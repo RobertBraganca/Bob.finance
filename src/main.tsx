@@ -6,6 +6,7 @@ import { App } from './App'
 import { RangeProvider } from './lib/store'
 import { ThemeProvider } from './lib/theme'
 import { ToastProvider } from './components/ui'
+import { TooltipProvider } from './components/ui/tooltip'
 import './styles/fonts.css'
 import './styles/tokens.css'
 import './styles/base.css'
@@ -26,13 +27,15 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <ToastProvider>
-          <BrowserRouter>
-            <RangeProvider>
-              <App />
-            </RangeProvider>
-          </BrowserRouter>
-        </ToastProvider>
+        <TooltipProvider>
+          <ToastProvider>
+            <BrowserRouter>
+              <RangeProvider>
+                <App />
+              </RangeProvider>
+            </BrowserRouter>
+          </ToastProvider>
+        </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>,
