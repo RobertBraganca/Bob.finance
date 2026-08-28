@@ -375,6 +375,76 @@ dev-only — não atualizado até mais rotas estarem portadas. Postura de
 autenticação da function (hoje `--no-verify-jwt`) ainda não decidida
 para o caso de uso real com chave anon/publishable.
 
+### `insights.ts` portado (28/08/2026) — a rota que a Visão geral usa
+Depois do usuário reportar que a Visão geral publicada ainda não
+carregava, investigação mostrou que ela depende de `insights.ts`
+(`/dashboard`, `/analytics/*`, `/goals/*`, `/debts`, `/credit-cards`,
+`/financial-health/*`, `/financial-engine/*`, `/investments/*`,
+`/cash-flow/*`) — ~70 rotas em 1018 linhas, bem maior que as 15 de
+`pricing.ts`. Usuário escolheu explicitamente portar o arquivo inteiro
+de uma vez (não só o subconjunto que a Visão geral chama) diante da
+opção de escopo apresentada.
+
+Portado para `supabase/functions/insights/index.ts` (Hono), com o
+mesmo padrão de `pricing.ts`. Diferença deliberada: as rotas de
+`insights.ts` não tinham prefixo próprio no Fastify (registradas direto
+sob `/api`, ao contrário de `pricing.ts` que já se prefixava sozinho
+com `/pricing/`). Como o nome da function vira o primeiro segmento da
+URL numa Edge Function, isso significa que essas rotas ganham aqui um
+prefixo novo (`/insights/`) que não existia antes — decisão registrada
+aqui, não um detalhe silencioso, e algo que o trabalho pendente de
+atualizar `src/lib/api.ts` vai precisar respeitar. Também exigiu copiar
+para `_shared/services/` os 3 services que `pricing.ts` não usava
+(`benchmarks.ts`, `dre.ts`, `quotes.ts`) — `quotes.ts` e `benchmarks.ts`
+usam `process.env.BRAPI_TOKEN`, trocado por `Deno.env.get(...)` (mesmo
+ajuste do resto do fechamento).
+
+**Achado real mais sério desta rodada, encontrado só ao vivo**: rotas
+com fan-out concorrente pesado (`Promise.all` de várias chamadas, cada
+uma às vezes com seu próprio fan-out por linha) **travam a requisição
+para sempre — sem erro nenhum, sem timeout do lado do servidor** — sob
+o pooler de transação (Supavisor, porta 6543) que este projeto usa
+nas Edge Functions. Isolado testando `/debts`, `/investments`,
+`/goals-history`, `/financial-health/{score,runway}` e
+`/financial-engine/available` um por um: cada um travava
+consistentemente, `curl --max-time` nunca retornava. Tentativas na
+ordem testada, com o que cada uma realmente mudou:
+- Subir `max` do client Postgres (1 → 5 → 10 → 20): resolveu `/debts` e
+  `/investments` em 5, mas `/goals-history` (12 meses, cada um rodando
+  sua própria `getPeriodProgress` de 5 queries) continuou travando até
+  em 20 — prova de que o teto real está a montante, no próprio budget
+  de conexão do pooler, não em `max` do lado do client.
+- Adicionar `idle_timeout: 20` (o mesmo já usado no client Node desde a
+  Fase 3, mas nunca copiado para o client Deno): resolveu o padrão de
+  "rota que funcionava e passou a travar em toda tentativa depois de
+  uma sessão de teste pesada" — sintoma batendo com o modo de falha
+  documentado pelo próprio Supabase (socket ficando obsoleto entre
+  invocações de uma instância reaproveitada, e o pool local do
+  `postgres-js` não percebendo).
+- Nenhuma das duas mudanças de configuração resolveu sozinha o
+  fan-out mais profundo (`goals-history`, `financial-health/score`,
+  `financial-health/runway`, `financial-engine/available`,
+  `financial-health/risk-radar`) — só reescrever o fan-out concorrente
+  como sequencial (um `await` de cada vez, em vez de `Promise.all`)
+  resolveu de fato, confirmado com 3 rodadas completas sem falha contra
+  as ~70 rotas depois do fix. Mais lento (soma da latência em vez do
+  máximo), aceitável aqui porque nenhuma dessas rotas está num caminho
+  onde essa diferença é perceptível.
+
+Fix aplicado só em `supabase/functions/_shared/` (o service original em
+`server/src/services/` não muda): o bug nunca reproduziu sob o pooler
+de sessão do servidor Node (Fase 3 já validou esse exato padrão de
+`Promise.all` ao vivo), então essa divergência entre as duas cópias é
+deliberada, do mesmo jeito que `db/client.ts` já diverge por pooler/
+porta/variáveis — não uma cópia desatualizada.
+
+**Isto é um risco sistêmico, não só desses 5 pontos**: qualquer service
+ainda não testado ao vivo com fan-out concorrente parecido pode ter o
+mesmo problema à espera de aparecer. Não foi viável auditar as ~70
+rotas uma por uma neste momento — o que existe é o que foi
+efetivamente exercitado (3 rodadas completas, todas as rotas GET,
+zero falha) mais os 5 pontos que travaram e foram corrigidos.
+
 ## Consequências
 - Este ADR não implementa nada sozinho — é o registro da decisão e do
   plano faseado. Cada fase acima vira trabalho próprio, com sua própria

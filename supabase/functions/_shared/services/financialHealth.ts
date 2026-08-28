@@ -347,14 +347,19 @@ export async function gatherScoreInputs(period: string, accountId: number | null
   // this indicator exists to show.
   const costFrom = periodBounds(addMonths(period, -settings.costLookbackMonths)).start
   const costTo = periodBounds(addMonths(period, -1)).end
-  const [costWindow, balances, debt, goals, reserve, allocationSlices] = await Promise.all([
-    totals({ from: costFrom, to: costTo, accountId }),
-    accountBalances(),
-    debtOverview({ period }),
-    getPeriodProgress(period, accountId),
-    reserveStatus(),
-    allocation(),
-  ])
+  // Sequencial, não Promise.all: sob o pooler de transação desta Edge
+  // Function, fan-out concorrente demais numa mesma conexão trava a
+  // requisição para sempre (sem erro nenhum) em vez de só ficar lenta —
+  // mesmo achado e mesmo fix de goals.ts#goalHistory. `debtOverview` e
+  // `getPeriodProgress` já fazem seu próprio fan-out interno, então rodar
+  // as outras 4 chamadas ao mesmo tempo empilhava concorrência suficiente
+  // para travar.
+  const costWindow = await totals({ from: costFrom, to: costTo, accountId })
+  const balances = await accountBalances()
+  const debt = await debtOverview({ period })
+  const goals = await getPeriodProgress(period, accountId)
+  const reserve = await reserveStatus()
+  const allocationSlices = await allocation()
   const monthlyCostCents =
     settings.costLookbackMonths > 0 ? Math.round(costWindow.expenseCents / settings.costLookbackMonths) : 0
 
@@ -584,7 +589,14 @@ export async function runway(
   // investimento numa linha por conta não teria onde ser aplicado.
   const consolidated = await runwayFor(null, 'Consolidado', settings, liquidClasses, overrides)
   const balances = await accountBalances()
-  const perAccount = await Promise.all(balances.map((a) => runwayFor(a.id, a.name, settings, liquidClasses)))
+  // Sequencial, não Promise.all: sob o pooler de transação desta Edge
+  // Function, fan-out concorrente demais numa mesma conexão trava a
+  // requisição para sempre (sem erro nenhum) em vez de só ficar lenta —
+  // mesmo achado e mesmo fix de goals.ts#goalHistory.
+  const perAccount: RunwayScope[] = []
+  for (const a of balances) {
+    perAccount.push(await runwayFor(a.id, a.name, settings, liquidClasses))
+  }
   return { scopes: [consolidated, ...perAccount], consolidated }
 }
 
@@ -649,14 +661,17 @@ export async function riskRadar(period: string, accountId: number | null = null)
   }
 
   /* Limite de cartão comprometido contra a receita do período. Ver ADR 0015:
-     este número é uma medição de limite usado, nunca a fatura de um ciclo. */
-  const [cards, goals, reserve, allocationSlices, debt] = await Promise.all([
-    listCards(),
-    getPeriodProgress(period, accountId),
-    reserveStatus(),
-    allocation(),
-    debtOverview({ period }),
-  ])
+     este número é uma medição de limite usado, nunca a fatura de um ciclo.
+     Sequencial, não Promise.all: mesmo achado e mesmo fix de
+     goals.ts#goalHistory — `debtOverview`/`getPeriodProgress` já fazem seu
+     próprio fan-out interno, e o pooler de transação desta Edge Function
+     trava a requisição (sem erro, para sempre) quando concorrência demais
+     se empilha numa mesma conexão. */
+  const cards = await listCards()
+  const goals = await getPeriodProgress(period, accountId)
+  const reserve = await reserveStatus()
+  const allocationSlices = await allocation()
+  const debt = await debtOverview({ period })
   const billCents = cards.reduce((sum, c) => sum + c.usedCents, 0)
   if (cards.length > 0 && goals.actual.incomeCents > 0) {
     const valueBps = Math.round((billCents / goals.actual.incomeCents) * 10_000)

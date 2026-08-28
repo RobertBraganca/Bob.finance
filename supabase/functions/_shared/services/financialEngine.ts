@@ -213,23 +213,26 @@ export async function availableForAllocation(
   const { start, end } = periodBounds(period)
 
   const balanceDeltaCents = overrides.consolidatedBalanceDeltaCents ?? 0
-  const [balances, pending, cards, reserve, reserveRealizedCents, investmentRealizedCents, debtRealizedCents, investmentGoals, debt] =
-    await Promise.all([
-      accountBalances(),
-      // Pending expenses, bounded by the period's end. `listPending` deliberately
-      // keeps overdue rows in the list (see specs/cash-flow-reconciliation), and
-      // that is the right behaviour here too: something still owed from last
-      // month is still money that is not free.
-      listPending('expense', { from: start, to: end }),
-      listCards(),
-      reserveStatus(),
-      reserveContributedCents(start, end),
-      investmentContributedCents(start, end),
-      debtPaidCents(start, end),
-      // `listGoals` already returns only the active ones.
-      listGoals(),
-      debtOverview({ period }),
-    ])
+  // Sequencial, não Promise.all: sob o pooler de transação desta Edge
+  // Function, fan-out concorrente demais numa mesma conexão trava a
+  // requisição para sempre (sem erro nenhum) em vez de só ficar lenta —
+  // mesmo achado e mesmo fix de goals.ts#goalHistory. `debtOverview` sozinho
+  // já faz seu próprio fan-out por dívida, então rodar as outras 8 chamadas
+  // ao mesmo tempo empilhava concorrência suficiente para travar.
+  const balances = await accountBalances()
+  // Pending expenses, bounded by the period's end. `listPending` deliberately
+  // keeps overdue rows in the list (see specs/cash-flow-reconciliation), and
+  // that is the right behaviour here too: something still owed from last
+  // month is still money that is not free.
+  const pending = await listPending('expense', { from: start, to: end })
+  const cards = await listCards()
+  const reserve = await reserveStatus()
+  const reserveRealizedCents = await reserveContributedCents(start, end)
+  const investmentRealizedCents = await investmentContributedCents(start, end)
+  const debtRealizedCents = await debtPaidCents(start, end)
+  // `listGoals` already returns only the active ones.
+  const investmentGoals = await listGoals()
+  const debt = await debtOverview({ period })
 
   // O delta entra ANTES das subtrações, porque o que a hipótese muda é
   // quanto existe em conta, não quanto está comprometido.

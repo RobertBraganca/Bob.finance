@@ -285,27 +285,38 @@ export async function goalHistory(months = 12, accountId?: number | null) {
   const currentPeriod = todayIso().slice(0, 7)
   const periods = periodRange(addMonths(currentPeriod, -(months - 1)), currentPeriod)
 
-  const outcomes: PeriodOutcome[] = await Promise.all(
-    periods.map(async (period) => {
-      const progress = await getPeriodProgress(period, accountId)
-      const checks = [
-        progress.progress.income.state,
-        progress.progress.spend.state,
-        progress.progress.savings.state,
-      ].filter((s) => s !== 'no_target')
-      const hits = checks.filter((s) => s === 'met' || s === 'on_track').length
-      return {
-        period,
-        incomeCents: progress.actual.incomeCents,
-        expenseCents: progress.actual.expenseCents,
-        savingsRateBps: progress.actual.savingsRateBps,
-        targets: checks.length,
-        hits,
-        allHit: checks.length > 0 && hits === checks.length,
-        hasTargets: checks.length > 0,
-      }
-    }),
-  )
+  // `getPeriodProgress` itself fires 5 concurrent queries. Running every
+  // requested period at once (or even just 3 at once — tried first, still
+  // broke) piles up enough simultaneous statements against the transaction
+  // pooler that some of them never come back: not an error, a request that
+  // never resolves. Confirmed live under this Edge Function specifically
+  // (never reproduced under the Node/session-pooler server in Fase 3): the
+  // breaking point moves with the client's own `max`, so it isn't a fixed
+  // ceiling anywhere — raising `max` (tried up to 20) only postpones it.
+  // Fully sequential is the one shape confirmed NOT to hang at any period
+  // count tested (up to all 12 months individually) — slower (one request
+  // per period instead of one for all), acceptable here since nothing else
+  // in this app calls goals-history in a latency-sensitive path.
+  const outcomes: PeriodOutcome[] = []
+  for (const period of periods) {
+    const progress = await getPeriodProgress(period, accountId)
+    const checks = [
+      progress.progress.income.state,
+      progress.progress.spend.state,
+      progress.progress.savings.state,
+    ].filter((s) => s !== 'no_target')
+    const hits = checks.filter((s) => s === 'met' || s === 'on_track').length
+    outcomes.push({
+      period,
+      incomeCents: progress.actual.incomeCents,
+      expenseCents: progress.actual.expenseCents,
+      savingsRateBps: progress.actual.savingsRateBps,
+      targets: checks.length,
+      hits,
+      allHit: checks.length > 0 && hits === checks.length,
+      hasTargets: checks.length > 0,
+    })
+  }
 
   // Streak counts back from the most recent CLOSED period, so an unfinished
   // month can neither inflate nor break the streak.

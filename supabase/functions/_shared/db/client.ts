@@ -15,9 +15,30 @@ import * as schema from './schema.ts'
  * rather than per-client-session.
  *
  * Transaction mode does not support prepared statements — `prepare:
- * false` is required, not optional, or queries fail. `max: 1`: each
- * function invocation is its own isolate: there is no benefit to
- * holding a local pool of more than one connection open per instance.
+ * false` is required, not optional, or queries fail. `max: 1` seemed
+ * right at first (one isolate, no benefit to a local pool) but hung
+ * indefinitely — never errored, just never responded — on routes with
+ * per-row concurrent fan-out (N+1 `Promise.all`, e.g.
+ * `listDebts`/`portfolioSummary`); `max: 5` (same ceiling as the
+ * Node/session-pooler client) cleared those. `goals.ts#goalHistory`'s
+ * deeper fan-out (12+ months, each running its own 5-query
+ * `getPeriodProgress`) still hung past that at every `max` tried up to
+ * 20 — fixed at the source instead (made fully sequential, see its own
+ * comment) rather than by chasing `max` further.
+ *
+ * Separately, and worse: endpoints that had been passing reliably
+ * started hanging on every single request, indefinitely, after a
+ * period of heavy testing — never recovering on their own even after
+ * several minutes idle. That is the known Supabase failure mode for
+ * warm serverless isolates reusing a stale pooled connection: the
+ * pooler or NAT drops an inactive TCP socket, but postgres-js's local
+ * pool still considers it live and hands it out, so the next query on
+ * it just hangs forever waiting for a response the dead socket will
+ * never deliver (Supabase's own "hanging queries in Serverless
+ * Functions" troubleshooting doc). `idle_timeout` makes postgres-js
+ * close and drop a connection itself once it has sat idle — before it
+ * goes stale under it — rather than leaving that to chance between
+ * invocations of a reused warm isolate.
  */
 function requireEnv(name: string): string {
   const value = Deno.env.get(name)
@@ -40,7 +61,8 @@ const client = postgres({
   database: Deno.env.get('APPDB_NAME') ?? 'postgres',
   ssl: 'require',
   prepare: false,
-  max: 1,
+  max: 5,
+  idle_timeout: 20,
   types: {
     // Same fix as server/src/db/client.ts: bigint (oid 20) and numeric
     // (oid 1700) come back as strings from postgres-js by default —
