@@ -16,6 +16,8 @@
  * to `ledger.ts`, everything else not `/pricing` falls through to `insights`.
  */
 
+import { telemetry } from './telemetry'
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -58,7 +60,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const payload = text ? JSON.parse(text) : null
 
   if (!response.ok) {
-    throw new ApiError(payload?.error ?? `HTTP ${response.status}`, response.status, payload?.issues)
+    const message = payload?.error ?? `HTTP ${response.status}`
+    // Ponto único: toda chamada de API passa por aqui, então um erro aqui
+    // representa qualquer fricção real de UX (validação, rota ainda não
+    // portada, falha do backend) sem precisar anotar cada callsite.
+    telemetry.error(functionFor(path), `http_${response.status}`, { path, message })
+    throw new ApiError(message, response.status, payload?.issues)
   }
   return payload as T
 }

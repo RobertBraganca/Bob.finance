@@ -838,3 +838,32 @@ export const projectQuotes = pgTable(
     index('project_quotes_usage_rights_idx').on(t.usageRightsOptionId),
   ],
 )
+
+/* ------------------------------------------------------------------ *
+ * Usage events — tela aberta, ação-chave feita, erro exibido ao
+ * usuário. Base para melhoria contínua de UX/UI: o quê e onde, nunca
+ * conteúdo financeiro nem clique a clique.
+ * ------------------------------------------------------------------ */
+export const usageEventKindEnum = pgEnum('usage_event_kind', ['view', 'action', 'error'])
+
+export const usageEvents = pgTable(
+  'usage_events',
+  {
+    id: id(),
+    occurredAt: text('occurred_at').notNull().default(now),
+    /** id aleatório gerado no navegador (localStorage), não é identidade de usuário — só agrupa eventos da mesma aba/sessão. */
+    sessionId: text('session_id').notNull(),
+    /** página/área do app, ex. "dashboard", "pricing", "transactions" */
+    feature: text('feature').notNull(),
+    kind: usageEventKindEnum('kind').notNull(),
+    /** rótulo específico do evento, ex. "quote_created", "csv_commit", "validation_error" */
+    name: text('name').notNull(),
+    detail: jsonb('detail'),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [
+    index('usage_events_feature_idx').on(t.feature),
+    index('usage_events_occurred_at_idx').on(t.occurredAt),
+    index('usage_events_kind_idx').on(t.kind),
+  ],
+)

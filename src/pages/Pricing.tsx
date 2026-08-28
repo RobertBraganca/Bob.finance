@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useAccounts } from '../lib/store'
+import { telemetry } from '../lib/telemetry'
 import {
   bps,
   bpsToInput,
@@ -414,7 +415,10 @@ function SaveQuoteModal({
 
   const save = useMutation({
     mutationFn: () => api.post('/pricing/quotes', { ...payload, clientLabel: label.trim() }),
-    onSuccess: onSaved,
+    onSuccess: () => {
+      telemetry.action('pricing', 'quote_saved')
+      onSaved()
+    },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
   })
 
@@ -595,6 +599,7 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
       return api.post(`/pricing/quotes/${quote.id}/approve`, { accountId, paidOn })
     },
     onSuccess: () => {
+      telemetry.action('pricing', 'quote_approved')
       toast('Cotação aprovada: lançamento de receita criado')
       queryClient.invalidateQueries()
       onClose()

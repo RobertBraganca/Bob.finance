@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { telemetry } from '../lib/telemetry'
 import {
   bps,
   bpsToInput,
@@ -2091,6 +2092,7 @@ function TradeModal({
       })
     },
     onSuccess: () => {
+      telemetry.action('investments', 'trade_recorded')
       toast('Lançamento adicionado')
       queryClient.invalidateQueries()
       onClose()

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { telemetry } from '../lib/telemetry'
 import { useAccounts } from '../lib/store'
 import { bps, centsToInput, money, moneyCompact, date as fmtDate, parseMoneyInput } from '../lib/format'
 import {
@@ -222,6 +223,7 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
       return card ? api.patch(`/credit-cards/${card.id}`, body) : api.post('/credit-cards', body)
     },
     onSuccess: () => {
+      if (!card) telemetry.action('credit-cards', 'card_created')
       toast(card ? 'Cartão atualizado' : 'Cartão cadastrado')
       queryClient.invalidateQueries()
       onClose()

@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, fileToBase64 } from '../lib/api'
+import { telemetry } from '../lib/telemetry'
 import { useAccounts } from '../lib/store'
 import { date as fmtDate, money } from '../lib/format'
 import {
@@ -472,6 +473,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
   const commit = useMutation({
     mutationFn: () => api.post<{ committed: number; skipped: number }>(`/imports/${batchId}/commit`),
     onSuccess: (result) => {
+      telemetry.action('import', 'csv_committed', { committed: result.committed, skipped: result.skipped })
       toast(`${result.committed} lançamentos gravados, ${result.skipped} ignorados`)
       queryClient.invalidateQueries()
       onClose()

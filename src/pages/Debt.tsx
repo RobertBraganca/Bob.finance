@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { telemetry } from '../lib/telemetry'
 import { useAccounts } from '../lib/store'
 import {
   bps,
@@ -492,6 +493,7 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
       return debt ? api.patch(`/debts/${debt.id}`, body) : api.post('/debts', body)
     },
     onSuccess: async () => {
+      if (!debt) telemetry.action('debt', 'debt_created')
       toast(debt ? 'Dívida atualizada' : 'Dívida cadastrada')
       // Awaited: se o modal reabrir antes do refetch, ele reidrata do cache
       // (ainda com o dado pré-edição) e a próxima edição sobrescreve esta.

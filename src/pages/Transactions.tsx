@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { telemetry } from '../lib/telemetry'
 import { forwardBoundsFor, useAccounts, useCategoryIndex, useRange } from '../lib/store'
 import { centsToInput, date as fmtDate, money, parseMoneyInput } from '../lib/format'
 import {
@@ -573,6 +574,7 @@ function NewTransactionModal({ onClose }: { onClose: () => void }) {
       })
     },
     onSuccess: () => {
+      telemetry.action('transactions', 'transaction_created_manual')
       toast('Lançamento criado')
       queryClient.invalidateQueries()
       onClose()

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { telemetry } from '../lib/telemetry'
 import { useMeta } from '../lib/store'
 import {
   bps,
@@ -421,6 +422,7 @@ function GoalEditor({
         savingsRateTargetBps: savings.trim() === '' ? null : parsePercentInput(savings),
       }),
     onSuccess: async () => {
+      telemetry.action('goals', 'goal_saved')
       toast('Metas salvas')
       // Awaited: reabrir antes do refetch reidrataria do cache pré-edição.
       await queryClient.invalidateQueries()

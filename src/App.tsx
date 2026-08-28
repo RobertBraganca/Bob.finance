@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { Route, Routes } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/shell/Shell'
 import { Card, Icon } from './components/ui'
+import { telemetry } from './lib/telemetry'
 import { Dashboard } from './pages/Dashboard'
 import { DrePage } from './pages/Dre'
 import { ImportPage } from './pages/Import'
@@ -41,7 +42,35 @@ function PortWarning() {
   )
 }
 
+/** Uma feature por rota — chave de log de uso, não rótulo de UI. */
+const FEATURE_BY_PATH: Record<string, string> = {
+  '/': 'dashboard',
+  '/diario': 'daily',
+  '/lancamentos': 'transactions',
+  '/dre': 'dre',
+  '/metas': 'goals',
+  '/dividas': 'debt',
+  '/cartoes': 'credit-cards',
+  '/investimentos': 'investments',
+  '/saude': 'financial-health',
+  '/motor': 'financial-engine',
+  '/precificacao': 'pricing',
+  '/importar': 'import',
+  '/categorias': 'categories',
+  '/ajustes': 'settings',
+}
+
+/** Uma chamada por navegação cobre toda página sem precisar instrumentar cada uma. */
+function usePageViewTelemetry() {
+  const location = useLocation()
+  useEffect(() => {
+    const feature = FEATURE_BY_PATH[location.pathname] ?? 'unknown'
+    telemetry.view(feature)
+  }, [location.pathname])
+}
+
 export function App() {
+  usePageViewTelemetry()
   return (
     <div className="app">
       <Sidebar />
