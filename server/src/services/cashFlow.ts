@@ -15,7 +15,17 @@ import { paymentStats } from './debt'
  * `reconciliationCandidates` below).
  */
 
-const MATERIALIZE_HORIZON_MONTHS = 6
+/**
+ * 24 meses (decisions/0028): o usuário quer lançar receitas fixas
+ * recorrentes (ex. salário) e acompanhar realizado x pendente até 2028
+ * — dois anos à frente, não só o que está prestes a vencer. Cada
+ * ocorrência vira uma linha real e congelada em `transactions` no
+ * valor de HOJE; se o valor do modelo mudar depois (um reajuste), só
+ * as ocorrências ainda não materializadas herdam o novo valor — as já
+ * materializadas exigem edição manual, mesmo risco que já existia com
+ * 6 meses, só que numa janela maior.
+ */
+const MATERIALIZE_HORIZON_MONTHS = 24
 
 export type ForecastRow = typeof cashFlowForecasts.$inferSelect
 type ForecastKind = ForecastRow['kind']
