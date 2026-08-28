@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `occurrence_period` text;

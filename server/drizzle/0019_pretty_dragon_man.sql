@@ -1,0 +1,1 @@
+ALTER TABLE `project_quotes` ADD `status` text DEFAULT 'draft' NOT NULL;

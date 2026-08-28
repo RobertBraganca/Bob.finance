@@ -1,0 +1,1 @@
+ALTER TABLE `financial_health_settings` ADD `risk_positive_margin_bps` integer DEFAULT 2000 NOT NULL;

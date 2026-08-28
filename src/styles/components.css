@@ -1,0 +1,1217 @@
+/* ==================================================================
+   Components. `.card` and `.slab` used to be two visually distinct
+   families (paper vs. near-black ink) in light mode; as of
+   2026-08-25 `.slab` renders identically to `.card` in light mode
+   (see tokens.css) — the KPI/gauge/heatmap grouping `.slab` still
+   marks in markup is now a semantic distinction only there, not a
+   visual one. Dark theme is unchanged: `.slab` still reads as the
+   near-black ink surface.
+   ================================================================== */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.card--flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.card--muted {
+  background: var(--surface-muted);
+}
+
+.slab {
+  background: var(--slab);
+  border: 1px solid var(--slab-line);
+  border-radius: var(--r-lg);
+  padding: var(--sp-5);
+  color: var(--on-slab-1);
+  box-shadow: var(--shadow-slab);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+/* Exactly one card per view earns this — a step above the plain
+   surface (never a flat #262626 anymore in light mode, since .slab
+   is no longer dark there — see tokens.css). Dark theme still gets
+   the original flat SOFT black, unchanged. */
+.slab--accent {
+  background: var(--slab-accent-bg);
+  border-color: var(--slab-accent-line);
+}
+
+.card__head,
+.slab__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+/* A compact card (span 4 and under) is where a title + a period control
+   most often collide. `flex-wrap` above already drops the actions onto
+   their own row instead of letting them spill past the card edge; this
+   just keeps that second row from being squeezed by a stray min-width. */
+.card__head > *,
+.slab__head > * {
+  min-width: 0;
+}
+
+/* Same reasoning as `.topbar__actions .row` in base.css: the head wraps, but
+   the actions group inside it is a plain `.row`, which does not. On a phone
+   that kept a 427px group of buttons intact inside a 301px header and pushed
+   the whole bento grid past the viewport. Only the group inside a card head
+   breaks; `.row` elsewhere keeps its single line. */
+.card__head .row,
+.slab__head .row {
+  flex-wrap: wrap;
+}
+
+.card__title,
+.slab__title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.card__sub {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+/* ---- Stat tile --------------------------------------------------- */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.stat__label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+.stat__value {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-xl);
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  font-variant-numeric: proportional-nums;
+}
+
+.stat__value--lg {
+  font-size: var(--text-2xl);
+}
+
+.stat__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  flex-wrap: wrap;
+}
+
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Buttons ----------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 8px 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  min-height: 36px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--brand);
+  color: #fff;
+}
+.btn--primary:hover:not(:disabled) {
+  background: var(--brand-hover);
+}
+
+.btn--ghost {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink-1);
+}
+.btn--ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.btn--quiet {
+  color: var(--ink-2);
+  padding: 6px 10px;
+}
+.btn--quiet:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--ink-1);
+}
+
+.btn--danger {
+  background: var(--surface);
+  border-color: #e6c3c2;
+  color: var(--delta-down);
+}
+.btn--danger:hover:not(:disabled) {
+  background: #fdf3f3;
+}
+
+.btn--sm {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+}
+
+.btn--slab {
+  background: var(--slab-overlay-weak);
+  border-color: var(--slab-overlay-strong);
+  color: var(--on-slab-1);
+}
+.btn--slab:hover:not(:disabled) {
+  background: var(--slab-overlay-strong);
+}
+
+/* ---- Segmented control ------------------------------------------ */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--paper-sunken);
+  border-radius: var(--r-pill);
+}
+
+.on-slab .segmented {
+  background: var(--slab-overlay-weak);
+}
+
+.segmented__btn {
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.segmented__btn[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--ink-1);
+  box-shadow: 0 1px 2px rgba(17, 18, 20, 0.08);
+}
+
+.on-slab .segmented__btn[aria-pressed='true'] {
+  background: var(--slab-raised);
+  color: #fff;
+}
+
+/* Compra/Venda kind of movement is legible before reading a field. */
+.segmented__btn--pos[aria-pressed='true'] {
+  background: var(--delta-up);
+  color: #fff;
+  box-shadow: none;
+}
+.segmented__btn--neg[aria-pressed='true'] {
+  background: var(--delta-down);
+  color: #fff;
+  box-shadow: none;
+}
+
+/* ---- Fields ------------------------------------------------------ */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.field__label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.field__hint {
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+}
+
+.field__error {
+  font-size: var(--text-2xs);
+  color: var(--delta-down);
+  font-weight: 500;
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  min-height: 36px;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+.input--numeral {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* `.select` (and `.select--bare`/`.select--toolbar` below) style a
+   trigger <button>, not a native <select> — see `components/ui/Dropdown.tsx`
+   for why: the browser draws a native <select>'s open popup with its own
+   chrome, ignoring most of this file (Firefox always, Chromium only
+   partially), so the row spacing a dropdown needs can't be delivered
+   reliably that way. These rules reset the button-specific defaults a
+   <select> never had (centered text, UA font/color) on top of the same
+   visual chrome the native control used. */
+.select {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  font-family: inherit;
+  color: var(--ink-1);
+  cursor: pointer;
+  padding-right: 28px;
+  background-image: linear-gradient(45deg, transparent 49%, var(--ink-3) 50%),
+    linear-gradient(-45deg, transparent 49%, var(--ink-3) 50%);
+  background-size: 5px 5px, 5px 5px;
+  background-position: calc(100% - 14px) 16px, calc(100% - 9px) 16px;
+  background-repeat: no-repeat;
+}
+.select__value {
+  display: block;
+  min-width: 0;
+}
+
+.select--bare {
+  border-color: transparent;
+  background-color: transparent;
+  min-height: 30px;
+  padding: 3px 26px 3px 6px;
+  background-position: calc(100% - 12px) 13px, calc(100% - 7px) 13px;
+  font-size: var(--text-xs);
+}
+.select--bare:hover {
+  background-color: var(--surface-hover);
+}
+
+/* Reads as the same control-group family as a ghost/sm button next to it
+   (e.g. the account filter beside "Personalizar") — same height, border,
+   background and type weight, not the borderless in-table look. */
+.select--toolbar {
+  min-height: 30px;
+  padding: 4px 26px 4px 10px;
+  border-color: var(--line-strong);
+  background-color: var(--surface);
+  background-position: calc(100% - 14px) 13px, calc(100% - 9px) 13px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ink-1);
+}
+.select--toolbar:hover {
+  background-color: var(--surface-hover);
+}
+
+/* ---- Filter pill --------------------------------------------------
+   The canonical control for anything that SCOPES a view — date range,
+   account, asset class, direction. A plain trigger <button> — the actual
+   popup is `DropdownSelect`'s own panel (`components/ui/Dropdown.tsx`),
+   not a native <select>. */
+.filter-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 36px;
+  padding: 0 var(--sp-3) 0 var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-1);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.filter-select:hover {
+  background: var(--surface-hover);
+}
+.filter-select:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--focus);
+}
+.filter-select__icon,
+.filter-select__chevron {
+  flex: none;
+  color: var(--ink-3);
+}
+.filter-select__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.on-slab .filter-select {
+  background: var(--slab-overlay-weak);
+  border-color: var(--slab-overlay-strong);
+  color: var(--on-slab-1);
+}
+.on-slab .filter-select__icon,
+.on-slab .filter-select__chevron {
+  color: var(--on-slab-2);
+}
+
+/* ---- Popover -------------------------------------------------------
+   A small floating panel anchored under a trigger — e.g. the custom
+   date-range picker, which used to be two full-width inputs sitting
+   inline in the filter row. */
+.popover-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.popover-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 220px;
+  padding: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+}
+
+/* ---- Dropdown listbox ------------------------------------------------
+   The panel behind Select/FilterSelect/CategorySelect (`Dropdown.tsx`),
+   drawn by this app instead of the browser — see the comment on `.select`
+   above for why. `.dropdown-anchor` is a block box so a trigger's own
+   `width: 100%` (Select/CategorySelect, sitting in a `.field`) resolves
+   against it; as a flex item (FilterSelect, sitting in a `.row`) it still
+   shrinks to the trigger's own content width, same as the native <select>
+   it replaced did in both places. */
+.dropdown-anchor {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+.dropdown-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 100%;
+  max-width: min(360px, 90vw);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+}
+.dropdown-group-label {
+  padding: 10px 12px 4px;
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-3);
+}
+.dropdown-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  color: var(--ink-1);
+  cursor: pointer;
+}
+.dropdown-option--highlighted {
+  background: var(--surface-hover);
+}
+.dropdown-option--selected {
+  font-weight: 600;
+}
+.dropdown-option__check {
+  flex: none;
+  color: var(--brand);
+}
+.dropdown-option--placeholder {
+  color: var(--ink-2);
+}
+.dropdown-option--empty {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+/* ---- Period picker ---------------------------------------------------
+   The month/year grid that replaced the old preset pill row + separate
+   custom-range popover — one control for every way to slice the period. */
+.period-picker {
+  min-width: 270px;
+}
+.period-picker__year-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  font-size: var(--text-sm);
+}
+.period-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--sp-2);
+}
+.period-picker__month {
+  padding: var(--sp-2) 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.period-picker__month:hover {
+  background: var(--surface-hover);
+}
+.period-picker__month--active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
+  cursor: pointer;
+  flex: none;
+}
+
+/* ---- Badges & chips --------------------------------------------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* Tinted wash + dark text-grade step of each brand hue — same pattern
+   BOB.OS's own Badge.jsx uses (translucent brand colour + full-strength
+   brand colour as text), retuned so the text clears 4.5:1 on white. */
+.badge--good {
+  background: #e8f7ec;
+  border-color: #bfe3cb;
+  color: #14682a;
+}
+.badge--warning {
+  background: #fdf3e0;
+  border-color: #f0dcae;
+  color: #7a5b00;
+}
+.badge--critical {
+  background: #ffecec;
+  border-color: #ffc7c7;
+  color: #cc0000;
+}
+.badge--info {
+  background: #e6f2ff;
+  border-color: #bcdcff;
+  color: #0056b3;
+}
+
+.on-slab .badge {
+  background: var(--slab-overlay-weak);
+  border-color: var(--slab-overlay-strong);
+  color: var(--on-slab-2);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+/* ---- Tables ------------------------------------------------------ */
+.table {
+  font-size: var(--text-sm);
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-muted);
+  text-align: left;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 10px var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.table tbody td {
+  padding: 9px var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+.table tbody tr[data-selected='true'] td {
+  background: var(--brand-wash);
+}
+
+.table__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.table__row--error td {
+  background: #fdf5f5;
+}
+.table__row--dup td {
+  background: #fdf9ee;
+}
+.table__row--warn td {
+  background: #fdf3e0;
+}
+
+.table-wrap {
+  max-height: 620px;
+  overflow: auto;
+}
+
+/* ---- Collapsible asset-class group card -------------------------- */
+.group-card {
+  padding: 0;
+  gap: 0;
+}
+
+.group-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  flex-wrap: wrap;
+  text-align: left;
+  border-radius: var(--r-lg);
+}
+
+.group-head:hover {
+  background: var(--surface-hover);
+}
+
+.group-head__stats {
+  flex: 1;
+  gap: var(--sp-5);
+  justify-content: flex-end;
+}
+
+.group-head__chevron {
+  flex: none;
+  color: var(--ink-3);
+  transition: transform 150ms ease;
+}
+
+.group-head__chevron--open {
+  transform: rotate(180deg);
+}
+
+/* ---- Meters ------------------------------------------------------ */
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meter__track {
+  position: relative;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--seq-100);
+  overflow: hidden;
+}
+
+.on-slab .meter__track {
+  background: var(--slab-meter-track);
+}
+
+.meter__fill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  transition: width 240ms ease;
+}
+
+/* The pace marker: where spending SHOULD be today. A hairline, not a
+   dashed line — dashes read as "projection" when this is a fact. */
+.meter__pace {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--ink-1);
+  border-radius: 1px;
+}
+
+.on-slab .meter__pace {
+  background: #fff;
+}
+
+/* ---- Empty states ------------------------------------------------ */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-8) var(--sp-5);
+  text-align: center;
+  color: var(--ink-3);
+  min-height: 180px;
+}
+
+.empty__glyph {
+  color: var(--ink-4);
+}
+
+.empty__title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.empty__body {
+  font-size: var(--text-sm);
+  max-width: 42ch;
+  line-height: 1.55;
+}
+
+.on-slab .empty__title {
+  color: var(--on-slab-1);
+}
+
+/* ---- Chart frame ------------------------------------------------- */
+.chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.chart__legend {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+
+.chart__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart__legend-key {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.chart__legend-key--block {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.chart__body {
+  min-width: 0;
+}
+
+.chart__note {
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+}
+
+/* Tooltips enhance; they never gate a value — every chart also has a
+   table view holding the same numbers. */
+/* Literal, not `var(--slab-raised)`: a chart tooltip is chrome, not a
+   card — stays dark regardless of the light-mode card reversal
+   (2026-08-25). */
+.tooltip {
+  background: #101010;
+  color: #fff;
+  border: 1px solid #222222;
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-size: var(--text-xs);
+  box-shadow: var(--shadow-pop);
+  min-width: 148px;
+}
+
+.tooltip__title {
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: #fff;
+}
+
+.tooltip__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-content: space-between;
+  color: #a1a1aa;
+  padding: 1px 0;
+}
+
+.tooltip__value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #fff;
+}
+
+/* ---- Heatmap legend -------------------------------------------------
+   Only the sequential-ramp legend swatch survives here — the calendar
+   grid itself (`SpendHeatmap.tsx`) is a Treemap now, sized by magnitude
+   instead of a uniform grid of cells; today's cell gets its own ring
+   drawn straight into the Treemap's SVG content, not this stylesheet. */
+.heatmap__scale {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+}
+
+.heatmap__scale-step {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+/* ---- Modal ------------------------------------------------------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(17, 18, 20, 0.42);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+}
+
+.modal {
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+  width: min(560px, 100%);
+  max-height: 88vh;
+  overflow: auto;
+  padding: var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.modal--wide {
+  width: min(880px, 100%);
+}
+
+/* ---- Toast ------------------------------------------------------- */
+.toasts {
+  position: fixed;
+  bottom: var(--sp-5);
+  right: var(--sp-5);
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: 380px;
+}
+
+/* Literal, not `var(--slab)`: a toast is chrome, not a card — stays
+   dark regardless of the light-mode card reversal (2026-08-25). */
+.toast {
+  background: #080808;
+  color: #fff;
+  border: 1px solid #222222;
+  border-radius: var(--r-md);
+  padding: 10px var(--sp-4);
+  font-size: var(--text-sm);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.toast--error {
+  border-color: #7a2f2f;
+}
+
+/* ---- Misc -------------------------------------------------------- */
+.divider {
+  height: 1px;
+  background: var(--line);
+  border: 0;
+}
+
+.dropzone {
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--r-lg);
+  padding: var(--sp-8) var(--sp-5);
+  text-align: center;
+  background: var(--surface-muted);
+  transition: border-color 120ms ease, background 120ms ease;
+  cursor: pointer;
+}
+
+.dropzone:hover,
+.dropzone[data-over='true'] {
+  border-color: var(--brand);
+  background: var(--brand-wash);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px var(--sp-4);
+  font-size: var(--text-sm);
+}
+
+.kv__k {
+  color: var(--ink-3);
+}
+
+.kv__v {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.ranked {
+  display: flex;
+  flex-direction: column;
+}
+
+.ranked__item {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-sm);
+}
+
+.ranked__item:last-child {
+  border-bottom: 0;
+}
+
+.ranked__share {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: right;
+}
+
+.ranked__value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  min-width: 96px;
+  text-align: right;
+}
+
+/* ---- Ranked list, expandable ----------------------------------------
+   CategoryRing's ranked list, when it has a leaf-level breakdown to fold
+   under each parent row (`childSlices` prop) — a disclosure per row
+   instead of a plain line. `.ranked__item` (swatch/name/share/value) is
+   reused as-is for the toggle button itself; only the border moves to the
+   group wrapper, since an open row's children sit between it and the
+   next parent. */
+.ranked__group {
+  border-bottom: 1px solid var(--line);
+}
+.ranked__group:last-child {
+  border-bottom: 0;
+}
+.ranked__item--toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: none;
+  padding: 7px 0;
+  font: inherit;
+  text-align: left;
+  color: var(--ink-1);
+  cursor: pointer;
+}
+.ranked__item--toggle:hover:not(:disabled) {
+  color: var(--ink-1);
+}
+.ranked__item--toggle:disabled {
+  cursor: default;
+}
+.ranked__chevron {
+  color: var(--ink-3);
+  transition: transform 120ms;
+}
+.ranked__chevron--open {
+  transform: rotate(180deg);
+}
+.ranked__children {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 8px 22px;
+}
+.ranked__item--child {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 5px 0;
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+.swatch--sm {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+
+/* Carousel — one page at a time, never a slide animation; the dot row is
+   the only affordance that says "there's more", same as everywhere else
+   in this app that prefers a static state over motion. */
+.carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.carousel-dots__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  background: var(--ink-3);
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.carousel-dots__dot[aria-current='true'] {
+  background: var(--ink-1);
+  opacity: 1;
+  width: 16px;
+  border-radius: var(--r-pill);
+}
+
+.progress-dots {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.progress-dots__dot {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-xs);
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* ---- Memória de cálculo ("como calculamos") ----------------------
+   Required next to every derived metric by decisions/0010, so it is a
+   component and not a per-page flourish. Uses only existing tokens: the
+   intelligence layer introduced no colour of its own. */
+.assumptions {
+  margin-top: var(--sp-2);
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-2);
+}
+
+.assumptions > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+  list-style: none;
+  user-select: none;
+}
+
+.assumptions > summary::-webkit-details-marker {
+  display: none;
+}
+
+.assumptions > summary:hover {
+  color: var(--ink-2);
+}
+
+.assumptions[open] > summary {
+  margin-bottom: var(--sp-2);
+  color: var(--ink-2);
+}
+
+.assumptions__body {
+  background: var(--surface-muted);
+  border-radius: var(--r-sm);
+  padding: var(--sp-3);
+}
+
+.assumptions__formula {
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  margin-bottom: var(--sp-2);
+}
+
+.assumptions .kv {
+  font-size: var(--text-2xs);
+}
+
+/* ---- Indicator row (composição do Health Score) ------------------
+   The bar is intentionally neutral: colour here would be the system
+   grading the number, and only the radar (where the USER set the
+   threshold) is allowed to say "fora da faixa". See decisions/0010. */
+.indicator__score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: var(--text-md);
+}
+
+.indicator__weight {
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* ---- Legenda interativa do gráfico de rentabilidade ---------------
+   Ordem estável e própria, porque as linhas do gráfico são reordenadas
+   a cada hover para controlar quem pinta por cima (padrão "dynamic
+   z-index" do recharts) e a legenda padrão seguiria essa reordenação,
+   embaralhando os itens sob o cursor. */
+.zlegend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px var(--sp-4);
+  padding: var(--sp-2) 0 0;
+  margin: 0;
+  list-style: none;
+}
+
+.zlegend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-family: inherit;
+  transition: opacity 120ms ease;
+}
+
+.zlegend__key {
+  width: 14px;
+  height: 3px;
+  border-radius: var(--r-pill);
+  flex: none;
+}

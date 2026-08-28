@@ -1,0 +1,1 @@
+ALTER TABLE `emergency_reserve_settings` ADD `manual_living_cost_cents` integer;

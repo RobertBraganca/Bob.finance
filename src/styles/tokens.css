@@ -1,0 +1,289 @@
+/* ==================================================================
+   Design tokens, aligned to the BOB.OS Design System (guidelines/ +
+   tokens/*.css): colours, type faces (Barlow Condensed display, Inter
+   body, JetBrains Mono for technical values), and the hard-corner
+   radius scale (2/4/6/8/12px — pill reserved for dots/badges) all
+   trace back to that source. Spacing scale and text size steps are
+   this app's own adaptation, unchanged.
+
+   As of 2026-08-25, light mode no longer has a near-black "ink card"
+   variant — `.slab` and `.card` render identically in light mode (see
+   the "Ink data cards" section below). That earlier hybrid direction
+   (light shell + near-black KPI/gauge/heatmap cards, from 2026-08-19)
+   was explicitly reversed by the user. Dark theme is unchanged: it
+   still uses the same near-black palette everywhere, `.slab` included.
+
+   Brand source of truth: brand red #FF0000, yellow #FFC700, blue
+   #007BFF, pink #FF2EA6, green #32D74B, purple #BA2BE2. Light-theme
+   neutrals (#FFFFFF/#FAFAFA/#F4F4F5/#E4E4E7) and dark-theme neutrals
+   (#080808/#101010/#161616/#222222) are BOB.OS's own two themes,
+   mapped onto this app's existing "paper shell + ink card" structure.
+
+   Chart colours are NOT decorative choices. Every brand hue below was
+   re-validated with the dataviz validator against BOTH real surfaces
+   (#ffffff paper cards and #080808 ink cards): lightness band, chroma
+   floor, adjacent-pair colour-vision separation, normal-vision floor
+   and contrast. Two brand hues needed a surface-specific step:
+     - green (#32D74B) is too light for the white surface (1.92:1) —
+       paper uses a darker in-hue step (#1E8E3C); the ink surface uses
+       the exact brand green, since that is where it was designed to
+       sit (BOB.OS's own product defaults to dark theme).
+     - blue/pink/purple pass unmodified on BOTH surfaces and are used
+       as the exact brand hex everywhere.
+   Do not hand-edit a --series-* or --status-* value without re-running
+   `node scripts/check-contrast.mjs` — the numbers are in that file.
+   ================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Type ------------------------------------------------------ */
+  /* Two families, per the brief: a geometric sans for large numerals,
+     a workhorse sans for everything else. Both are sans — a serif or
+     decorative face on a balance reads as off-brand ornament. */
+  --font-display: 'Barlow Condensed', 'Barlow', 'Arial Black', ui-sans-serif, sans-serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+  --text-2xl: 2.25rem;
+  --text-hero: 3rem;
+
+  /* ---- Light shell (BOB.OS light theme) -------------------------- */
+  --paper: #ffffff;
+  --paper-sunken: #f4f4f5;
+  --surface: #fafafa;
+  --surface-muted: #f4f4f5;
+  --surface-hover: #f4f4f5;
+
+  --line: #e4e4e7;
+  --line-strong: #a1a1aa;
+  --hairline: rgba(9, 9, 11, 0.08);
+
+  --ink-1: #09090b;
+  --ink-2: #52525b;
+  --ink-3: #71717a;
+  --ink-4: #a1a1aa;
+
+  /* ---- Ink data cards ---------------------------------------------
+     As of 2026-08-25, superseded in LIGHT mode: the hybrid "near-black
+     KPI card" decision from 2026-08-19 was explicitly reversed by the
+     user, so `.slab` now reads identically to `.card` here — same
+     literal values as the light shell above. The `:root[data-theme=
+     'dark']` block below re-asserts the ORIGINAL near-black values
+     explicitly (not inherited), so toggling to dark theme is
+     completely unchanged from before this reversal. */
+  --slab: var(--surface);
+  --slab-raised: var(--paper);
+  --slab-line: var(--line);
+  --slab-hairline: var(--hairline);
+  --slab-accent-bg: var(--surface-muted);
+  --slab-accent-line: var(--line);
+  /* Overlay tints for controls rendered ON a slab (buttons, segmented
+     controls, filter-selects, badges, meter tracks) — dark-tinted here
+     since the slab itself is light now; dark theme restores the
+     original white-translucent overlays below. */
+  --slab-overlay-weak: rgba(9, 9, 11, 0.06);
+  --slab-overlay-strong: rgba(9, 9, 11, 0.1);
+  --slab-meter-track: var(--seq-100);
+
+  --on-slab-1: var(--ink-1);
+  --on-slab-2: var(--ink-2);
+  --on-slab-3: var(--ink-3);
+
+  /* ---- Brand -----------------------------------------------------
+     BOB.OS brand red. Used for chrome — nav, primary actions, focus,
+     links — never as a chart series colour, so it can never be
+     mistaken for data. #CC0000 is the design system's own designated
+     hover/link-hover step, not an invented shade. */
+  --brand: #ff0000;
+  --brand-hover: #cc0000;
+  --brand-wash: #ffecec;
+  --brand-line: #ffc7c7;
+  --brand-on-slab: #ff0000;
+  --focus: rgba(255, 0, 0, 0.35);
+  /* The vivid brand yellow, for DECORATIVE fills only (meters, gauges) —
+     never text, which stays on --status-warning's darker step: at
+     1.6:1 the vivid hue fails even the non-text 3:1 bar next to small
+     type, but a thick meter bar against its own light track clears it
+     comfortably. */
+  --brand-yellow: #ffc700;
+
+  /* ---- Categorical series --------------------------------------
+     The brand's own secondary set — blue, pink, green, purple — is
+     the full extent of what BOB.OS provides for "identity, not
+     status" colour. Capped at 4 slots on purpose: red and yellow are
+     reserved for status (danger/warning), which this app's own goal
+     and debt views already show side-by-side with category swatches,
+     so reusing them as series colours would be ambiguous in exactly
+     the views that need them least confusing. See CategoryRing's
+     4-segment cap and README. */
+  --series-1: #007bff; /* blue   */
+  --series-2: #ff2ea6; /* pink   */
+  --series-3: #1e8e3c; /* green — light-safe step, see header note */
+  --series-4: #ba2be2; /* purple */
+
+  /* Same 4 hues on the ink surface. Blue/pink/purple are identical to
+     the light set (they already passed unmodified); green is the
+     brand's own vivid #32D74B, since the dark surface is where it was
+     designed to sit. */
+  --series-1-slab: #007bff;
+  --series-2-slab: #ff2ea6;
+  --series-3-slab: #32d74b;
+  --series-4-slab: #ba2be2;
+
+  /* ---- Sequential ramp (magnitude: heatmaps, intensity) ---------
+     Single-hue ramp anchored on brand blue (#007BFF), light->dark for
+     the paper surface and dark->light for the ink surface so "near
+     zero" always recedes toward whatever surface it is on. */
+  --seq-100: #d6eaff;
+  --seq-150: #b8daff;
+  --seq-200: #8fc5ff;
+  --seq-250: #66b0ff;
+  --seq-300: #3396ff;
+  --seq-350: #1c8bff;
+  --seq-400: #007bff;
+  --seq-450: #0063cc;
+  --seq-500: #004a99;
+  --seq-550: #003d80;
+  --seq-600: #003166;
+  --seq-650: #00284d;
+  --seq-700: #002347;
+
+  /* ---- Status (reserved — never a series colour) ----------------
+     Exact BOB.OS semantics: good=brand green, warning=brand yellow,
+     critical=brand red. These are FILLS (meter bars, gauge arcs) —
+     on the light surface the vivid brand hues themselves fall under
+     3:1 (green 1.9:1, yellow 1.6:1), so status never carries meaning
+     by colour alone: it always ships with an icon and a label, and
+     small *text* uses the darker --delta-* tokens below.
+     Verified by `node scripts/check-contrast.mjs`. */
+  --status-good: #1e8e3c;
+  --status-warning: #a66a00;
+  --status-serious: #e8590c;
+  --status-critical: #ff0000;
+
+  /* Delta text: needs contrast as TEXT, so these are deeper steps
+     than the status fills above (or, on the ink surface, the brand
+     hue itself — it already clears text-grade contrast there). */
+  --delta-up: #14682a;
+  --delta-down: #cc0000;
+  --delta-up-slab: #32d74b;
+  --delta-down-slab: #ff0000;
+
+  /* ---- Chart chrome -------------------------------------------- */
+  --grid: #ececec;
+  --axis: #d4d4d8;
+  --axis-text: #71717a;
+  --grid-slab: #1c1c1c;
+  --axis-slab: #222222;
+  --axis-text-slab: #71717a;
+  --neutral-mark: #a1a1aa;
+  --neutral-mark-slab: #52525b;
+
+  /* ---- Geometry ---------------------------------------------------
+     BOB.OS: "cantos duros" — hard corners, 2/4/6/8/12px. Pill is
+     reserved for status dots/badges, never a card or a button. */
+  --r-xs: 2px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
+  --r-pill: 9999px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-9: 56px;
+
+  --shadow-card: 0 1px 2px rgba(17, 18, 20, 0.04), 0 8px 24px -16px rgba(17, 18, 20, 0.16);
+  --shadow-slab: var(--shadow-card);
+  --shadow-pop: 0 12px 32px -8px rgba(17, 18, 20, 0.22);
+
+  --sidebar-w: 232px;
+  --topbar-h: 64px;
+}
+
+/* Anything inside an ink card re-points the generic text/line tokens at
+   the on-slab values, so a component written once works on both
+   surfaces without knowing where it landed. */
+.on-slab {
+  --surface: var(--slab-raised);
+  --surface-muted: var(--slab);
+  --surface-hover: #161616;
+  --line: var(--slab-line);
+  --line-strong: #3f3f46;
+  --hairline: var(--slab-hairline);
+  --ink-1: var(--on-slab-1);
+  --ink-2: var(--on-slab-2);
+  --ink-3: var(--on-slab-3);
+  /* Decorative-only tier: BOB.OS's own dark "text-muted" (#52525B on
+     #080808 is 2.6:1) — intentionally low-contrast, same role as the
+     original ink-4 (icons, disabled hints, never load-bearing text). */
+  --ink-4: #52525b;
+  --grid: var(--grid-slab);
+  --axis: var(--axis-slab);
+  --axis-text: var(--axis-text-slab);
+  --brand: var(--brand-on-slab);
+  --delta-up: var(--delta-up-slab);
+  --delta-down: var(--delta-down-slab);
+}
+
+/* ---- Dark mode ----------------------------------------------------
+   Reuses the same already-validated ink-card palette above, applied
+   at the ROOT instead of scoped to `.on-slab` — so `.card` and `.slab`
+   converge to the same dark surface (only `.slab--accent` still stands
+   apart), and every chart's `surface="paper"` prop gets remapped to
+   the slab theme by `useEffectiveSurface` (src/lib/theme.tsx) rather
+   than needing a third, uncalibrated colour set. Light mode (the
+   default, no attribute) is completely unchanged. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  /* `--slab`/`--on-slab-*` are var()-derived from the light tokens now
+     (see "Ink data cards" above, 2026-08-25) — explicit literals here
+     restore the ORIGINAL near-black ink card, unchanged from before
+     that reversal, instead of inheriting the new light-mode aliases. */
+  --slab: #080808;
+  --slab-raised: #101010;
+  --slab-line: #222222;
+  --slab-hairline: rgba(255, 255, 255, 0.08);
+  --slab-accent-bg: #262626;
+  --slab-accent-line: #333333;
+  --slab-overlay-weak: rgba(255, 255, 255, 0.08);
+  --slab-overlay-strong: rgba(255, 255, 255, 0.14);
+  --slab-meter-track: rgba(255, 255, 255, 0.1);
+  --on-slab-1: #ffffff;
+  --on-slab-2: #a1a1aa;
+  --on-slab-3: #71717a;
+  --shadow-slab: 0 1px 2px rgba(0, 0, 0, 0.3), 0 18px 40px -24px rgba(0, 0, 0, 0.5);
+  --paper: var(--slab);
+  --paper-sunken: var(--slab);
+  --surface: var(--slab-raised);
+  --surface-muted: var(--slab);
+  --surface-hover: #161616;
+  --line: var(--slab-line);
+  --line-strong: #3f3f46;
+  --hairline: var(--slab-hairline);
+  --ink-1: var(--on-slab-1);
+  --ink-2: var(--on-slab-2);
+  --ink-3: var(--on-slab-3);
+  --ink-4: #52525b;
+  --grid: var(--grid-slab);
+  --axis: var(--axis-slab);
+  --axis-text: var(--axis-text-slab);
+  --brand: var(--brand-on-slab);
+  --delta-up: var(--delta-up-slab);
+  --delta-down: var(--delta-down-slab);
+  --shadow-card: var(--shadow-slab);
+}

@@ -1,0 +1,1 @@
+ALTER TABLE `debts` ADD `end_period` text;

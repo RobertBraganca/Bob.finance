@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `manually_edited` integer DEFAULT false NOT NULL;

@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.env
+.env.*
+.DS_Store
+*.tsbuildinfo
+
+# Todo o conteúdo de data/ é gerado em runtime ou é dado financeiro real
+# (bancos SQLite, backups, regras inferidas de extratos reais) — nada aqui
+# deve ir para o git. Ver server/src/db/client.ts (mkdirSync recriando o
+# diretório) e scripts/backup.ts.
+data/
+
+# Estado local do Supabase CLI (link do projeto, versões de serviço,
+# pooler url) — não é segredo por si só, mas é estado de máquina, não
+# código versionável.
+supabase/.temp/
+supabase/.branches/
+
+# Arquivo real de negociações de corretora (B3), sem uso pelo código —
+# não deve ir para o git. Ver auditoria de segurança pré-push.
+src/assets/negociacao-*.xlsx

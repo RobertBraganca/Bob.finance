@@ -1,0 +1,1 @@
+ALTER TABLE `cash_flow_forecasts` ADD `due_day` integer DEFAULT 1 NOT NULL;

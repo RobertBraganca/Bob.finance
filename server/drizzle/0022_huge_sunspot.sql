@@ -1,0 +1,1 @@
+ALTER TABLE `investment_goals` ADD `purpose` text;
