@@ -5,10 +5,16 @@ import { useEffect, useState } from 'react'
  * Deliberately localStorage, not a server table: this is a personal screen
  * preference, not data about the user's finances, and the app already
  * treats "which browser you're on" as the unit of session (no login).
+ *
+ * Fase 4 da migração pro shadcn/ui: largura deixou de ser um span discreto
+ * de 12 colunas (o que uma grade CSS decidia) e virou uma fração contínua
+ * de verdade, arrastando o `Resizable` do shadcn — cada linha do bento é
+ * um grupo de painéis redimensionáveis, não mais uma célula de grid.
+ * Reordenar dentro da mesma linha e mover a linha inteira continuam
+ * disponíveis; mover um card para OUTRA linha não é suportado nesta fase
+ * (ver ADR 0031) — as linhas em si são um conjunto fixo de cards, só a
+ * ordem e a largura dentro delas mudam.
  */
-
-export type BentoSpan = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
-export const BENTO_SPAN_OPTIONS: BentoSpan[] = [3, 4, 5, 6, 7, 8, 9, 12]
 
 export type BentoCardId =
   | 'month-mode'
@@ -45,115 +51,178 @@ export const BENTO_CARD_LABELS: Record<BentoCardId, string> = {
   'uncategorized-banner': 'Aviso de sem categoria',
 }
 
-export type BentoCardConfig = { id: BentoCardId; span: BentoSpan; visible: boolean }
+export type BentoRow = { id: string; cards: BentoCardId[] }
 
-/** Matches the order and spans the Home shipped with, before anyone customizes it. */
-export const DEFAULT_BENTO_LAYOUT: BentoCardConfig[] = [
-  { id: 'month-mode', span: 12, visible: true },
-  { id: 'hero', span: 4, visible: true },
-  { id: 'income-expense-kpi', span: 4, visible: true },
-  { id: 'accounts', span: 4, visible: true },
-  { id: 'credit-cards', span: 8, visible: true },
-  { id: 'reconciliation', span: 12, visible: true },
-  { id: 'pending-income', span: 6, visible: true },
-  { id: 'pending-expense', span: 6, visible: true },
-  { id: 'income-expense-chart', span: 12, visible: true },
-  { id: 'income-by-category', span: 6, visible: true },
-  { id: 'expense-by-category', span: 6, visible: true },
-  { id: 'net-flow', span: 7, visible: true },
-  { id: 'top-merchants', span: 5, visible: true },
-  { id: 'account-flow', span: 12, visible: true },
-  { id: 'uncategorized-banner', span: 12, visible: true },
+/** Matches the row grouping and rough proportions the Home shipped with
+ * (the old 12-column spans), before anyone customizes it. */
+export const DEFAULT_BENTO_ROWS: BentoRow[] = [
+  { id: 'row-month-mode', cards: ['month-mode'] },
+  { id: 'row-hero', cards: ['hero', 'income-expense-kpi', 'accounts'] },
+  { id: 'row-credit-cards', cards: ['credit-cards'] },
+  { id: 'row-reconciliation', cards: ['reconciliation'] },
+  { id: 'row-pending', cards: ['pending-income', 'pending-expense'] },
+  { id: 'row-income-expense-chart', cards: ['income-expense-chart'] },
+  { id: 'row-by-category', cards: ['income-by-category', 'expense-by-category'] },
+  { id: 'row-net-flow', cards: ['net-flow', 'top-merchants'] },
+  { id: 'row-account-flow', cards: ['account-flow'] },
+  { id: 'row-uncategorized-banner', cards: ['uncategorized-banner'] },
 ]
 
+const DEFAULT_SIZES: Partial<Record<BentoCardId, number>> = {
+  hero: 33,
+  'income-expense-kpi': 33,
+  accounts: 34,
+  'pending-income': 50,
+  'pending-expense': 50,
+  'income-by-category': 50,
+  'expense-by-category': 50,
+  'net-flow': 58,
+  'top-merchants': 42,
+}
+
+type StoredLayout = {
+  version: 2
+  rows: BentoRow[]
+  sizes: Partial<Record<BentoCardId, number>>
+  visible: Partial<Record<BentoCardId, boolean>>
+}
+
+/** Pre-Fase-4 shape: a flat list with a discrete 12-column `span`. */
+type StoredLayoutV1 = Array<{ id: BentoCardId; span: number; visible: boolean }>
+
 const STORAGE_KEY = 'bento-layout:dashboard:v1'
+
+function defaultLayout(): StoredLayout {
+  return {
+    version: 2,
+    rows: DEFAULT_BENTO_ROWS.map((row) => ({ ...row, cards: [...row.cards] })),
+    sizes: { ...DEFAULT_SIZES },
+    visible: {},
+  }
+}
+
+/** One-time upgrade for whoever already customized the old span/order grid
+ * — same row-wrapping rule the CSS grid used (accumulate spans, wrap past
+ * 12), so the arrangement someone already built stays recognizable, just
+ * continuous instead of stepped. */
+function migrateFromV1(old: StoredLayoutV1): StoredLayout {
+  const visible: Partial<Record<BentoCardId, boolean>> = {}
+  const sizes: Partial<Record<BentoCardId, number>> = {}
+  const rows: BentoRow[] = []
+  let current: Array<{ id: BentoCardId; span: number }> = []
+  let currentSum = 0
+
+  const flush = () => {
+    if (current.length === 0) return
+    const total = current.reduce((sum, c) => sum + c.span, 0)
+    current.forEach((c) => {
+      sizes[c.id] = Math.round((c.span / total) * 100)
+    })
+    rows.push({ id: `row-${rows.length}`, cards: current.map((c) => c.id) })
+    current = []
+    currentSum = 0
+  }
+
+  for (const card of old) {
+    visible[card.id] = card.visible
+    if (currentSum + card.span > 12 && current.length > 0) flush()
+    current.push({ id: card.id, span: card.span })
+    currentSum += card.span
+  }
+  flush()
+
+  return { version: 2, rows, sizes, visible }
+}
 
 /**
  * Reconciles whatever is in storage with the current default set: a card
  * added in a later release appears at its default position, visible; a card
  * removed from the app just disappears — neither case corrupts what the
- * user already customized.
+ * user already customized. Unlike v1, a whole ROW disappears once every
+ * card in it is gone (no empty resizable group left behind).
  */
-function reconcile(stored: BentoCardConfig[]): BentoCardConfig[] {
-  const byId = new Map(stored.map((c) => [c.id, c]))
-  const knownOrder = stored.map((c) => c.id).filter((id) => byId.has(id) && DEFAULT_BENTO_LAYOUT.some((d) => d.id === id))
+function reconcile(stored: StoredLayout): StoredLayout {
+  const knownIds = new Set(DEFAULT_BENTO_ROWS.flatMap((r) => r.cards))
+  let rows = stored.rows
+    .map((row) => ({ ...row, cards: row.cards.filter((id) => knownIds.has(id)) }))
+    .filter((row) => row.cards.length > 0)
 
-  /**
-   * A card added in a later release enters at ITS DEFAULT POSITION, not at
-   * the end. Appending was fine while every new card was a footnote, but a
-   * card meant for the top of the page (the month summary) would land below
-   * everything for anyone who had already customized the layout, which is
-   * exactly the users most likely to keep it there.
-   */
-  const order = [...knownOrder]
-  DEFAULT_BENTO_LAYOUT.forEach((fallback, defaultIndex) => {
-    if (order.includes(fallback.id)) return
-    // Ancora no vizinho anterior do layout padrão que o usuário já tem, para
-    // o card novo aparecer onde ele nasceu, e não sempre no topo nem sempre
-    // no fim.
-    const previous = DEFAULT_BENTO_LAYOUT.slice(0, defaultIndex)
-      .map((d) => d.id)
-      .filter((id) => order.includes(id))
+  const present = new Set(rows.flatMap((r) => r.cards))
+  DEFAULT_BENTO_ROWS.forEach((defaultRow, defaultRowIndex) => {
+    const missing = defaultRow.cards.filter((id) => !present.has(id))
+    if (missing.length === 0) return
+    // Anchor next to the nearest earlier default card that survived, same
+    // idea as v1's reconcile — a card new to this release lands where it
+    // was designed to, not always at the very end.
+    const anchorId = DEFAULT_BENTO_ROWS.slice(0, defaultRowIndex)
+      .flatMap((r) => r.cards)
+      .filter((id) => present.has(id))
       .pop()
-    const at = previous === undefined ? 0 : order.indexOf(previous) + 1
-    order.splice(at, 0, fallback.id)
+    const anchorRowIndex = anchorId ? rows.findIndex((r) => r.cards.includes(anchorId)) : -1
+    const insertAt = anchorRowIndex === -1 ? 0 : anchorRowIndex + 1
+    rows = [...rows.slice(0, insertAt), { id: defaultRow.id, cards: missing }, ...rows.slice(insertAt)]
+    missing.forEach((id) => present.add(id))
   })
 
-  return order.map((id) => {
-    const fromStorage = byId.get(id)
-    const fallback = DEFAULT_BENTO_LAYOUT.find((d) => d.id === id)!
-    return fromStorage ? { ...fallback, ...fromStorage } : fallback
-  })
+  return { version: 2, rows, sizes: { ...stored.sizes }, visible: { ...stored.visible } }
 }
 
-function load(): BentoCardConfig[] {
+function load(): StoredLayout {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return DEFAULT_BENTO_LAYOUT
-    return reconcile(JSON.parse(raw))
+    if (!raw) return defaultLayout()
+    const parsed = JSON.parse(raw)
+    return reconcile(Array.isArray(parsed) ? migrateFromV1(parsed) : (parsed as StoredLayout))
   } catch {
-    return DEFAULT_BENTO_LAYOUT
+    return defaultLayout()
   }
 }
 
 export function useBentoLayout() {
-  const [layout, setLayout] = useState<BentoCardConfig[]>(load)
+  const [state, setState] = useState<StoredLayout>(load)
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(layout))
-  }, [layout])
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  }, [state])
 
-  const setSpan = (id: BentoCardId, span: BentoSpan) =>
-    setLayout((prev) => prev.map((c) => (c.id === id ? { ...c, span } : c)))
+  const isVisible = (id: BentoCardId) => state.visible[id] ?? true
 
   const setVisible = (id: BentoCardId, visible: boolean) =>
-    setLayout((prev) => prev.map((c) => (c.id === id ? { ...c, visible } : c)))
+    setState((prev) => ({ ...prev, visible: { ...prev.visible, [id]: visible } }))
 
-  const move = (id: BentoCardId, direction: -1 | 1) =>
-    setLayout((prev) => {
-      const index = prev.findIndex((c) => c.id === id)
+  /** Last known share of its row's width, for a card's initial/collapsed size. */
+  const sizeFor = (id: BentoCardId, siblingCount: number) => state.sizes[id] ?? 100 / Math.max(1, siblingCount)
+
+  /** Wired to `ResizablePanelGroup`'s `onLayoutChanged` — persists a row's new split. */
+  const setRowSizes = (layout: Record<string, number>) =>
+    setState((prev) => ({ ...prev, sizes: { ...prev.sizes, ...layout } }))
+
+  const moveRow = (rowId: string, direction: -1 | 1) =>
+    setState((prev) => {
+      const index = prev.rows.findIndex((r) => r.id === rowId)
       const target = index + direction
-      if (index < 0 || target < 0 || target >= prev.length) return prev
-      const next = prev.slice()
-      const a = next[index]!
-      const b = next[target]!
-      next[index] = b
-      next[target] = a
-      return next
+      if (index < 0 || target < 0 || target >= prev.rows.length) return prev
+      const rows = prev.rows.slice()
+      ;[rows[index], rows[target]] = [rows[target]!, rows[index]!]
+      return { ...prev, rows }
     })
 
-  /** Jumps straight to a 0-based position, for the "posição" dropdown — no repeated clicks. */
-  const moveTo = (id: BentoCardId, targetIndex: number) =>
-    setLayout((prev) => {
-      const index = prev.findIndex((c) => c.id === id)
-      if (index < 0 || targetIndex < 0 || targetIndex >= prev.length || targetIndex === index) return prev
-      const next = prev.slice()
-      const [card] = next.splice(index, 1)
-      next.splice(targetIndex, 0, card!)
-      return next
+  const moveWithinRow = (rowId: string, cardId: BentoCardId, direction: -1 | 1) =>
+    setState((prev) => {
+      const rowIndex = prev.rows.findIndex((r) => r.id === rowId)
+      if (rowIndex < 0) return prev
+      const row = prev.rows[rowIndex]!
+      const index = row.cards.indexOf(cardId)
+      const target = index + direction
+      if (index < 0 || target < 0 || target >= row.cards.length) return prev
+      const cards = row.cards.slice()
+      ;[cards[index], cards[target]] = [cards[target]!, cards[index]!]
+      const rows = prev.rows.slice()
+      rows[rowIndex] = { ...row, cards }
+      return { ...prev, rows }
     })
 
-  const reset = () => setLayout(DEFAULT_BENTO_LAYOUT)
+  const reset = () => setState(defaultLayout())
 
-  return { layout, setSpan, setVisible, move, moveTo, reset }
+  return { rows: state.rows, isVisible, setVisible, sizeFor, setRowSizes, moveRow, moveWithinRow, reset }
 }
