@@ -239,6 +239,8 @@ export function DebtPage() {
                 surface="paper"
                 totalLabel="Dívida total"
                 height={190}
+                paddingAngle={5}
+                cornerRadius={6}
                 slices={data.byKind.map((entry) => ({
                   categoryId: null,
                   name: KIND_LABEL[entry.kind] ?? entry.kind,
