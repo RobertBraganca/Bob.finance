@@ -5,7 +5,10 @@ import { bps, money, parseMoneyInput } from '../../lib/format'
 // Importa do barrel uma vez só. NÃO é reexportado por ele: o barrel
 // importando este arquivo, que importa o barrel de volta, fecharia um ciclo.
 import { Assumptions, type AssumptionBag } from './Assumptions'
-import { Button, EmptyState, Modal, Segmented, Select, TextInput } from './index'
+import { Button, EmptyState, Select } from './index'
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from './dialog'
+import { Input } from './input'
+import { Tabs, TabsList, TabsTrigger } from './tabs'
 
 /**
  * Simulador de decisões: "e se eu fizesse X?".
@@ -84,46 +87,34 @@ export function SimulatorModal({
     kind === 'expense' ? (parseMoneyInput(amount) ?? 0) > 0 : debtId !== null
 
   return (
-    <Modal
-      title="Simular uma decisão"
-      onClose={onClose}
-      wide
-      footer={
-        <>
-          <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-            Nada aqui é gravado. É uma pergunta e uma resposta.
-          </span>
-          <Button
-            variant="primary"
-            icon="sparkle"
-            disabled={!canRun || run.isPending}
-            onClick={() => run.mutate()}
-          >
-            Simular
-          </Button>
-        </>
-      }
-    >
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[880px]">
+        <DialogTitle>Simular uma decisão</DialogTitle>
       <div className="stack stack--loose">
-        <Segmented
-          ariaLabel="Tipo de simulação"
+        <Tabs
           value={kind}
-          onChange={(next) => {
-            setKind(next)
+          onValueChange={(next) => {
+            setKind(next as 'expense' | 'payoff')
             setResult(null)
             setError(null)
           }}
-          options={[
-            { value: 'expense', label: 'Gasto único' },
-            { value: 'payoff', label: 'Quitar dívida' },
-          ]}
-        />
+        >
+          <TabsList aria-label="Tipo de simulação">
+            <TabsTrigger value="expense">Gasto único</TabsTrigger>
+            <TabsTrigger value="payoff">Quitar dívida</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
           {kind === 'expense' ? (
             <div className="field" style={{ width: 180 }}>
               <label className="field__label">Valor</label>
-              <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+              <Input
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0,00"
+                className="text-right tabular-nums"
+              />
             </div>
           ) : (
             <div className="field" style={{ minWidth: 240, flex: 1 }}>
@@ -206,7 +197,21 @@ export function SimulatorModal({
           </div>
         )}
       </div>
-    </Modal>
+        <DialogFooter>
+          <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+            Nada aqui é gravado. É uma pergunta e uma resposta.
+          </span>
+          <Button
+            variant="primary"
+            icon="sparkle"
+            disabled={!canRun || run.isPending}
+            onClick={() => run.mutate()}
+          >
+            Simular
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

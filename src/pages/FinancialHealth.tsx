@@ -11,15 +11,15 @@ import {
   HeroFigure,
   Icon,
   Meter,
-  Modal,
   scoreIndicatorState,
   Slab,
   SkeletonLines,
   StatTile,
-  TextInput,
   useToast,
   type AssumptionBag,
 } from '../components/ui'
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
+import { Input } from '../components/ui/input'
 import { SimulatorModal } from '../components/ui/SimulatorModal'
 import { PageHeader } from '../components/shell/Shell'
 
@@ -514,22 +514,10 @@ function SettingsEditor({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal
-      title="Pesos do score e limites do radar"
-      onClose={onClose}
-      wide
-      footer={
-        <>
-          <Button icon="refresh" onClick={restore} disabled={!defaults}>
-            Voltar aos valores sugeridos
-          </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
-            Salvar
-          </Button>
-        </>
-      }
-    >
-      {!current ? (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[880px]">
+        <DialogTitle>Pesos do score e limites do radar</DialogTitle>
+        {!current ? (
         <SkeletonLines lines={5} />
       ) : (
         <div className="stack stack--loose">
@@ -625,7 +613,16 @@ function SettingsEditor({ onClose }: { onClose: () => void }) {
           </p>
         </div>
       )}
-    </Modal>
+        <DialogFooter>
+          <Button icon="refresh" onClick={restore} disabled={!defaults}>
+            Voltar aos valores sugeridos
+          </Button>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+            Salvar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -643,7 +640,7 @@ function NumberField({
   return (
     <div className="field" style={{ width: 168 }}>
       <label className="field__label">{label}</label>
-      <TextInput value={value} onChange={onChange} numeral />
+      <Input value={value} onChange={(e) => onChange(e.target.value)} className="text-right tabular-nums" />
       {hint && <span className="field__hint">{hint}</span>}
     </div>
   )
