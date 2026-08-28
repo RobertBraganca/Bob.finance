@@ -17,15 +17,15 @@ import {
   Card,
   EmptyState,
   HeroFigure,
-  Modal,
   Select,
   Slab,
   SkeletonLines,
   StatTile,
-  TextInput,
   useToast,
   type AssumptionBag,
 } from '../components/ui'
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
+import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
 
 /**
@@ -417,22 +417,10 @@ function ParamsEditor({ onClose }: { onClose: () => void }) {
   const accountOptions = accounts.map((account) => ({ value: account.id, label: account.name }))
 
   return (
-    <Modal
-      title="Parâmetros do motor financeiro"
-      onClose={onClose}
-      wide
-      footer={
-        <>
-          <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-            Tudo aqui é escolha sua. O que o app consegue derivar do extrato continua sendo derivado.
-          </span>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
-            Salvar
-          </Button>
-        </>
-      }
-    >
-      {!current ? (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[880px]">
+        <DialogTitle>Parâmetros do motor financeiro</DialogTitle>
+        {!current ? (
         <SkeletonLines lines={5} />
       ) : (
         <div className="stack stack--loose">
@@ -467,11 +455,11 @@ function ParamsEditor({ onClose }: { onClose: () => void }) {
             <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
               <div className="field" style={{ width: 190 }}>
                 <label className="field__label">Pró-labore (R$)</label>
-                <TextInput
+                <Input
                   value={proLabore === undefined ? centsToInput(current.proLaboreCents) : proLabore}
-                  onChange={setProLabore}
+                  onChange={(e) => setProLabore(e.target.value)}
                   placeholder="deixe vazio para derivar"
-                  numeral
+                  className="text-right tabular-nums"
                 />
                 <span className="field__hint">
                   Vazio significa derivar do repasse PJ para PF pareado no período
@@ -479,19 +467,19 @@ function ParamsEditor({ onClose }: { onClose: () => void }) {
               </div>
               <div className="field" style={{ width: 150 }}>
                 <label className="field__label">Alíquota (%)</label>
-                <TextInput
+                <Input
                   value={tax === undefined ? bpsToInput(current.taxRateBps) : tax}
-                  onChange={setTax}
-                  numeral
+                  onChange={(e) => setTax(e.target.value)}
+                  className="text-right tabular-nums"
                 />
                 <span className="field__hint">Incide sobre o próprio faturamento</span>
               </div>
               <div className="field" style={{ width: 190 }}>
                 <label className="field__label">Reserva planejada (R$)</label>
-                <TextInput
+                <Input
                   value={reserve === undefined ? centsToInput(current.reservePlannedCents) : reserve}
-                  onChange={setReserve}
-                  numeral
+                  onChange={(e) => setReserve(e.target.value)}
+                  className="text-right tabular-nums"
                 />
                 <span className="field__hint">
                   Quanto deste mês você destina à reserva. O quanto falta para completá-la aparece
@@ -500,10 +488,10 @@ function ParamsEditor({ onClose }: { onClose: () => void }) {
               </div>
               <div className="field" style={{ width: 150 }}>
                 <label className="field__label">Margem (R$)</label>
-                <TextInput
+                <Input
                   value={margin === undefined ? centsToInput(current.marginCents) : margin}
-                  onChange={setMargin}
-                  numeral
+                  onChange={(e) => setMargin(e.target.value)}
+                  className="text-right tabular-nums"
                 />
               </div>
             </div>
@@ -516,6 +504,15 @@ function ParamsEditor({ onClose }: { onClose: () => void }) {
           </p>
         </div>
       )}
-    </Modal>
+        <DialogFooter>
+          <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+            Tudo aqui é escolha sua. O que o app consegue derivar do extrato continua sendo derivado.
+          </span>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+            Salvar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
