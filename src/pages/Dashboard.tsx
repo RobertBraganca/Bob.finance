@@ -335,6 +335,8 @@ export function Dashboard() {
           surface="paper"
           totalLabel="Total de entradas"
           height={200}
+          paddingAngle={5}
+          cornerRadius={6}
           onSliceClick={(categoryId) => navigate(`/lancamentos?parentCategoryId=${categoryId}`)}
         />
       </Card>
@@ -347,6 +349,8 @@ export function Dashboard() {
           surface="paper"
           totalLabel="Total de saídas"
           height={200}
+          paddingAngle={5}
+          cornerRadius={6}
           onSliceClick={(categoryId) => navigate(`/lancamentos?parentCategoryId=${categoryId}`)}
         />
       </Card>
