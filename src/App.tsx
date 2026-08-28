@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
+import { SpeedInsights } from '@vercel/speed-insights/react'
 import { Sidebar } from './components/shell/Shell'
 import { Card, Icon } from './components/ui'
 import { telemetry } from './lib/telemetry'
@@ -93,6 +94,7 @@ export function App() {
           <Route path="/ajustes" element={<SettingsPage />} />
         </Routes>
       </main>
+      <SpeedInsights />
     </div>
   )
 }
