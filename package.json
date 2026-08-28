@@ -29,6 +29,7 @@
   "dependencies": {
     "@fastify/cors": "^11.3.0",
     "@tanstack/react-query": "^5.101.4",
+    "@vercel/speed-insights": "^2.0.0",
     "better-sqlite3": "^13.0.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
