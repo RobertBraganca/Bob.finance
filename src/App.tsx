@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/shell/Shell'
+import { SidebarInset, SidebarProvider, SidebarTrigger } from './components/ui/sidebar'
 import { Card, Icon } from './components/ui'
 import { telemetry } from './lib/telemetry'
 import { Dashboard } from './pages/Dashboard'
@@ -72,27 +73,33 @@ function usePageViewTelemetry() {
 export function App() {
   usePageViewTelemetry()
   return (
-    <div className="app">
+    <SidebarProvider>
       <Sidebar />
-      <main className="main">
-        <PortWarning />
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/diario" element={<DailyPage />} />
-          <Route path="/lancamentos" element={<TransactionsPage />} />
-          <Route path="/dre" element={<DrePage />} />
-          <Route path="/metas" element={<GoalsPage />} />
-          <Route path="/dividas" element={<DebtPage />} />
-          <Route path="/cartoes" element={<CreditCardsPage />} />
-          <Route path="/investimentos" element={<InvestmentsPage />} />
-          <Route path="/saude" element={<FinancialHealthPage />} />
-          <Route path="/motor" element={<FinancialEnginePage />} />
-          <Route path="/precificacao" element={<PricingPage />} />
-          <Route path="/importar" element={<ImportPage />} />
-          <Route path="/categorias" element={<CategoriesPage />} />
-          <Route path="/ajustes" element={<SettingsPage />} />
-        </Routes>
-      </main>
-    </div>
+      <SidebarInset>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
+          <SidebarTrigger />
+          <span className="text-sm font-semibold">Finanças</span>
+        </div>
+        <div className="main">
+          <PortWarning />
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/diario" element={<DailyPage />} />
+            <Route path="/lancamentos" element={<TransactionsPage />} />
+            <Route path="/dre" element={<DrePage />} />
+            <Route path="/metas" element={<GoalsPage />} />
+            <Route path="/dividas" element={<DebtPage />} />
+            <Route path="/cartoes" element={<CreditCardsPage />} />
+            <Route path="/investimentos" element={<InvestmentsPage />} />
+            <Route path="/saude" element={<FinancialHealthPage />} />
+            <Route path="/motor" element={<FinancialEnginePage />} />
+            <Route path="/precificacao" element={<PricingPage />} />
+            <Route path="/importar" element={<ImportPage />} />
+            <Route path="/categorias" element={<CategoriesPage />} />
+            <Route path="/ajustes" element={<SettingsPage />} />
+          </Routes>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
   )
 }

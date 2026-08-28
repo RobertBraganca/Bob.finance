@@ -1,24 +1,55 @@
 import { NavLink, useLocation } from 'react-router-dom'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Icon, type IconName } from '../ui/Icon'
 import { FilterSelect } from '../ui'
 import { PeriodPickerPopover } from '../ui/PeriodPickerPopover'
+import {
+  Sidebar as ShadcnSidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarRail,
+  SidebarTrigger,
+  useSidebar,
+} from '../ui/sidebar'
 import { useMeta, useRange } from '../../lib/store'
 import { useTheme } from '../../lib/theme'
 import { date as fmtDate } from '../../lib/format'
 import logo from '../../assets/logo-red.svg'
 
-const NAV: Array<{ to: string; label: string; icon: IconName; group?: string }> = [
-  { to: '/', label: 'Visão geral', icon: 'dashboard', group: 'Acompanhar' },
-  { to: '/diario', label: 'Diário', icon: 'calendar' },
-  { to: '/lancamentos', label: 'Lançamentos', icon: 'list' },
-  { to: '/dre', label: 'DRE', icon: 'scale' },
-  { to: '/saude', label: 'Saúde financeira', icon: 'sparkle', group: 'Planejar' },
-  { to: '/motor', label: 'Motor financeiro', icon: 'gauge' },
-  { to: '/precificacao', label: 'Precificação', icon: 'calculator' },
-  { to: '/metas', label: 'Metas do mês', icon: 'target' },
-  { to: '/dividas', label: 'Endividamento', icon: 'landmark' },
-  { to: '/investimentos', label: 'Investimentos', icon: 'trending' },
+type NavItem = { to: string; label: string; icon: IconName }
+type NavSection = { label: string; items: NavItem[] }
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    label: 'Acompanhar',
+    items: [
+      { to: '/', label: 'Visão geral', icon: 'dashboard' },
+      { to: '/diario', label: 'Diário', icon: 'calendar' },
+      { to: '/lancamentos', label: 'Lançamentos', icon: 'list' },
+      { to: '/dre', label: 'DRE', icon: 'scale' },
+    ],
+  },
+  {
+    label: 'Planejar',
+    items: [
+      { to: '/saude', label: 'Saúde financeira', icon: 'sparkle' },
+      { to: '/motor', label: 'Motor financeiro', icon: 'gauge' },
+      { to: '/precificacao', label: 'Precificação', icon: 'calculator' },
+      { to: '/metas', label: 'Metas do mês', icon: 'target' },
+      { to: '/dividas', label: 'Endividamento', icon: 'landmark' },
+      { to: '/investimentos', label: 'Investimentos', icon: 'trending' },
+    ],
+  },
 ]
 
 /**
@@ -29,39 +60,24 @@ const NAV: Array<{ to: string; label: string; icon: IconName; group?: string }> 
  * é a mesma URL de sempre, inclusive `/cartoes`, que só sai da lista de
  * primeiro nível — segue existindo e navegável normalmente.
  */
-const SETTINGS_NAV: Array<{ to: string; label: string; icon: IconName }> = [
+const SETTINGS_NAV: NavItem[] = [
   { to: '/ajustes', label: 'Contas e bancos', icon: 'bank' },
   { to: '/cartoes', label: 'Cartões', icon: 'wallet' },
   { to: '/categorias', label: 'Categorias e regras', icon: 'tags' },
   { to: '/importar', label: 'Importar', icon: 'upload' },
 ]
 
-const SIDEBAR_COLLAPSE_KEY = 'sidebar-collapsed'
-
-function useSidebarCollapse() {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === '1')
-
-  useEffect(() => {
-    document.documentElement.style.setProperty('--sidebar-w', collapsed ? '68px' : '232px')
-  }, [collapsed])
-
-  return {
-    collapsed,
-    toggle: () =>
-      setCollapsed((current) => {
-        const next = !current
-        localStorage.setItem(SIDEBAR_COLLAPSE_KEY, next ? '1' : '0')
-        return next
-      }),
-  }
+function isNavActive(pathname: string, to: string) {
+  return to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(`${to}/`)
 }
 
 export function Sidebar() {
   const meta = useMeta()
   const location = useLocation()
   const uncategorized = meta.data?.ledger.count === 0 ? 0 : undefined
-  const { collapsed, toggle } = useSidebarCollapse()
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const { setOpenMobile } = useSidebar()
+  const { theme, toggle } = useTheme()
+  const isDark = theme === 'dark'
   // Aberto por padrão se a rota atual já está em Configurações, ou se o
   // sinal de "comece aqui" (nenhum lançamento ainda) está ativo — do
   // contrário, começa fechado para não competir por espaço com o resto.
@@ -70,107 +86,93 @@ export function Sidebar() {
   )
 
   return (
-    <aside className="sidebar" data-collapsed={collapsed} data-mobile-open={mobileOpen}>
-      <div className="sidebar__bar">
-        <div className="brandmark">
-          <span className="brandmark__glyph">
-            <img src={logo} alt="BOB.OS" />
-          </span>
-          {!collapsed && <span className="brandmark__name">Finanças</span>}
-        </div>
-
-        <button
-          type="button"
-          className="sidebar__hamburger"
-          onClick={() => setMobileOpen((v) => !v)}
-          aria-label={mobileOpen ? 'Fechar menu' : 'Abrir menu'}
-          aria-expanded={mobileOpen}
-        >
-          <Icon name={mobileOpen ? 'x' : 'list'} size={20} />
-        </button>
-      </div>
-
-      {mobileOpen && <div className="sidebar__backdrop" onClick={() => setMobileOpen(false)} />}
-
-      <nav className="nav">
-        {NAV.map((item) => (
-          <div key={item.to}>
-            {item.group && !collapsed && <div className="nav__group label">{item.group}</div>}
-            <NavLink
-              to={item.to}
-              end={item.to === '/'}
-              className="nav__item"
-              title={collapsed ? item.label : undefined}
-              onClick={() => setMobileOpen(false)}
-            >
-              {({ isActive }) => (
-                <>
-                  <span className="nav__icon" style={isActive ? { color: 'inherit' } : undefined}>
-                    <Icon name={item.icon} size={16} />
-                  </span>
-                  <span className="grow truncate">{item.label}</span>
-                  {item.to === '/importar' && uncategorized === 0 && (
-                    <span className="nav__badge">comece aqui</span>
-                  )}
-                </>
-              )}
-            </NavLink>
+    <ShadcnSidebar collapsible="icon">
+      <SidebarHeader>
+        <div className="flex items-center justify-between gap-2 px-2 py-1">
+          <div className="flex items-center gap-2 overflow-hidden">
+            <img src={logo} alt="BOB.OS" className="size-6 shrink-0" />
+            <span className="truncate text-sm font-semibold group-data-[collapsible=icon]:hidden">
+              Finanças
+            </span>
           </div>
+          <SidebarTrigger className="group-data-[collapsible=icon]:hidden" />
+        </div>
+      </SidebarHeader>
+
+      <SidebarContent>
+        {NAV_SECTIONS.map((section) => (
+          <SidebarGroup key={section.label}>
+            <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
+            <SidebarMenu>
+              {section.items.map((item) => (
+                <SidebarMenuItem key={item.to}>
+                  <SidebarMenuButton
+                    isActive={isNavActive(location.pathname, item.to)}
+                    tooltip={item.label}
+                    onClick={() => setOpenMobile(false)}
+                    render={<NavLink to={item.to} end={item.to === '/'} />}
+                  >
+                    <Icon name={item.icon} size={16} />
+                    <span>{item.label}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
         ))}
 
-        <div>
-          {!collapsed && <div className="nav__group label">Configurar</div>}
-          <button
-            type="button"
-            className="nav__item"
-            title={collapsed ? 'Configurações' : undefined}
-            aria-expanded={settingsOpen}
-            onClick={() => setSettingsOpen((v) => !v)}
-          >
-            <span className="nav__icon">
-              <Icon name="settings" size={16} />
-            </span>
-            {!collapsed && (
-              <>
-                <span className="grow truncate">Configurações</span>
-                {uncategorized === 0 && !settingsOpen && <span className="nav__badge">comece aqui</span>}
-                <Icon name={settingsOpen ? 'chevronDown' : 'chevronRight'} size={14} />
-              </>
-            )}
-          </button>
-
-          {settingsOpen && !collapsed && (
-            <div className="stack stack--tight" style={{ marginTop: 2 }}>
-              {SETTINGS_NAV.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className="nav__item"
-                  style={{ paddingLeft: 'var(--sp-7)' }}
-                  onClick={() => setMobileOpen(false)}
-                >
-                  {({ isActive }) => (
-                    <>
-                      <span className="nav__icon" style={isActive ? { color: 'inherit' } : undefined}>
+        <SidebarGroup>
+          <SidebarGroupLabel>Configurar</SidebarGroupLabel>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="Configurações"
+                aria-expanded={settingsOpen}
+                onClick={() => setSettingsOpen((v) => !v)}
+              >
+                <Icon name="settings" size={16} />
+                <span>Configurações</span>
+              </SidebarMenuButton>
+              {uncategorized === 0 && !settingsOpen && <SidebarMenuBadge>comece aqui</SidebarMenuBadge>}
+              {settingsOpen && (
+                <SidebarMenuSub>
+                  {SETTINGS_NAV.map((item) => (
+                    <SidebarMenuSubItem key={item.to}>
+                      <SidebarMenuSubButton
+                        isActive={location.pathname === item.to}
+                        onClick={() => setOpenMobile(false)}
+                        render={<NavLink to={item.to} />}
+                      >
                         <Icon name={item.icon} size={16} />
-                      </span>
-                      <span className="grow truncate">{item.label}</span>
-                      {item.to === '/importar' && uncategorized === 0 && (
-                        <span className="nav__badge">comece aqui</span>
-                      )}
-                    </>
-                  )}
-                </NavLink>
-              ))}
-              <ThemeToggle asNavItem />
-            </div>
-          )}
-        </div>
+                        <span>{item.label}</span>
+                        {item.to === '/importar' && uncategorized === 0 && (
+                          <span className="ml-auto text-[10px] text-sidebar-foreground/70">
+                            comece aqui
+                          </span>
+                        )}
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  ))}
+                </SidebarMenuSub>
+              )}
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+      </SidebarContent>
 
-        <div className="sidebar__foot sidebar__foot--in-nav">
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton tooltip={isDark ? 'Usar tema claro' : 'Usar tema escuro'} onClick={toggle}>
+              <Icon name={isDark ? 'sun' : 'moon'} size={16} />
+              <span>{isDark ? 'Tema claro' : 'Tema escuro'}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+        <div className="px-2 py-1 text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
           {meta.data?.ledger.count ? (
             <>
-              <strong className="tabular">{meta.data.ledger.count.toLocaleString('pt-BR')}</strong>{' '}
+              <strong className="tabular-nums">{meta.data.ledger.count.toLocaleString('pt-BR')}</strong>{' '}
               lançamentos
               <br />
               {fmtDate(meta.data.ledger.min)} a {fmtDate(meta.data.ledger.max)}
@@ -179,83 +181,10 @@ export function Sidebar() {
             'Nenhum dado ainda'
           )}
         </div>
-      </nav>
+      </SidebarFooter>
 
-      {/* Expandido, "Aparência" mora dentro de Configurações (acima); só
-          quando a barra está recolhida — e a submenu não tem onde caber —
-          este atalho isolado continua sendo o único caminho até o tema. */}
-      {collapsed && <ThemeToggle collapsed={collapsed} />}
-
-      <button
-        type="button"
-        className="sidebar__collapse-btn"
-        onClick={toggle}
-        title={collapsed ? 'Expandir menu' : 'Recolher menu'}
-      >
-        <Icon name="chevronRight" size={14} className={collapsed ? undefined : 'sidebar__collapse-icon'} />
-        {!collapsed && <span>Recolher</span>}
-      </button>
-
-      {!collapsed && (
-        <div className="sidebar__foot sidebar__foot--desktop">
-          {meta.data?.ledger.count ? (
-            <>
-              <strong className="tabular">{meta.data.ledger.count.toLocaleString('pt-BR')}</strong>{' '}
-              lançamentos
-              <br />
-              {fmtDate(meta.data.ledger.min)} a {fmtDate(meta.data.ledger.max)}
-            </>
-          ) : (
-            'Nenhum dado ainda'
-          )}
-        </div>
-      )}
-    </aside>
-  )
-}
-
-/** Dark mode reuses the already-validated ink-card palette at the root
- * (see tokens.css `:root[data-theme='dark']`) rather than a third,
- * uncalibrated colour set — so every `.card` converges toward `.slab`,
- * and only `.slab--accent` still stands apart. */
-function ThemeToggle({ collapsed = false, asNavItem = false }: { collapsed?: boolean; asNavItem?: boolean }) {
-  const { theme, toggle } = useTheme()
-  const isDark = theme === 'dark'
-
-  // "Aparência" dentro de Configurações (specs/settings-accounts-profiles,
-  // "Reorganização da navegação") — mesmo controle, só com a mesma cara de
-  // `.nav__item` dos outros itens do submenu em vez do atalho isolado do
-  // rodapé.
-  if (asNavItem) {
-    return (
-      <button
-        type="button"
-        className="nav__item"
-        style={{ paddingLeft: 'var(--sp-7)' }}
-        onClick={toggle}
-        title={isDark ? 'Usar tema claro' : 'Usar tema escuro'}
-      >
-        <span className="nav__icon">
-          <Icon name={isDark ? 'sun' : 'moon'} size={16} />
-        </span>
-        <span className="grow truncate">Aparência</span>
-        <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-          {isDark ? 'Escuro' : 'Claro'}
-        </span>
-      </button>
-    )
-  }
-
-  return (
-    <button
-      type="button"
-      className="sidebar__collapse-btn"
-      onClick={toggle}
-      title={isDark ? 'Usar tema claro' : 'Usar tema escuro'}
-    >
-      <Icon name={isDark ? 'sun' : 'moon'} size={14} />
-      {!collapsed && <span>{isDark ? 'Tema claro' : 'Tema escuro'}</span>}
-    </button>
+      <SidebarRail />
+    </ShadcnSidebar>
   )
 }
 

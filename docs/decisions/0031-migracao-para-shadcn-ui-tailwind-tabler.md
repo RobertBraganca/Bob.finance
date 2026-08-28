@@ -1,6 +1,6 @@
 # 0031. Migração da camada de UI para shadcn/ui + Tailwind CSS + Tabler Icons
 
-Status: aceita (em andamento — Fase 0 concluída)
+Status: aceita (em andamento — Fases 0-1 concluídas, Fase 2 concluída)
 
 ## Contexto
 Usuário pediu, explicitamente (28/08/2026): revisar todas as páginas e
@@ -88,6 +88,48 @@ fontes/ícones idênticos ao anterior, testado nos dois temas). Fases 1+
 continuam em sessões seguintes — plano completo com a ordem e os
 critérios de cada fase está registrado em `.claude/plans/
 crystalline-drifting-key.md` (aprovado nesta mesma sessão).
+
+### Fase 1: primitivos base
+`card dialog select input tabs tooltip badge skeleton popover` instalados
+via `shadcn add`. Ícones `lucide-react` que vieram por padrão em `select`
+e `dialog` foram trocados por Tabler (mesmo tratamento da Fase 0); a
+dependência `lucide-react` foi removida do `package.json` — nada no
+projeto a referencia. `TooltipProvider` adicionado na raiz (`main.tsx`),
+exigido pelo componente `Tooltip`.
+
+### Fase 2: Sidebar
+`Shell.tsx` reescrito em cima de `SidebarProvider`/`Sidebar`/
+`SidebarHeader`/`SidebarContent`/`SidebarGroup`/`SidebarMenu*`/
+`SidebarFooter`/`SidebarRail` (shadcn `sidebar` + suas dependências
+`sheet`, `separator`, `use-mobile`). Mesma navegação (`NAV`→
+`NAV_SECTIONS`, agora agrupada por seção em vez de marcadores de grupo
+soltos; `SETTINGS_NAV` idêntico) e mesmas rotas — nenhuma URL mudou.
+
+Ganhos automáticos do componente shadcn, sem código extra:
+- **Transição suave** ao recolher/expandir (`collapsible="icon"`) —
+  o que a barra antiga não tinha (troca abrupta de uma CSS var).
+- **Menu mobile vira um drawer de verdade** (`Sheet`), substituindo o
+  dropdown vertical absoluto que a barra antiga desenhava à mão.
+- Estado de expandido/recolhido passa a ser persistido via cookie
+  (padrão do componente) em vez da chave `localStorage`
+  `sidebar-collapsed` de antes — mesma ideia, mecanismo do shadcn.
+
+`ThemeToggle` (claro/escuro) virou um item fixo no rodapé da sidebar
+(sempre visível, com tooltip quando recolhida) em vez de existir em
+dois lugares (dentro de Configurações quando expandida, isolado quando
+recolhida) — um só lugar, sempre alcançável, em vez de duas
+implementações do mesmo controle.
+
+`App.tsx` envolve a árvore com `SidebarProvider`/`SidebarInset`; a
+antiga `<div className="app">` (grid CSS de duas colunas) sai de uso.
+Uma barra compacta (`md:hidden`) com o `SidebarTrigger` cobre a
+abertura do menu em telas pequenas.
+
+**CSS legado não removido nesta fase**: `.app`, `.sidebar*`, `.nav*`,
+`.brandmark*` em `base.css` ficaram sem nenhum ponto de uso após a
+reescrita, mas a remoção fica para a Fase 6 (limpeza final), como já
+prevista no plano — reduz o tamanho do diff desta fase e mantém
+reversibilidade caso a Sidebar nova precise de ajuste.
 
 ## Alternativas consideradas
 - **Radix UI puro, sem Tailwind**: descartada pelo usuário — perderia
