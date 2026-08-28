@@ -22,10 +22,10 @@ import {
   Slab,
   StatTile,
   StatusBadge,
-  TextInput,
   useToast,
   type MeterState,
 } from '../components/ui'
+import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
 import { SpendHeatmap } from '../components/charts/SpendHeatmap'
 
@@ -255,7 +255,12 @@ function QuickAdd({ today }: { today: string }) {
       >
         <div className="field" style={{ width: 150 }} ref={amountRef}>
           <label className="field__label">Valor</label>
-          <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+          <Input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0,00"
+            className="text-right tabular-nums"
+          />
         </div>
         <div className="field" style={{ minWidth: 200, flex: 1 }}>
           <label className="field__label">Categoria</label>
@@ -263,11 +268,11 @@ function QuickAdd({ today }: { today: string }) {
         </div>
         <div className="field" style={{ minWidth: 180, flex: 1 }}>
           <label className="field__label">Nota</label>
-          <TextInput value={note} onChange={setNote} placeholder="ex. almoço com cliente" />
+          <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ex. almoço com cliente" />
         </div>
         <div className="field" style={{ width: 150 }}>
           <label className="field__label">Data</label>
-          <TextInput value={day} onChange={setDay} type="date" max={today} />
+          <Input value={day} onChange={(e) => setDay(e.target.value)} type="date" max={today} />
         </div>
         <div className="field" style={{ minWidth: 160 }}>
           <label className="field__label">Conta</label>
