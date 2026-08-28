@@ -445,6 +445,57 @@ rotas uma por uma neste momento — o que existe é o que foi
 efetivamente exercitado (3 rodadas completas, todas as rotas GET,
 zero falha) mais os 5 pontos que travaram e foram corrigidos.
 
+### Frontend apontado para as Edge Functions (28/08/2026)
+Com `pricing` e `insights` publicados, `src/lib/api.ts` foi atualizado
+para chamar as Edge Functions reais quando `VITE_SUPABASE_URL` está
+configurada (build do Vercel), mantendo o proxy `/api` do Vite como
+fallback quando não está (dev local, ou rotas ainda não portadas).
+Verificado com um build de produção real rodado localmente
+(`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` reais) — Visão geral
+carregando dado real de ponta a ponta pela function. Variáveis
+adicionadas pelo usuário no Vercel (`VITE_SUPABASE_URL`,
+`VITE_SUPABASE_ANON_KEY`, escopo Production).
+
+### `ledger.ts` portado (28/08/2026) — contas, categorias, importação, lançamentos
+Depois do deploy no Vercel com as variáveis configuradas, o usuário
+reportou que "ainda estão faltando muitas informações" e "transações
+tá dando erro" — sintoma esperado: `ledger.ts` (contas, perfis de
+importação CSV, categorias/regras/memória aprendida, lançamentos) era
+o único arquivo de rota que faltava para as telas que dependem de
+conta/categoria/lançamento, e ainda não tinha function nenhuma.
+
+Portado para `supabase/functions/ledger/index.ts` (Hono), mesmo padrão
+dos dois anteriores — prefixo novo `/ledger` (rotas do Fastify sem
+prefixo próprio, mesma situação de `insights.ts`). Fechamento novo
+copiado para `_shared/`: `core/money.ts`, `csv/{detect,parse,profile}.ts`
+(o pipeline de detecção/parse de CSV, usa `papaparse` — adicionado ao
+import map do Deno), `services/categories.ts`, `services/imports.ts`.
+Único ajuste de conteúdo além da extensão `.ts`: `csv/profile.ts` usa
+`Buffer.toString('utf8')` num fallback e a rota usa `Buffer.from(...,
+'base64')` para decodificar o upload — Node expõe `Buffer` como global
+implícito, Deno não, então ambos passaram a importar de `node:buffer`
+explicitamente (built-in do Deno, sem entrada no import map).
+
+`src/lib/api.ts` ganhou uma lista explícita de prefixos
+(`LEDGER_PREFIXES`: `/accounts`, `/profiles`, `/imports`, `/categories`,
+`/rules`, `/transactions`) que roteiam para a function `ledger` — tudo
+que não é `/pricing` nem um desses prefixos cai em `insights` por
+padrão.
+
+**Verificado ao vivo**: todas as rotas GET (`/accounts`, `/categories`,
+`/rules`, `/profiles`, `/imports`, `/transactions`) em 3 rodadas, zero
+falha; escrita testada com um ciclo completo de criar/editar/apagar
+categoria de teste, sem deixar resíduo. No frontend, `/lancamentos`
+carregado do zero (aba nova, sem cache) contra o build local com as
+Edge Functions reais: lista de lançamentos, totais do período e "a
+pagar" todos com dado real e correto, console sem erro.
+
+**Ainda não portado**: `backups.ts`, `simulate.ts` — únicos dois
+arquivos de rota restantes. `imports.ts` (upload de CSV, staging,
+commit) está portado mas não teve o fluxo de upload/commit exercitado
+ao vivo nesta rodada (só as leituras) — vale um teste dedicado antes de
+confiar na tela de Importação em produção.
+
 ## Consequências
 - Este ADR não implementa nada sozinho — é o registro da decisão e do
   plano faseado. Cada fase acima vira trabalho próprio, com sua própria

@@ -3,14 +3,17 @@
  *
  * Local dev (no VITE_SUPABASE_URL set): Vite proxies /api to the Fastify
  * server (vite.config.ts) — unchanged, still needed for routes not yet
- * ported to an Edge Function (ledger, backups, simulate).
+ * ported to an Edge Function (backups, simulate).
  *
  * Deployed build (VITE_SUPABASE_URL set, e.g. on Vercel): there is no
  * Fastify server to proxy to, so requests go straight to the Supabase
  * Edge Functions (decisions/0026). Each Fastify route file became its own
- * function, named after the file; `pricing.ts`'s routes already had their
- * own `/pricing/...` prefix, but `insights.ts`'s didn't, so those gained
- * an `/insights` prefix here that has no Fastify-side equivalent.
+ * function, named after the file. `pricing.ts`'s routes already had their
+ * own `/pricing/...` prefix in Fastify, so that one carries over as-is;
+ * `insights.ts` and `ledger.ts` didn't have one, so those two gained a
+ * matching `/insights` or `/ledger` prefix here that has no Fastify-side
+ * equivalent — LEDGER_PREFIXES lists exactly the path prefixes that moved
+ * to `ledger.ts`, everything else not `/pricing` falls through to `insights`.
  */
 
 export class ApiError extends Error {
@@ -26,10 +29,19 @@ export class ApiError extends Error {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 
+const LEDGER_PREFIXES = ['/accounts', '/profiles', '/imports', '/categories', '/rules', '/transactions']
+
+function functionFor(path: string): 'pricing' | 'ledger' | 'insights' {
+  if (path === '/pricing' || path.startsWith('/pricing/')) return 'pricing'
+  if (LEDGER_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}?`)))
+    return 'ledger'
+  return 'insights'
+}
+
 function resolveUrl(path: string): string {
   if (!SUPABASE_URL) return `/api${path}`
-  const fn = path.startsWith('/pricing/') || path === '/pricing' ? 'pricing' : 'insights'
-  return fn === 'pricing' ? `${SUPABASE_URL}/functions/v1${path}` : `${SUPABASE_URL}/functions/v1/insights${path}`
+  const fn = functionFor(path)
+  return fn === 'pricing' ? `${SUPABASE_URL}/functions/v1${path}` : `${SUPABASE_URL}/functions/v1/${fn}${path}`
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

@@ -1,0 +1,10 @@
+{
+  "imports": {
+    "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
+    "hono": "npm:hono@^4",
+    "drizzle-orm": "npm:drizzle-orm@^0.45.2",
+    "postgres": "npm:postgres@^3.4.9",
+    "zod": "npm:zod@^4.4.3",
+    "papaparse": "npm:papaparse@^5.6.0"
+  }
+}
