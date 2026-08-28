@@ -122,27 +122,19 @@ export function rampStep(theme: ChartTheme, value: number, max: number): string 
 }
 
 /**
- * Intensity ramp for a magnitude that IS a risk/attention signal (e.g. how
- * much was spent in a day), not a neutral "more data" quantity — the collision
- * rule in the colour formula: a series that *means* good/bad wears the fixed
- * status tokens (`theme.status`), never the brand-hue sequential ramp. Three
- * steps only (skips `serious`) to match the everyday reading: green = ok,
- * yellow = attention, red = risk.
+ * Calendar-heatmap steps (e.g. spend per day): a day with no spend is
+ * `theme.neutral`, flat and unambiguous — never the palest blue, which in a
+ * grid this dense would read as "a little" instead of "none". Every day
+ * that DID spend gets `rampStep`'s brand-blue ramp: this is a neutral
+ * "more data" quantity (see `rampStep`'s own note), not a risk signal, so
+ * it never borrows the status (green/yellow/red) tokens.
  */
-export function intensityStep(theme: ChartTheme, value: number, max: number): string {
-  if (value <= 0 || max <= 0) return theme.neutral
-  const ratio = value / max
-  if (ratio <= 1 / 3) return theme.status.good
-  if (ratio <= 2 / 3) return theme.status.warning
-  return theme.status.critical
+export function heatmapStep(theme: ChartTheme, value: number, max: number): string {
+  return value <= 0 || max <= 0 ? theme.neutral : rampStep(theme, value, max)
 }
 
-/** The 3 fixed steps `intensityStep` buckets onto, low -> high, for a legend. */
-export const intensityScale = (theme: ChartTheme): readonly string[] => [
-  theme.status.good,
-  theme.status.warning,
-  theme.status.critical,
-]
+/** `heatmapStep`'s fixed legend, low -> high: neutral, then the same ramp steps `rampStep` can actually land on. */
+export const heatmapScale = (theme: ChartTheme): readonly string[] => [theme.neutral, ...theme.sequential.slice(1)]
 
 /* ---- Fixed mark specs, applied to every chart -------------------- */
 export const MARK = {

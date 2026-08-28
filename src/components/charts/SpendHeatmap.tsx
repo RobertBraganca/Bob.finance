@@ -1,24 +1,24 @@
-import { ResponsiveContainer, Tooltip, Treemap } from 'recharts'
-import type { TreemapNode } from 'recharts/types/chart/Treemap'
-import { money, date as fmtDate } from '../../lib/format'
-import { intensityScale, intensityStep, themeFor, type ChartTheme, type Surface } from '../../lib/chartTheme'
+import { money, date as fmtDate, weekdayLabel, weekdayOf } from '../../lib/format'
+import { heatmapScale, heatmapStep, themeFor, type Surface } from '../../lib/chartTheme'
 import { useEffectiveSurface } from '../../lib/theme'
-import { ChartFrame, makeTooltip } from './frame'
+import { ChartFrame } from './frame'
 
 export type DayPoint = { day: string; expenseCents: number; transactionCount: number }
 
-type TreemapDatum = { name: string; value: number; day: string; transactionCount: number }
+type Cell = DayPoint | null
 
 /**
- * Magnitude by AREA, not just colour — a treemap instead of the calendar
- * grid this replaced. A day twice as expensive draws a rectangle twice as
- * big, which reads faster than two shades of the same blue, especially for
- * the small, frequent amounts most days actually have. The trade-off is
- * explicit: this drops the calendar's day-of-week position, which is why
- * the day-of-month still labels every cell big enough to hold it, and the
- * table view (same as before) is the position-preserving fallback.
- * Zero-gasto days carry no area and are left out, same as the table
- * already did.
+ * A calendar grid, one square per day of the month — dom-sáb across, one
+ * row per week, exactly the shape a physical calendar has. A day with no
+ * spend is flat neutral gray, never confusable with "a little"; every day
+ * that DID spend sits on the same blue sequential ramp the rest of the app
+ * uses for a neutral "more data" quantity (`heatmapStep`, `lib/chartTheme`).
+ *
+ * Replaces an area-sized treemap (rectangles scaled to the day's amount)
+ * that traded away the calendar's day-of-week position for a magnitude
+ * that read as "confusing, no contrast" in practice — a uniform grid of
+ * colour is the more legible trade for this data (a handful of distinct
+ * amounts, not a continuous range worth spending pixels on).
  */
 export function SpendHeatmap({
   days,
@@ -33,30 +33,22 @@ export function SpendHeatmap({
 }) {
   const theme = themeFor(useEffectiveSurface(surface))
 
-  const nonZero = days.filter((d) => d.expenseCents > 0)
-  const max = Math.max(0, ...nonZero.map((d) => d.expenseCents))
-  const hasData = max > 0
+  const max = Math.max(0, ...days.map((d) => d.expenseCents))
+  const hasData = days.length > 0
 
-  const data: TreemapDatum[] = nonZero.map((d) => ({
-    name: fmtDate(d.day),
-    value: d.expenseCents,
-    day: d.day,
-    transactionCount: d.transactionCount,
-  }))
-
-  const Tip = makeTooltip<TreemapDatum>((point) => ({
-    title: point.name,
-    rows: [
-      { label: 'Gasto', value: money(point.value), color: intensityStep(theme, point.value, max) },
-      { label: 'Lançamentos', value: String(point.transactionCount) },
-    ],
-  }))
+  // Pad to a whole number of weeks: blank cells before day 1 so the first
+  // real day lands in its true weekday column, and after the last day so
+  // every row is a full 7-wide week (an incomplete last row would read as
+  // missing data instead of "the month just ended here").
+  const leadingBlanks = days.length > 0 ? weekdayOf(days[0]!.day) : 0
+  const cells: Cell[] = [...Array(leadingBlanks).fill(null), ...days]
+  while (cells.length % 7 !== 0) cells.push(null)
 
   return (
     <ChartFrame
       isEmpty={!hasData}
       emptyTitle="Nenhum gasto registrado"
-      emptyBody="Cada retângulo é um dia, do tamanho do quanto foi gasto. Comece com um lançamento rápido ou importe um extrato."
+      emptyBody="Cada quadrado é um dia, mais escuro quanto mais foi gasto. Comece com um lançamento rápido ou importe um extrato."
       table={{
         caption: 'Gasto por dia',
         rows: days.filter((d) => d.expenseCents > 0),
@@ -67,112 +59,40 @@ export function SpendHeatmap({
         ],
       }}
     >
-      <ResponsiveContainer width="100%" height={280}>
-        <Treemap
-          data={data}
-          dataKey="value"
-          nameKey="name"
-          aspectRatio={4 / 3}
-          isAnimationActive={false}
-          stroke={theme.surface}
-          content={(props) => (
-            <DayCell
-              {...(props as unknown as TreemapNode & TreemapDatum)}
-              theme={theme}
-              max={max}
-              isToday={(props as unknown as TreemapDatum).day === today}
-              onSelectDay={onSelectDay}
+      <div className="heatmap__grid">
+        {Array.from({ length: 7 }, (_, i) => (
+          <span key={i} className="heatmap__weekday">
+            {weekdayLabel(i)}
+          </span>
+        ))}
+        {cells.map((cell, index) => {
+          if (!cell) return <span key={index} className="heatmap__cell heatmap__cell--empty" aria-hidden="true" />
+          const isToday = cell.day === today
+          return (
+            <button
+              key={cell.day}
+              type="button"
+              className="heatmap__cell"
+              style={{
+                background: heatmapStep(theme, cell.expenseCents, max),
+                cursor: onSelectDay ? 'pointer' : 'default',
+                boxShadow: isToday ? `inset 0 0 0 2px ${theme.primary}` : undefined,
+              }}
+              title={`${fmtDate(cell.day)}: ${money(cell.expenseCents)}, ${cell.transactionCount} lançamento(s)`}
+              aria-label={`${fmtDate(cell.day)}: ${money(cell.expenseCents)}, ${cell.transactionCount} lançamento(s)`}
+              onClick={onSelectDay ? () => onSelectDay(cell.day) : undefined}
             />
-          )}
-        >
-          <Tooltip content={<Tip />} />
-        </Treemap>
-      </ResponsiveContainer>
+          )
+        })}
+      </div>
 
       <div className="heatmap__scale">
         <span>menos</span>
-        {intensityScale(theme).map((step, index) => (
+        {heatmapScale(theme).map((step, index) => (
           <span key={index} className="heatmap__scale-step" style={{ background: step }} />
         ))}
         <span>mais</span>
       </div>
     </ChartFrame>
-  )
-}
-
-/** One rectangle. Recharts hands raw x/y/width/height in the container's own SVG units, plus whatever fields `data` carried. */
-function DayCell(
-  props: TreemapNode &
-    TreemapDatum & {
-      theme: ChartTheme
-      max: number
-      isToday: boolean
-      onSelectDay?: (day: string) => void
-    },
-) {
-  const { x, y, width, height, value, day, transactionCount, theme, max, isToday, onSelectDay } = props
-  // Recharts calls `content` for every node in the computed tree, starting
-  // with the synthetic root that wraps the whole chart area — it has none
-  // of `data`'s own fields (no `day`), only x/y/width/height. Only the
-  // leaves (one per day) are real content to draw.
-  if (width <= 0 || height <= 0 || !day) return null
-
-  const fill = intensityStep(theme, value, max)
-  const dayNumber = day.slice(8, 10).replace(/^0/, '')
-  const canLabelDay = width >= 20 && height >= 16
-  const canLabelValue = width >= 52 && height >= 34
-
-  return (
-    <g
-      onClick={() => onSelectDay?.(day)}
-      style={{ cursor: onSelectDay ? 'pointer' : 'default' }}
-      aria-label={`${fmtDate(day)}: ${money(value)}, ${transactionCount} lançamento(s)`}
-    >
-      <rect
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-        fill={fill}
-        stroke={theme.surface}
-        strokeWidth={2}
-        rx={3}
-      />
-      {isToday && (
-        <rect
-          x={x + 1.5}
-          y={y + 1.5}
-          width={Math.max(0, width - 3)}
-          height={Math.max(0, height - 3)}
-          fill="none"
-          stroke={theme.primary}
-          strokeWidth={2}
-          rx={2}
-        />
-      )}
-      {canLabelDay && (
-        <text
-          x={x + 6}
-          y={y + 16}
-          fontSize={11}
-          fontWeight={600}
-          fill={theme.axisText}
-          style={{ pointerEvents: 'none' }}
-        >
-          {dayNumber}
-        </text>
-      )}
-      {canLabelValue && (
-        <text
-          x={x + 6}
-          y={y + height - 8}
-          fontSize={11}
-          fill={theme.axisText}
-          style={{ pointerEvents: 'none' }}
-        >
-          {money(value)}
-        </text>
-      )}
-    </g>
   )
 }

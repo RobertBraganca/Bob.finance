@@ -143,7 +143,7 @@ export function DailyPage() {
             </HeroFigure>
           </Slab>
 
-          <Slab span={8} title="Intensidade por dia" subtitle="Cada retângulo é um dia; maior e mais escuro = mais gasto">
+          <Slab span={8} title="Intensidade por dia" subtitle="Cada quadrado é um dia; quanto mais escuro, mais foi gasto">
             <SpendHeatmap days={daily.data?.days ?? []} surface="paper" today={today} />
           </Slab>
 
