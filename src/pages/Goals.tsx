@@ -21,16 +21,16 @@ import {
   HeroFigure,
   Icon,
   Meter,
-  Modal,
   Select,
   SkeletonLines,
   Slab,
   StatTile,
   StatusBadge,
-  TextInput,
   useToast,
   type MeterState,
 } from '../components/ui'
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
+import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
 
 type CapProgress = {
@@ -443,42 +443,55 @@ function GoalEditor({
   })
 
   return (
-    <Modal
-      title={`Metas de ${periodLong(period)}`}
-      onClose={onClose}
-      footer={
-        <>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[560px]">
+        <DialogTitle>{`Metas de ${periodLong(period)}`}</DialogTitle>
+        <div className="stack">
+          <div className="field">
+            <label className="field__label">Meta de receita (R$)</label>
+            <Input
+              value={income}
+              onChange={(e) => setIncome(e.target.value)}
+              placeholder="ex. 15.000,00"
+              className="text-right tabular-nums"
+            />
+          </div>
+          <div className="field">
+            <label className="field__label">Teto de gastos (R$)</label>
+            <Input
+              value={cap}
+              onChange={(e) => setCap(e.target.value)}
+              placeholder="ex. 9.500,00"
+              className="text-right tabular-nums"
+            />
+          </div>
+          <div className="field">
+            <label className="field__label">Taxa de poupança-alvo (%)</label>
+            <Input
+              value={savings}
+              onChange={(e) => setSavings(e.target.value)}
+              placeholder="ex. 20"
+              className="text-right tabular-nums"
+            />
+            <span className="field__hint">
+              Percentual da receita que não é consumido. Aportes em investimentos contam como poupado.
+            </span>
+          </div>
+          <p className="chart__note">
+            Metas são guardadas por mês, então mudar o alvo de agosto não reescreve o histórico de
+            julho, e é isso que faz a sequência de acertos significar algo.
+          </p>
+        </div>
+        <DialogFooter>
           <Button icon="refresh" onClick={() => copy.mutate()} disabled={copy.isPending}>
             Copiar do mês anterior
           </Button>
           <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
             Salvar
           </Button>
-        </>
-      }
-    >
-      <div className="stack">
-        <div className="field">
-          <label className="field__label">Meta de receita (R$)</label>
-          <TextInput value={income} onChange={setIncome} placeholder="ex. 15.000,00" numeral />
-        </div>
-        <div className="field">
-          <label className="field__label">Teto de gastos (R$)</label>
-          <TextInput value={cap} onChange={setCap} placeholder="ex. 9.500,00" numeral />
-        </div>
-        <div className="field">
-          <label className="field__label">Taxa de poupança-alvo (%)</label>
-          <TextInput value={savings} onChange={setSavings} placeholder="ex. 20" numeral />
-          <span className="field__hint">
-            Percentual da receita que não é consumido. Aportes em investimentos contam como poupado.
-          </span>
-        </div>
-        <p className="chart__note">
-          Metas são guardadas por mês, então mudar o alvo de agosto não reescreve o histórico de
-          julho, e é isso que faz a sequência de acertos significar algo.
-        </p>
-      </div>
-    </Modal>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -529,8 +542,10 @@ function CapEditor({
   const available = (suggestions.data?.suggestions ?? []).filter((s) => !existing.has(s.categoryId))
 
   return (
-    <Modal title={`Tetos por categoria de ${periodLong(period)}`} onClose={onClose} wide>
-      <div className="stack stack--loose">
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[880px]">
+        <DialogTitle>{`Tetos por categoria de ${periodLong(period)}`}</DialogTitle>
+        <div className="stack stack--loose">
         {caps.length > 0 && (
           <div className="stack stack--tight">
             <span className="label">Tetos definidos</span>
@@ -575,7 +590,12 @@ function CapEditor({
             </div>
             <div className="field" style={{ width: 160 }}>
               <label className="field__label">Teto (R$)</label>
-              <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+              <Input
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0,00"
+                className="text-right tabular-nums"
+              />
             </div>
             <Button
               variant="primary"
@@ -616,6 +636,7 @@ function CapEditor({
           </div>
         )}
       </div>
-    </Modal>
+      </DialogContent>
+    </Dialog>
   )
 }
