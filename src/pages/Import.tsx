@@ -10,12 +10,13 @@ import {
   CategorySelect,
   EmptyState,
   Icon,
-  Modal,
   Select,
   SkeletonLines,
   StatTile,
   useToast,
 } from '../components/ui'
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { PageHeader } from '../components/shell/Shell'
 
 type Detection = {
@@ -502,26 +503,9 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
   const summary = batch.data?.summary
 
   return (
-    <Modal
-      wide
-      title={`Revisar: ${batch.data?.batch.filename ?? ''}`}
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="danger" icon="trash" onClick={() => discard.mutate()} disabled={discard.isPending}>
-            Descartar lote
-          </Button>
-          <Button
-            variant="primary"
-            icon="check"
-            onClick={() => commit.mutate()}
-            disabled={commit.isPending || (summary?.includable ?? 0) === 0}
-          >
-            Gravar {summary?.includable ?? 0} lançamentos
-          </Button>
-        </>
-      }
-    >
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[880px]">
+        <DialogTitle>{`Revisar: ${batch.data?.batch.filename ?? ''}`}</DialogTitle>
       {!batch.data ? (
         <SkeletonLines lines={5} />
       ) : (
@@ -542,25 +526,13 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
           </div>
 
           <div className="row row--between row--wrap">
-            <div className="segmented" role="group" aria-label="Filtrar linhas">
-              {(
-                [
-                  ['all', `Todas (${rows.length})`],
-                  ['problems', `Atenção (${summary!.duplicates + summary!.errors})`],
-                  ['uncategorized', `Sem categoria (${summary!.uncategorized})`],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className="segmented__btn"
-                  aria-pressed={filter === value}
-                  onClick={() => setFilter(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <Tabs value={filter} onValueChange={(value) => setFilter(value as typeof filter)}>
+              <TabsList aria-label="Filtrar linhas">
+                <TabsTrigger value="all">{`Todas (${rows.length})`}</TabsTrigger>
+                <TabsTrigger value="problems">{`Atenção (${summary!.duplicates + summary!.errors})`}</TabsTrigger>
+                <TabsTrigger value="uncategorized">{`Sem categoria (${summary!.uncategorized})`}</TabsTrigger>
+              </TabsList>
+            </Tabs>
             <div className="row">
               <Button
                 size="sm"
@@ -668,6 +640,20 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
           </p>
         </>
       )}
-    </Modal>
+        <DialogFooter>
+          <Button variant="danger" icon="trash" onClick={() => discard.mutate()} disabled={discard.isPending}>
+            Descartar lote
+          </Button>
+          <Button
+            variant="primary"
+            icon="check"
+            onClick={() => commit.mutate()}
+            disabled={commit.isPending || (summary?.includable ?? 0) === 0}
+          >
+            Gravar {summary?.includable ?? 0} lançamentos
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
