@@ -103,7 +103,7 @@ export async function pricingRoutes(app: FastifyInstance) {
   app.post('/pricing/simulate', async (req, reply) => {
     const body = simulateBody.parse(req.body)
     try {
-      return pricing.simulate(body)
+      return await pricing.simulate(body)
     } catch (error) {
       // "No basis to calculate" is a state of the user's configuration, not
       // a server fault — same treatment the rest of the app gives a division
@@ -118,7 +118,7 @@ export async function pricingRoutes(app: FastifyInstance) {
   app.post('/pricing/quotes', async (req, reply) => {
     const body = simulateBody.extend({ clientLabel: z.string().min(1).max(120) }).parse(req.body)
     try {
-      return pricing.saveQuote(body)
+      return await pricing.saveQuote(body)
     } catch (error) {
       if (error instanceof pricing.PricingError) return reply.code(422).send({ error: error.message })
       throw error
@@ -174,7 +174,7 @@ export async function pricingRoutes(app: FastifyInstance) {
       })
       .parse(req.body)
     try {
-      return pricing.approveQuote(id, body)
+      return await pricing.approveQuote(id, body)
     } catch (error) {
       if (error instanceof pricing.PricingError) return reply.code(422).send({ error: error.message })
       throw error

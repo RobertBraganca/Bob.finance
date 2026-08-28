@@ -35,7 +35,7 @@ export async function simulateRoutes(app: FastifyInstance) {
       })
       .parse(req.body)
     try {
-      return simulator.simulateDebtPayoff(body)
+      return await simulator.simulateDebtPayoff(body)
     } catch (error) {
       // Dívida inexistente ou já quitada é estado do dado, não falha de
       // servidor: mesma resposta que o resto do app dá para "não calcula".
