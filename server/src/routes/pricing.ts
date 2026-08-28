@@ -32,7 +32,7 @@ export async function pricingRoutes(app: FastifyInstance) {
    * Settings
    * ---------------------------------------------------------------- */
   app.get('/pricing/settings', async () => ({
-    settings: pricing.getSettings(),
+    settings: await pricing.getSettings(),
     defaults: pricing.DEFAULT_PRICING_SETTINGS,
   }))
 
@@ -43,7 +43,7 @@ export async function pricingRoutes(app: FastifyInstance) {
         billablePercentageBps: z.number().int().min(1).max(10_000).optional(),
       })
       .parse(req.body)
-    return { settings: pricing.updateSettings(body), defaults: pricing.DEFAULT_PRICING_SETTINGS }
+    return { settings: await pricing.updateSettings(body), defaults: pricing.DEFAULT_PRICING_SETTINGS }
   })
 
   /* ---------------------------------------------------------------- *
@@ -51,9 +51,13 @@ export async function pricingRoutes(app: FastifyInstance) {
    * ---------------------------------------------------------------- */
   app.get('/pricing/multipliers', async (req) => {
     const query = z.object({ dimension: z.enum(pricing.PRICING_DIMENSIONS).optional() }).parse(req.query)
+    const [multipliers, byDimension] = await Promise.all([
+      pricing.listMultipliers(query.dimension),
+      pricing.multipliersByDimension(),
+    ])
     return {
-      multipliers: pricing.listMultipliers(query.dimension),
-      byDimension: pricing.multipliersByDimension(),
+      multipliers,
+      byDimension,
       dimensions: pricing.PRICING_DIMENSIONS.map((value) => ({
         value,
         label: pricing.DIMENSION_LABELS[value],
@@ -109,7 +113,7 @@ export async function pricingRoutes(app: FastifyInstance) {
     }
   })
 
-  app.get('/pricing/quotes', async () => ({ quotes: pricing.listQuotes() }))
+  app.get('/pricing/quotes', async () => ({ quotes: await pricing.listQuotes() }))
 
   app.post('/pricing/quotes', async (req, reply) => {
     const body = simulateBody.extend({ clientLabel: z.string().min(1).max(120) }).parse(req.body)
@@ -123,7 +127,7 @@ export async function pricingRoutes(app: FastifyInstance) {
 
   app.get('/pricing/quotes/:id', async (req, reply) => {
     const { id } = idParam.parse(req.params)
-    const quote = pricing.getQuote(id)
+    const quote = await pricing.getQuote(id)
     if (!quote) return reply.code(404).send({ error: 'cotação não encontrada' })
     return quote
   })
@@ -139,7 +143,7 @@ export async function pricingRoutes(app: FastifyInstance) {
       .extend({ clientLabel: z.string().min(1).max(120).optional() })
       .parse(req.body)
     try {
-      const quote = pricing.updateQuote(id, body)
+      const quote = await pricing.updateQuote(id, body)
       if (!quote) return reply.code(404).send({ error: 'cotação não encontrada' })
       return quote
     } catch (error) {
@@ -156,7 +160,7 @@ export async function pricingRoutes(app: FastifyInstance) {
   app.patch('/pricing/quotes/:id/status', async (req, reply) => {
     const { id } = idParam.parse(req.params)
     const body = z.object({ status: z.enum(pricing.QUOTE_STATUSES) }).parse(req.body)
-    const quote = pricing.setQuoteStatus(id, body.status)
+    const quote = await pricing.setQuoteStatus(id, body.status)
     if (!quote) return reply.code(404).send({ error: 'cotação não encontrada' })
     return quote
   })

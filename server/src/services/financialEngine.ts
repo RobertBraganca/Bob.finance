@@ -67,8 +67,8 @@ export const DEFAULT_BREAK_EVEN_PARAMS: BreakEvenParams = {
 /** Where a parameter's value came from, reported alongside the result. */
 export type ParamOrigin = 'default' | 'configurado' | 'requisição'
 
-export function getSettings(): BreakEvenParams {
-  const row = db.select().from(financialEngineSettings).where(eq(financialEngineSettings.id, 1)).get()
+export async function getSettings(): Promise<BreakEvenParams> {
+  const row = (await db.select().from(financialEngineSettings).where(eq(financialEngineSettings.id, 1)))[0]
   if (!row) return { ...DEFAULT_BREAK_EVEN_PARAMS }
   return {
     pjAccountId: row.pjAccountId,
@@ -80,12 +80,12 @@ export function getSettings(): BreakEvenParams {
   }
 }
 
-export function setSettings(patch: Partial<BreakEvenParams>): BreakEvenParams {
-  const existing = db.select().from(financialEngineSettings).where(eq(financialEngineSettings.id, 1)).get()
+export async function setSettings(patch: Partial<BreakEvenParams>): Promise<BreakEvenParams> {
+  const existing = (await db.select().from(financialEngineSettings).where(eq(financialEngineSettings.id, 1)))[0]
   if (existing) {
-    db.update(financialEngineSettings).set(patch).where(eq(financialEngineSettings.id, 1)).run()
+    await db.update(financialEngineSettings).set(patch).where(eq(financialEngineSettings.id, 1))
   } else {
-    db.insert(financialEngineSettings).values({ id: 1, ...DEFAULT_BREAK_EVEN_PARAMS, ...patch }).run()
+    await db.insert(financialEngineSettings).values({ id: 1, ...DEFAULT_BREAK_EVEN_PARAMS, ...patch })
   }
   return getSettings()
 }
@@ -96,11 +96,11 @@ export function setSettings(patch: Partial<BreakEvenParams>): BreakEvenParams {
  * `default`: what matters downstream is that nobody had to make a choice for
  * it, not which row it was read from.
  */
-function resolveParams(overrides: Partial<BreakEvenParams>): {
+async function resolveParams(overrides: Partial<BreakEvenParams>): Promise<{
   params: BreakEvenParams
   origins: Record<keyof BreakEvenParams, ParamOrigin>
-} {
-  const stored = getSettings()
+}> {
+  const stored = await getSettings()
   const keys = Object.keys(DEFAULT_BREAK_EVEN_PARAMS) as Array<keyof BreakEvenParams>
 
   /**
@@ -134,39 +134,39 @@ function resolveParams(overrides: Partial<BreakEvenParams>): {
  * ------------------------------------------------------------------ */
 
 /** Reserve contributions: buy trades on whichever assets the user flagged as reserve. */
-function reserveContributedCents(from: string, to: string): number {
-  const row = db.get<{ total: number }>(sql`
+async function reserveContributedCents(from: string, to: string): Promise<number> {
+  const rows = await db.execute<{ total: number }>(sql`
     select coalesce(sum(round(t.quantity * t.unit_price_cents)), 0) as total
     from asset_trades t
     join assets a on a.id = t.asset_id
     where t.kind = 'buy'
-      and a.counts_toward_reserve = 1
+      and a.counts_toward_reserve = true
       and t.traded_on between ${from} and ${to}
   `)
-  return row?.total ?? 0
+  return rows[0]?.total ?? 0
 }
 
 /** Investment contributions: buy trades on everything that is NOT the reserve. */
-function investmentContributedCents(from: string, to: string): number {
-  const row = db.get<{ total: number }>(sql`
+async function investmentContributedCents(from: string, to: string): Promise<number> {
+  const rows = await db.execute<{ total: number }>(sql`
     select coalesce(sum(round(t.quantity * t.unit_price_cents) + t.fees_cents), 0) as total
     from asset_trades t
     join assets a on a.id = t.asset_id
     where t.kind = 'buy'
-      and a.counts_toward_reserve = 0
+      and a.counts_toward_reserve = false
       and t.traded_on between ${from} and ${to}
   `)
-  return row?.total ?? 0
+  return rows[0]?.total ?? 0
 }
 
 /** Debt paid inside the period, from the same payment ledger `specs/debt` counts parcelas with. */
-function debtPaidCents(from: string, to: string): number {
-  const row = db.get<{ total: number }>(sql`
+async function debtPaidCents(from: string, to: string): Promise<number> {
+  const rows = await db.execute<{ total: number }>(sql`
     select coalesce(sum(amount_cents), 0) as total
     from debt_payments
     where kind = 'payment' and paid_on between ${from} and ${to}
   `)
-  return row?.total ?? 0
+  return rows[0]?.total ?? 0
 }
 
 /* ------------------------------------------------------------------ *
@@ -206,42 +206,43 @@ export type AvailableForAllocation = {
 /** Ajuste hipotético do simulador. Ausente em toda chamada de produção. */
 export type AvailableOverrides = { consolidatedBalanceDeltaCents?: number }
 
-export function availableForAllocation(
+export async function availableForAllocation(
   period: string,
   overrides: AvailableOverrides = {},
-): AvailableForAllocation {
+): Promise<AvailableForAllocation> {
   const { start, end } = periodBounds(period)
 
   const balanceDeltaCents = overrides.consolidatedBalanceDeltaCents ?? 0
-  const balances = accountBalances()
+  const [balances, pending, cards, reserve, reserveRealizedCents, investmentRealizedCents, debtRealizedCents, investmentGoals, debt] =
+    await Promise.all([
+      accountBalances(),
+      // Pending expenses, bounded by the period's end. `listPending` deliberately
+      // keeps overdue rows in the list (see specs/cash-flow-reconciliation), and
+      // that is the right behaviour here too: something still owed from last
+      // month is still money that is not free.
+      listPending('expense', { from: start, to: end }),
+      listCards(),
+      reserveStatus(),
+      reserveContributedCents(start, end),
+      investmentContributedCents(start, end),
+      debtPaidCents(start, end),
+      // `listGoals` already returns only the active ones.
+      listGoals(),
+      debtOverview({ period }),
+    ])
+
   // O delta entra ANTES das subtrações, porque o que a hipótese muda é
   // quanto existe em conta, não quanto está comprometido.
-  const consolidatedBalanceCents =
-    balances.reduce((sum, a) => sum + a.balanceCents, 0) + balanceDeltaCents
+  const consolidatedBalanceCents = balances.reduce((sum, a) => sum + a.balanceCents, 0) + balanceDeltaCents
 
-  // Pending expenses, bounded by the period's end. `listPending` deliberately
-  // keeps overdue rows in the list (see specs/cash-flow-reconciliation), and
-  // that is the right behaviour here too: something still owed from last
-  // month is still money that is not free.
-  const pending = listPending('expense', { from: start, to: end })
   const futureCommitmentsCents = pending.reduce((sum, p) => sum + Math.abs(p.amountCents), 0)
-
-  const cards = listCards()
   const provisionedCardBillCents = cards.reduce((sum, c) => sum + c.usedCents, 0)
-
-  const reserve = reserveStatus()
-  const reserveRealizedCents = reserveContributedCents(start, end)
-  const investmentRealizedCents = investmentContributedCents(start, end)
-  const debtRealizedCents = debtPaidCents(start, end)
   const alreadyAllocatedCents = reserveRealizedCents + investmentRealizedCents + debtRealizedCents
 
   const availableCents =
     consolidatedBalanceCents - futureCommitmentsCents - provisionedCardBillCents - alreadyAllocatedCents
 
-  // `listGoals` already returns only the active ones.
-  const investmentGoals = listGoals()
   const investmentTargetCents = investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0)
-  const debt = debtOverview({ period })
   const isCurrentPeriod = period === todayIso().slice(0, 7)
 
   const unorderedDestinations: Destination[] = [
@@ -376,11 +377,11 @@ export type BreakEven = {
  * overrides it, and `assumptions.origem` always says which of the two the
  * number came from.
  */
-function proLaboreFor(
+async function proLaboreFor(
   period: string,
   params: BreakEvenParams,
   origin: ParamOrigin,
-): { cents: number; origin: string } {
+): Promise<{ cents: number; origin: string }> {
   if (params.proLaboreCents !== null) {
     return {
       cents: params.proLaboreCents,
@@ -391,7 +392,7 @@ function proLaboreFor(
     return { cents: 0, origin: 'não derivável: contas PJ e PF não informadas' }
   }
   const { start, end } = periodBounds(period)
-  const flows = accountFlows({ from: start, to: end })
+  const flows = await accountFlows({ from: start, to: end })
   const cents = flows.edges
     .filter((e) => e.fromAccountId === params.pjAccountId && e.toAccountId === params.pfAccountId)
     .reduce((sum, e) => sum + e.amountCents, 0)
@@ -416,23 +417,24 @@ function proLaboreFor(
  * o que aconteceu foi o contrário: ela não entrou nesta conta. Ver
  * `specs/motor-financeiro`, "Ponto de equilíbrio mínimo e com metas".
  */
-export function breakEven(
+export async function breakEven(
   period: string,
   overrides: Partial<BreakEvenParams> = {},
   options: { includeGoals?: boolean } = {},
-): BreakEven {
+): Promise<BreakEven> {
   const includeGoals = options.includeGoals ?? true
-  const { params, origins } = resolveParams(
+  const { params, origins } = await resolveParams(
     includeGoals ? overrides : { ...overrides, reservePlannedCents: 0 },
   )
   const { start, end } = periodBounds(period)
 
-  const pjTotals = totals({ from: start, to: end, accountId: params.pjAccountId })
-  const proLabore = proLaboreFor(period, params, origins.proLaboreCents)
-  // `listGoals` already returns only the active ones.
-  const investmentGoals = listGoals()
+  const [pjTotals, investmentGoals, reserve] = await Promise.all([
+    totals({ from: start, to: end, accountId: params.pjAccountId }),
+    listGoals(),
+    reserveStatus(),
+  ])
+  const proLabore = await proLaboreFor(period, params, origins.proLaboreCents)
   const plannedInvestmentCents = investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0)
-  const reserve = reserveStatus()
 
   const lines: BreakEvenLine[] = [
     {

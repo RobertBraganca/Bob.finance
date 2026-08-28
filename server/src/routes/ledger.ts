@@ -16,7 +16,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
    * Accounts
    * ---------------------------------------------------------------- */
   app.get('/accounts', async () => ({
-    accounts: db.select().from(accounts).where(eq(accounts.archived, false)).all(),
+    accounts: await db.select().from(accounts).where(eq(accounts.archived, false)),
   }))
 
   app.post('/accounts', async (req) => {
@@ -28,7 +28,12 @@ export async function ledgerRoutes(app: FastifyInstance) {
         openingBalanceCents: z.number().int().default(0),
       })
       .parse(req.body)
-    return db.insert(accounts).values(body).returning().get()
+    return (
+      await db
+        .insert(accounts)
+        .values({ ...body, kind: body.kind as (typeof accounts.$inferInsert)['kind'] })
+        .returning()
+    )[0]!
   })
 
   app.patch('/accounts/:id', async (req) => {
@@ -43,7 +48,15 @@ export async function ledgerRoutes(app: FastifyInstance) {
       })
       .parse(req.body)
 
-    return db.update(accounts).set(body).where(eq(accounts.id, id)).returning().get() ?? null
+    return (
+      (
+        await db
+          .update(accounts)
+          .set({ ...body, kind: body.kind as (typeof accounts.$inferInsert)['kind'] | undefined })
+          .where(eq(accounts.id, id))
+          .returning()
+      )[0] ?? null
+    )
   })
 
   /**
@@ -56,52 +69,64 @@ export async function ledgerRoutes(app: FastifyInstance) {
     const { id } = idParam.parse(req.params)
 
     const used =
-      db.select({ n: sql<number>`count(*)` }).from(transactions).where(eq(transactions.accountId, id)).get()
+      (await db.select({ n: sql<number>`count(*)` }).from(transactions).where(eq(transactions.accountId, id)))[0]
         ?.n ?? 0
     const referencedByProfile =
-      db
-        .select({ n: sql<number>`count(*)` })
-        .from(parserProfiles)
-        .where(eq(parserProfiles.defaultAccountId, id))
-        .get()?.n ?? 0
+      (
+        await db
+          .select({ n: sql<number>`count(*)` })
+          .from(parserProfiles)
+          .where(eq(parserProfiles.defaultAccountId, id))
+      )[0]?.n ?? 0
 
     if (used > 0 || referencedByProfile > 0) {
-      db.update(accounts).set({ archived: true }).where(eq(accounts.id, id)).run()
+      await db.update(accounts).set({ archived: true }).where(eq(accounts.id, id))
       return { archived: true, deleted: false, affected: used }
     }
 
-    const account = db.select().from(accounts).where(eq(accounts.id, id)).get()
+    const account = (await db.select().from(accounts).where(eq(accounts.id, id)))[0]
     if (!account) return reply.code(404).send({ error: 'conta não encontrada' })
 
-    db.delete(accounts).where(eq(accounts.id, id)).run()
+    await db.delete(accounts).where(eq(accounts.id, id))
     return { archived: false, deleted: true, affected: 0 }
   })
 
   /* ---------------------------------------------------------------- *
    * Parser profiles — a bank dialect is a row, editable from the UI.
    * ---------------------------------------------------------------- */
-  app.get('/profiles', async () => ({ profiles: importsService.listProfiles() }))
+  app.get('/profiles', async () => ({ profiles: await importsService.listProfiles() }))
 
   app.post('/profiles', async (req, reply) => {
     const config = profileConfigSchema.parse(req.body)
     const problems = validateProfileShape(config)
     if (problems.length > 0) return reply.code(400).send({ error: 'perfil inválido', problems })
-    return db.insert(parserProfiles).values(config).returning().get()
+    return (
+      await db
+        .insert(parserProfiles)
+        .values(config as typeof parserProfiles.$inferInsert)
+        .returning()
+    )[0]!
   })
 
   app.patch('/profiles/:id', async (req, reply) => {
     const { id } = idParam.parse(req.params)
-    const current = importsService.getProfile(id)
+    const current = await importsService.getProfile(id)
     if (!current) return reply.code(404).send({ error: 'perfil não encontrado' })
     const merged = profileConfigSchema.parse({ ...current, ...(req.body as object) })
     const problems = validateProfileShape(merged)
     if (problems.length > 0) return reply.code(400).send({ error: 'perfil inválido', problems })
-    return db.update(parserProfiles).set(merged).where(eq(parserProfiles.id, id)).returning().get()
+    return (
+      await db
+        .update(parserProfiles)
+        .set(merged as typeof parserProfiles.$inferInsert)
+        .where(eq(parserProfiles.id, id))
+        .returning()
+    )[0]!
   })
 
   app.delete('/profiles/:id', async (req) => {
     const { id } = idParam.parse(req.params)
-    return { removed: db.delete(parserProfiles).where(eq(parserProfiles.id, id)).run().changes }
+    return { removed: (await db.delete(parserProfiles).where(eq(parserProfiles.id, id))).count }
   })
 
   /* ---------------------------------------------------------------- *
@@ -111,7 +136,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
     const body = z.object({ filename: z.string(), contentBase64: z.string() }).parse(req.body)
     const buffer = Buffer.from(body.contentBase64, 'base64')
     if (buffer.length === 0) return reply.code(400).send({ error: 'arquivo vazio' })
-    return { filename: body.filename, ...importsService.detect(buffer) }
+    return { filename: body.filename, ...(await importsService.detect(buffer)) }
   })
 
   app.post('/imports/stage', async (req, reply) => {
@@ -126,7 +151,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
     const buffer = Buffer.from(body.contentBase64, 'base64')
     if (buffer.length === 0) return reply.code(400).send({ error: 'arquivo vazio' })
     try {
-      return importsService.stageImport({
+      return await importsService.stageImport({
         buffer,
         filename: body.filename,
         profileId: body.profileId,
@@ -137,11 +162,11 @@ export async function ledgerRoutes(app: FastifyInstance) {
     }
   })
 
-  app.get('/imports', async () => ({ batches: importsService.listBatches() }))
+  app.get('/imports', async () => ({ batches: await importsService.listBatches() }))
 
   app.get('/imports/:id', async (req, reply) => {
     const { id } = idParam.parse(req.params)
-    const batch = importsService.getBatch(id)
+    const batch = await importsService.getBatch(id)
     if (!batch) return reply.code(404).send({ error: 'lote não encontrado' })
     return batch
   })
@@ -159,7 +184,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
         ),
       })
       .parse(req.body)
-    const result = importsService.patchStagedRows(id, body.patches)
+    const result = await importsService.patchStagedRows(id, body.patches)
     if (!result) return reply.code(404).send({ error: 'lote não encontrado' })
     return result
   })
@@ -167,7 +192,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
   app.post('/imports/:id/commit', async (req, reply) => {
     const { id } = idParam.parse(req.params)
     try {
-      return importsService.commitImport(id)
+      return await importsService.commitImport(id)
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
     }
@@ -186,10 +211,10 @@ export async function ledgerRoutes(app: FastifyInstance) {
   /* ---------------------------------------------------------------- *
    * Categories, rules, learned memory
    * ---------------------------------------------------------------- */
-  app.get('/categories', async () => ({
-    tree: categoriesService.categoryTree(),
-    options: categoriesService.categoryOptions(),
-  }))
+  app.get('/categories', async () => {
+    const [tree, options] = await Promise.all([categoriesService.categoryTree(), categoriesService.categoryOptions()])
+    return { tree, options }
+  })
 
   app.post('/categories', async (req, reply) => {
     const body = z
@@ -202,7 +227,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
       })
       .parse(req.body)
     try {
-      return categoriesService.createCategory(body)
+      return await categoriesService.createCategory(body)
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
     }
@@ -233,10 +258,10 @@ export async function ledgerRoutes(app: FastifyInstance) {
     )
   })
 
-  app.get('/rules', async () => ({
-    rules: categoriesService.listRules(),
-    memory: categoriesService.listMemory(),
-  }))
+  app.get('/rules', async () => {
+    const [rules, memory] = await Promise.all([categoriesService.listRules(), categoriesService.listMemory()])
+    return { rules, memory }
+  })
 
   app.post('/rules', async (req) => {
     const body = z

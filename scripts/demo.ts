@@ -9,6 +9,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { sql } from 'drizzle-orm'
 import { seed } from '../server/src/db/seed'
 import { db } from '../server/src/db/client'
 import { accounts } from '../server/src/db/schema'
@@ -18,7 +19,7 @@ import * as investments from '../server/src/services/investments'
 import * as goals from '../server/src/services/goals'
 import { totals } from '../server/src/services/analytics'
 
-seed()
+await seed()
 
 /**
  * Guard: this script writes synthetic transactions. Running it on a ledger
@@ -26,8 +27,7 @@ seed()
  * finances, and the two are indistinguishable afterwards.
  */
 {
-  const { sql } = await import('drizzle-orm')
-  const existing = db.get<{ n: number }>(sql`select count(*) as n from transactions`)?.n ?? 0
+  const existing = (await db.execute<{ n: number }>(sql`select count(*) as n from transactions`))[0]?.n ?? 0
   if (existing > 0 && process.env.FINANCE_DEMO_FORCE !== '1') {
     console.error(
       `\nO banco já tem ${existing} lançamentos.\n` +
@@ -39,8 +39,8 @@ seed()
   }
 }
 
-const accountByName = new Map(db.select().from(accounts).all().map((a) => [a.name, a.id] as const))
-const profileByName = new Map(imports.listProfiles().map((p) => [p.name, p.id] as const))
+const accountByName = new Map((await db.select().from(accounts)).map((a) => [a.name, a.id] as const))
+const profileByName = new Map((await imports.listProfiles()).map((p) => [p.name, p.id] as const))
 
 const FILES = [
   ['itau-extrato-2026-06_08.csv', 'Itaú Extrato', 'Conta Corrente'],
@@ -53,13 +53,13 @@ const FILES = [
 
 console.log('\n--- extratos ---')
 for (const [file, profileName, accountName] of FILES) {
-  const staged = imports.stageImport({
+  const staged = await imports.stageImport({
     buffer: readFileSync(resolve('fixtures', file)),
     filename: file,
     profileId: profileByName.get(profileName)!,
     accountId: accountByName.get(accountName)!,
   })
-  const committed = imports.commitImport(staged.batchId)
+  const committed = await imports.commitImport(staged.batchId)
   console.log(
     `${file.padEnd(34)} ${String(committed.committed).padStart(3)} gravados, ` +
       `${staged.duplicateCount} duplicatas, ${staged.errorCount} erros, ${staged.ignoredCount} ignoradas`,
@@ -78,19 +78,16 @@ console.log('\n--- aprendizado ---')
   const txn = await import('../server/src/services/transactions')
   const categories = await import('../server/src/services/categories')
 
-  const vestuario = categories
-    .categoryOptions()
-    .find((option) => option.path === 'Pessoal / Vestuário')!
+  const vestuario = (await categories.categoryOptions()).find((option) => option.path === 'Pessoal / Vestuário')!
 
-  const magalu = db
+  const magalu = await db
     .select({ id: transactions.id })
     .from(transactions)
     .where(like(transactions.descriptionNorm, '%magazine luiza%'))
-    .all()
 
   for (let i = 0; i < 3 && magalu.length > 0; i++) {
     const target = magalu[i % magalu.length]!
-    const result = txn.setCategory([target.id], vestuario.id)
+    const result = await txn.setCategory([target.id], vestuario.id)
     const learned = result.learned[0]
     if (learned) {
       console.log(
@@ -101,7 +98,7 @@ console.log('\n--- aprendizado ---')
   }
   // Apply the freshly learned rule to everything still matching it.
   const { recategorize } = await import('../server/src/services/categorization')
-  console.log('recategorização após aprendizado:', recategorize({ onlyUncategorized: true }))
+  console.log('recategorização após aprendizado:', await recategorize({ onlyUncategorized: true }))
 }
 
 console.log('\n--- dívidas ---')
@@ -111,12 +108,12 @@ const DEBTS = [
   { name: 'Financiamento veículo', kind: 'financing', institution: 'Bradesco', principalCents: 3_820_000, aprBps: 2_180, minimumPaymentCents: 112_000, scheduledPaymentCents: 112_000, dueDay: 20 },
 ]
 for (const debt of DEBTS) {
-  const created = debtService.createDebt(debt)
+  const created = await debtService.createDebt(debt)
   console.log(`${debt.name.padEnd(24)} ${(debt.principalCents / 100).toFixed(2)} @ ${(debt.aprBps / 100).toFixed(1)}% a.a.`)
   // A short measured history, so the debt trend is real data and not a guess.
-  debtService.recordSnapshot(created.id, '2026-06-01', Math.round(debt.principalCents * 1.09))
-  debtService.recordSnapshot(created.id, '2026-07-01', Math.round(debt.principalCents * 1.05))
-  debtService.recordSnapshot(created.id, '2026-08-01', debt.principalCents)
+  await debtService.recordSnapshot(created.id, '2026-06-01', Math.round(debt.principalCents * 1.09))
+  await debtService.recordSnapshot(created.id, '2026-07-01', Math.round(debt.principalCents * 1.05))
+  await debtService.recordSnapshot(created.id, '2026-08-01', debt.principalCents)
 }
 
 console.log('\n--- investimentos ---')
@@ -128,14 +125,14 @@ const ASSETS = [
   { name: 'Bitcoin', assetClass: 'crypto', ticker: 'BTC', unit: 34_500_000, qty: 0.035, price: 39_800_000 },
 ]
 for (const asset of ASSETS) {
-  const created = investments.createAsset({
+  const created = await investments.createAsset({
     name: asset.name,
     ticker: asset.ticker,
     assetClass: asset.assetClass,
   })
   // Split into three monthly contributions so the performance chart has shape.
   for (const [index, month] of ['2026-06-05', '2026-07-05', '2026-08-05'].entries()) {
-    investments.createTrade({
+    await investments.createTrade({
       assetId: created.id,
       tradedOn: month,
       quantity: asset.qty / 3,
@@ -143,26 +140,26 @@ for (const asset of ASSETS) {
       feesCents: 250,
     })
   }
-  investments.recordValuation(created.id, '2026-07-15', Math.round((asset.unit + asset.price) / 2))
-  investments.recordValuation(created.id, '2026-08-18', asset.price)
+  await investments.recordValuation(created.id, '2026-07-15', Math.round((asset.unit + asset.price) / 2))
+  await investments.recordValuation(created.id, '2026-08-18', asset.price)
   console.log(`${asset.name.padEnd(24)} ${asset.assetClass}`)
 }
 
-investments.setTargetAllocation(null, [
+await investments.setTargetAllocation(null, [
   { assetClass: 'fixed_income', targetBps: 4_500 },
   { assetClass: 'stocks', targetBps: 3_000 },
   { assetClass: 'fii', targetBps: 2_000 },
   { assetClass: 'crypto', targetBps: 500 },
 ])
 
-investments.createGoal({
+await investments.createGoal({
   name: 'Reserva de oportunidade',
   targetValueCents: 15_000_000,
   targetDate: '2029-12-01',
   monthlyContributionCents: 250_000,
   expectedReturnBps: 950,
 })
-investments.createGoal({
+await investments.createGoal({
   name: 'Entrada do imóvel',
   targetValueCents: 40_000_000,
   targetDate: '2032-06-01',
@@ -172,22 +169,22 @@ investments.createGoal({
 
 console.log('\n--- metas mensais ---')
 for (const period of ['2026-06', '2026-07', '2026-08']) {
-  const actual = totals({ from: `${period}-01`, to: `${period}-31` })
-  goals.upsertGoal(period, {
+  const actual = await totals({ from: `${period}-01`, to: `${period}-31` })
+  await goals.upsertGoal(period, {
     incomeTargetCents: Math.round((actual.incomeCents * 0.92) / 10_000) * 10_000,
     spendCapCents: Math.round((actual.expenseCents * 1.08) / 10_000) * 10_000,
     savingsRateTargetBps: 3_000,
   })
-  for (const suggestion of goals.suggestCaps(period, 1).slice(0, 5)) {
-    goals.upsertCap(period, suggestion.categoryId, Math.round(suggestion.suggestedCapCents * 1.1))
+  for (const suggestion of (await goals.suggestCaps(period, 1)).slice(0, 5)) {
+    await goals.upsertCap(period, suggestion.categoryId, Math.round(suggestion.suggestedCapCents * 1.1))
   }
-  const progress = goals.getPeriodProgress(period)
+  const progress = await goals.getPeriodProgress(period)
   console.log(
     `${period}  receita ${(progress.actual.incomeCents / 100).toFixed(2)} / saídas ${(progress.actual.expenseCents / 100).toFixed(2)} · ${progress.caps.length} tetos`,
   )
 }
 
-const final = totals({ from: '2026-06-01', to: '2026-08-31' })
+const final = await totals({ from: '2026-06-01', to: '2026-08-31' })
 console.log(
   `\nPronto. ${final.transactionCount} lançamentos, ${final.uncategorizedCount} sem categoria.`,
 )

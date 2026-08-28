@@ -114,24 +114,25 @@ export type OneTimeExpenseInput = {
   period?: string
 }
 
-export function simulateOneTimeExpense(input: OneTimeExpenseInput): SimulationResult {
+export async function simulateOneTimeExpense(input: OneTimeExpenseInput): Promise<SimulationResult> {
   const period = input.period ?? periodOf(todayIso())
   const accountId = input.accountId ?? null
 
-  const baseInputs = health.gatherScoreInputs(period, accountId)
+  const baseInputs = await health.gatherScoreInputs(period, accountId)
   const { inputs: afterInputs, runwayOverrides, availableDeltaCents } = applyOutflow(
     baseInputs,
     input.source,
     input.amountCents,
   )
 
-  const runwayBefore = health.runway().consolidated
-  const runwayAfter = health.runway(health.DEFAULT_LIQUID_ASSET_CLASSES, runwayOverrides).consolidated
-
-  const availableBefore = engine.availableForAllocation(period)
-  const availableAfter = engine.availableForAllocation(period, {
-    consolidatedBalanceDeltaCents: availableDeltaCents,
-  })
+  const [runwayBeforeScope, runwayAfterScope, availableBefore, availableAfter] = await Promise.all([
+    health.runway(),
+    health.runway(health.DEFAULT_LIQUID_ASSET_CLASSES, runwayOverrides),
+    engine.availableForAllocation(period),
+    engine.availableForAllocation(period, { consolidatedBalanceDeltaCents: availableDeltaCents }),
+  ])
+  const runwayBefore = runwayBeforeScope.consolidated
+  const runwayAfter = runwayAfterScope.consolidated
 
   const scoreBefore = scoreOf(baseInputs)
   const scoreAfter = scoreOf(afterInputs)
@@ -189,10 +190,10 @@ export type DebtPayoffResult = SimulationResult & {
   savedInterestCents: number
 }
 
-export function simulateDebtPayoff(input: DebtPayoffInput): DebtPayoffResult {
+export async function simulateDebtPayoff(input: DebtPayoffInput): Promise<DebtPayoffResult> {
   const period = input.period ?? periodOf(todayIso())
 
-  const debt = listDebts().find((d) => d.id === input.debtId)
+  const debt = (await listDebts()).find((d) => d.id === input.debtId)
   if (!debt) throw new SimulatorError(`dívida ${input.debtId} não encontrada`)
   if (debt.balanceCents <= 0) {
     throw new SimulatorError(`a dívida "${debt.name}" já está quitada, não há economia de juros para calcular`)
@@ -203,11 +204,11 @@ export function simulateDebtPayoff(input: DebtPayoffInput): DebtPayoffResult {
    * mês a mês, no ritmo atual, e devolve por dívida quanto de juro cada uma
    * ainda vai pagar até o fim: quitar hoje é exatamente não pagar isso.
    */
-  const baseline = projectPaydown({ extraMonthlyCents: 0, label: 'Pagamento atual' })
+  const baseline = await projectPaydown({ extraMonthlyCents: 0, label: 'Pagamento atual' })
   const savedInterestCents = baseline.perDebt.find((d) => d.debtId === input.debtId)?.interestCents ?? 0
 
   const payoffCents = debt.balanceCents
-  const baseInputs = health.gatherScoreInputs(period, null)
+  const baseInputs = await health.gatherScoreInputs(period, null)
   const { inputs: afterOutflow, runwayOverrides, availableDeltaCents } = applyOutflow(
     baseInputs,
     input.source,
@@ -233,16 +234,17 @@ export function simulateDebtPayoff(input: DebtPayoffInput): DebtPayoffResult {
     },
   }
 
-  const runwayBefore = health.runway().consolidated
-  // A dívida de curto prazo do runway olha parcelas pendentes já
-  // materializadas; quitar não as apaga do ledger (nada é gravado), então o
-  // efeito modelado aqui é só a saída de dinheiro da origem escolhida.
-  const runwayAfter = health.runway(health.DEFAULT_LIQUID_ASSET_CLASSES, runwayOverrides).consolidated
-
-  const availableBefore = engine.availableForAllocation(period)
-  const availableAfter = engine.availableForAllocation(period, {
-    consolidatedBalanceDeltaCents: availableDeltaCents,
-  })
+  const [runwayBeforeScope, runwayAfterScope, availableBefore, availableAfter] = await Promise.all([
+    health.runway(),
+    // A dívida de curto prazo do runway olha parcelas pendentes já
+    // materializadas; quitar não as apaga do ledger (nada é gravado), então o
+    // efeito modelado aqui é só a saída de dinheiro da origem escolhida.
+    health.runway(health.DEFAULT_LIQUID_ASSET_CLASSES, runwayOverrides),
+    engine.availableForAllocation(period),
+    engine.availableForAllocation(period, { consolidatedBalanceDeltaCents: availableDeltaCents }),
+  ])
+  const runwayBefore = runwayBeforeScope.consolidated
+  const runwayAfter = runwayAfterScope.consolidated
 
   const scoreBefore = scoreOf(baseInputs)
   const scoreAfter = scoreOf(afterInputs)

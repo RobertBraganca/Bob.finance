@@ -130,23 +130,23 @@ let createdChildren = 0
 let skipped = 0
 
 for (const node of TREE) {
-  const topLevel = db.select().from(categories).all().filter((c) => c.parentId === null)
+  const topLevel = (await db.select().from(categories)).filter((c) => c.parentId === null)
   let parent = topLevel.find((c) => c.name === node.name)
 
   if (!parent) {
-    parent = createCategory({ name: node.name, kind: node.kind, color: node.color, icon: node.icon })
+    parent = await createCategory({ name: node.name, kind: node.kind, color: node.color, icon: node.icon })
     createdParents++
   } else {
     skipped++
   }
 
-  const siblings = db.select().from(categories).all().filter((c) => c.parentId === parent!.id)
+  const siblings = (await db.select().from(categories)).filter((c) => c.parentId === parent!.id)
   for (const childName of node.children) {
     if (siblings.some((s) => s.name === childName)) {
       skipped++
       continue
     }
-    createCategory({ name: childName, parentId: parent.id })
+    await createCategory({ name: childName, parentId: parent.id })
     createdChildren++
   }
 }

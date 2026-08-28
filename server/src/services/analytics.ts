@@ -20,10 +20,13 @@ import { addMonths, dayRange, periodBounds, periodOf, periodRange } from '../cor
  * Uncategorized rows fall back to their sign, so spending is never
  * understated just because the user has not finished categorizing.
  */
+// c.kind is the category_kind enum; cast to text so both CASE branches
+// resolve to the same type (Postgres, unlike SQLite, won't implicitly
+// coerce an enum column against a text literal in the other branch).
 const FLOW_KIND = sql`
   case
     when c.kind is null then (case when t.amount_cents > 0 then 'income' else 'expense' end)
-    else c.kind
+    else c.kind::text
   end`
 
 export type Range = { from: string; to: string; accountId?: number | null }
@@ -49,17 +52,16 @@ export type Totals = {
   uncategorizedCount: number
 }
 
-export function totals(range: Range): Totals {
-  const row = db
-    .get<{
-      income: number
-      expense: number
-      invested: number
-      redeemed: number
-      transfer: number
-      count: number
-      uncategorized: number
-    }>(sql`
+export async function totals(range: Range): Promise<Totals> {
+  const rows = await db.execute<{
+    income: number
+    expense: number
+    invested: number
+    redeemed: number
+    transfer: number
+    count: number
+    uncategorized: number
+  }>(sql`
       select
         coalesce(sum(case when flow = 'income'     and amount_cents > 0 then amount_cents else 0 end), 0) as income,
         coalesce(sum(case when flow = 'expense'    and amount_cents < 0 then -amount_cents else 0 end), 0) as expense,
@@ -73,10 +75,11 @@ export function totals(range: Range): Totals {
         from transactions t
         left join categories c on c.id = t.category_id
         where t.posted_on between ${range.from} and ${range.to}
-          and t.pending = 0
+          and t.pending = false
         ${accountFilter(range.accountId)}
-      )
+      ) x
     `)
+  const row = rows[0]
 
   const incomeCents = row?.income ?? 0
   const expenseCents = row?.expense ?? 0
@@ -123,20 +126,21 @@ export type ServiceAverages = {
  * every posted transaction the account has ever had, ignoring `range`
  * entirely except for which account.
  */
-export function historicalServiceAverages(accountId: number): ServiceAverages {
-  const row = db.get<{ income: number; expense: number; incomeCount: number; expenseCount: number }>(sql`
+export async function historicalServiceAverages(accountId: number): Promise<ServiceAverages> {
+  const rows = await db.execute<{ income: number; expense: number; incomeCount: number; expenseCount: number }>(sql`
     select
       coalesce(sum(case when flow = 'income'  and amount_cents > 0 then amount_cents else 0 end), 0) as income,
       coalesce(sum(case when flow = 'expense' and amount_cents < 0 then -amount_cents else 0 end), 0) as expense,
-      coalesce(sum(case when flow = 'income'  and amount_cents > 0 then 1 else 0 end), 0) as incomeCount,
-      coalesce(sum(case when flow = 'expense' and amount_cents < 0 then 1 else 0 end), 0) as expenseCount
+      coalesce(sum(case when flow = 'income'  and amount_cents > 0 then 1 else 0 end), 0) as "incomeCount",
+      coalesce(sum(case when flow = 'expense' and amount_cents < 0 then 1 else 0 end), 0) as "expenseCount"
     from (
       select t.amount_cents, ${FLOW_KIND} as flow
       from transactions t
       left join categories c on c.id = t.category_id
-      where t.pending = 0 and t.account_id = ${accountId}
-    )
+      where t.pending = false and t.account_id = ${accountId}
+    ) x
   `)
+  const row = rows[0]
 
   const revenueTransactionCount = row?.incomeCount ?? 0
   const expenseTransactionCount = row?.expenseCount ?? 0
@@ -161,8 +165,8 @@ export type MonthlyPoint = {
   investedCents: number
 }
 
-export function monthlySeries(range: Range): MonthlyPoint[] {
-  const rows = db.all<{
+export async function monthlySeries(range: Range): Promise<MonthlyPoint[]> {
+  const rows = await db.execute<{
     period: string
     income: number
     expense: number
@@ -178,9 +182,9 @@ export function monthlySeries(range: Range): MonthlyPoint[] {
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = 0
+        and t.pending = false
       ${accountFilter(range.accountId)}
-    )
+    ) x
     group by period
     order by period
   `)
@@ -206,8 +210,8 @@ export function monthlySeries(range: Range): MonthlyPoint[] {
  * enough that a bar per day is more useful than a single bar for the
  * whole month (the caller decides the cutoff; this just computes it).
  */
-export function dailyIncomeExpenseSeries(range: Range): MonthlyPoint[] {
-  const rows = db.all<{ day: string; income: number; expense: number; invested: number }>(sql`
+export async function dailyIncomeExpenseSeries(range: Range): Promise<MonthlyPoint[]> {
+  const rows = await db.execute<{ day: string; income: number; expense: number; invested: number }>(sql`
     select
       day,
       coalesce(sum(case when flow = 'income'     and amount_cents > 0 then amount_cents else 0 end), 0) as income,
@@ -218,9 +222,9 @@ export function dailyIncomeExpenseSeries(range: Range): MonthlyPoint[] {
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = 0
+        and t.pending = false
       ${accountFilter(range.accountId)}
-    )
+    ) x
     group by day
     order by day
   `)
@@ -256,17 +260,17 @@ export type BreakdownSlice = {
   shareBps: number
 }
 
-export function categoryBreakdown(
+export async function categoryBreakdown(
   range: Range,
   options: { flow?: 'expense' | 'income' | 'investment'; level?: 'parent' | 'leaf' } = {},
-): BreakdownSlice[] {
+): Promise<BreakdownSlice[]> {
   const flow = options.flow ?? 'expense'
   const level = options.level ?? 'parent'
   const sign = flow === 'income' ? sql`amount_cents > 0` : sql`amount_cents < 0`
 
   const groupId = level === 'parent' ? sql`coalesce(c.parent_id, c.id)` : sql`c.id`
 
-  const rows = db.all<{
+  const rows = await db.execute<{
     categoryId: number | null
     parentCategoryId: number | null
     name: string | null
@@ -275,8 +279,8 @@ export function categoryBreakdown(
     count: number
   }>(sql`
     select
-      g.id as categoryId,
-      g.parent_id as parentCategoryId,
+      g.id as "categoryId",
+      g.parent_id as "parentCategoryId",
       g.name as name,
       g.color as color,
       coalesce(sum(abs(x.amount_cents)), 0) as amount,
@@ -286,12 +290,12 @@ export function categoryBreakdown(
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = 0
+        and t.pending = false
       ${accountFilter(range.accountId)}
     ) x
     left join categories g on g.id = x.group_id
     where x.flow = ${flow} and ${sign}
-    group by x.group_id
+    group by x.group_id, g.id, g.parent_id, g.name, g.color
     order by amount desc
   `)
 
@@ -312,8 +316,8 @@ export function categoryBreakdown(
  * ------------------------------------------------------------------ */
 export type DailyPoint = { day: string; expenseCents: number; transactionCount: number }
 
-export function dailySeries(range: Range): DailyPoint[] {
-  const rows = db.all<{ day: string; expense: number; count: number }>(sql`
+export async function dailySeries(range: Range): Promise<DailyPoint[]> {
+  const rows = await db.execute<{ day: string; expense: number; count: number }>(sql`
     select
       day,
       coalesce(sum(case when flow = 'expense' and amount_cents < 0 then -amount_cents else 0 end), 0) as expense,
@@ -323,9 +327,9 @@ export function dailySeries(range: Range): DailyPoint[] {
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = 0
+        and t.pending = false
       ${accountFilter(range.accountId)}
-    )
+    ) x
     group by day
     order by day
   `)
@@ -341,8 +345,8 @@ export function dailySeries(range: Range): DailyPoint[] {
 /* ------------------------------------------------------------------ *
  * Balance trajectory — running net position over the range.
  * ------------------------------------------------------------------ */
-export function netFlowSeries(range: Range) {
-  const months = monthlySeries(range)
+export async function netFlowSeries(range: Range) {
+  const months = await monthlySeries(range)
   let running = 0
   return months.map((m) => {
     running += m.netCents
@@ -356,26 +360,26 @@ export function netFlowSeries(range: Range) {
  * sempre exclui `pending`. Mesma classificação de fluxo (kind da categoria,
  * caindo para o sinal quando sem categoria) e mesmo filtro de conta.
  */
-export function receivable(range: Range): number {
-  const row = db.get<{ amount: number }>(sql`
+export async function receivable(range: Range): Promise<number> {
+  const rows = await db.execute<{ amount: number }>(sql`
     select coalesce(sum(case when flow = 'income' and amount_cents > 0 then amount_cents else 0 end), 0) as amount
     from (
       select t.amount_cents, ${FLOW_KIND} as flow
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = 1
+        and t.pending = true
         ${accountFilter(range.accountId)}
-    )
+    ) x
   `)
-  return row?.amount ?? 0
+  return rows[0]?.amount ?? 0
 }
 
 /* ------------------------------------------------------------------ *
  * Everything the dashboard needs, in one round trip.
  * ------------------------------------------------------------------ */
-export function dashboard(range: Range) {
-  const current = totals(range)
+export async function dashboard(range: Range) {
+  const current = await totals(range)
 
   // The comparable previous window: same number of months, immediately before.
   const months = periodRange(periodOf(range.from), periodOf(range.to)).length
@@ -384,9 +388,24 @@ export function dashboard(range: Range) {
     to: periodBounds(addMonths(periodOf(range.to), -months)).end,
     accountId: range.accountId ?? null,
   }
-  const previous = totals(previousRange)
-  const currentReceivableCents = receivable(range)
-  const previousReceivableCents = receivable(previousRange)
+  const [previous, currentReceivableCents, previousReceivableCents, monthly, byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf, netFlow, topMerchantsList] =
+    await Promise.all([
+      totals(previousRange),
+      receivable(range),
+      receivable(previousRange),
+      monthlySeries(range),
+      categoryBreakdown(range, { flow: 'expense', level: 'parent' }),
+      categoryBreakdown(range, { flow: 'expense', level: 'leaf' }),
+      categoryBreakdown(range, { flow: 'income', level: 'parent' }),
+      categoryBreakdown(range, { flow: 'income', level: 'leaf' }),
+      netFlowSeries(range),
+      topMerchants(range, 8),
+    ])
+
+  // A bar per day only makes sense for a short window — for anything
+  // longer than a month of days, the chart falls back to `monthly` on
+  // the client, so there is no reason to compute this at all.
+  const daily = dayRange(range.from, range.to).length <= 31 ? await dailyIncomeExpenseSeries(range) : []
 
   return {
     range,
@@ -398,17 +417,14 @@ export function dashboard(range: Range) {
       netBps: deltaBps(current.netCents, previous.netCents),
       receivableBps: deltaBps(currentReceivableCents, previousReceivableCents),
     },
-    monthly: monthlySeries(range),
-    // A bar per day only makes sense for a short window — for anything
-    // longer than a month of days, the chart falls back to `monthly` on
-    // the client, so there is no reason to compute this at all.
-    daily: dayRange(range.from, range.to).length <= 31 ? dailyIncomeExpenseSeries(range) : [],
-    byCategory: categoryBreakdown(range, { flow: 'expense', level: 'parent' }),
-    byCategoryLeaf: categoryBreakdown(range, { flow: 'expense', level: 'leaf' }),
-    incomeByCategory: categoryBreakdown(range, { flow: 'income', level: 'parent' }),
-    incomeByCategoryLeaf: categoryBreakdown(range, { flow: 'income', level: 'leaf' }),
-    netFlow: netFlowSeries(range),
-    topMerchants: topMerchants(range, 8),
+    monthly,
+    daily,
+    byCategory,
+    byCategoryLeaf,
+    incomeByCategory,
+    incomeByCategoryLeaf,
+    netFlow,
+    topMerchants: topMerchantsList,
   }
 }
 
@@ -418,10 +434,10 @@ export function deltaBps(current: number, previous: number): number | null {
   return Math.round(((current - previous) / Math.abs(previous)) * 10_000)
 }
 
-export function topMerchants(range: Range, limit = 8) {
-  return db.all<{ signature: string; amount: number; count: number }>(sql`
+export async function topMerchants(range: Range, limit = 8) {
+  return db.execute<{ signature: string; amount: number; count: number }>(sql`
     select
-      description as signature,
+      min(description) as signature,
       coalesce(sum(-amount_cents), 0) as amount,
       count(*) as count
     from (
@@ -429,9 +445,9 @@ export function topMerchants(range: Range, limit = 8) {
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = 0
+        and t.pending = false
       ${accountFilter(range.accountId)}
-    )
+    ) x
     where flow = 'expense' and amount_cents < 0
     group by lower(description)
     order by amount desc
@@ -443,8 +459,8 @@ export function topMerchants(range: Range, limit = 8) {
  * Account balances, derived from the opening balance plus every
  * transaction — never stored, so it can never drift.
  * ------------------------------------------------------------------ */
-export function accountBalances() {
-  return db.all<{
+export async function accountBalances() {
+  return db.execute<{
     id: number
     name: string
     institution: string
@@ -458,12 +474,12 @@ export function accountBalances() {
       a.name,
       a.institution,
       a.kind,
-      a.opening_balance_cents + coalesce(sum(case when t.pending = 0 then t.amount_cents else 0 end), 0) as balanceCents,
-      count(case when t.pending = 0 then t.id else null end) as transactionCount,
-      max(case when t.pending = 0 then t.posted_on else null end) as lastPostedOn
+      a.opening_balance_cents + coalesce(sum(case when t.pending = false then t.amount_cents else 0 end), 0) as "balanceCents",
+      count(case when t.pending = false then t.id else null end) as "transactionCount",
+      max(case when t.pending = false then t.posted_on else null end) as "lastPostedOn"
     from accounts a
     left join transactions t on t.account_id = a.id
-    where a.archived = 0
+    where a.archived = false
     group by a.id
     order by a.name
   `)

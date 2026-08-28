@@ -18,15 +18,15 @@ import { paymentStats } from './debt'
 const MATERIALIZE_HORIZON_MONTHS = 6
 
 export type ForecastRow = typeof cashFlowForecasts.$inferSelect
+type ForecastKind = ForecastRow['kind']
 
-export function listForecasts(): Array<ForecastRow & { nextOccurrencePeriod: string | null }> {
-  return db
+export async function listForecasts(): Promise<Array<ForecastRow & { nextOccurrencePeriod: string | null }>> {
+  const rows = await db
     .select()
     .from(cashFlowForecasts)
     .where(eq(cashFlowForecasts.active, true))
     .orderBy(cashFlowForecasts.description)
-    .all()
-    .map((row) => ({ ...row, nextOccurrencePeriod: nextOccurrencePeriod(row) }))
+  return Promise.all(rows.map(async (row) => ({ ...row, nextOccurrencePeriod: await nextOccurrencePeriod(row) })))
 }
 
 /** One (forecast, period) occurrence not yet materialized as a transaction row. */
@@ -73,15 +73,12 @@ function pendingOccurrences(forecast: ForecastRow, throughPeriod: string): strin
  */
 const FAR_FUTURE_HORIZON_MONTHS = 60
 
-function nextOccurrencePeriod(forecast: ForecastRow): string | null {
+async function nextOccurrencePeriod(forecast: ForecastRow): Promise<string | null> {
   const horizon = addMonths(todayIso().slice(0, 7), FAR_FUTURE_HORIZON_MONTHS)
   const skipped = new Set(
-    db
-      .select({ period: skippedOccurrences.period })
-      .from(skippedOccurrences)
-      .where(eq(skippedOccurrences.forecastId, forecast.id))
-      .all()
-      .map((r) => r.period),
+    (
+      await db.select({ period: skippedOccurrences.period }).from(skippedOccurrences).where(eq(skippedOccurrences.forecastId, forecast.id))
+    ).map((r) => r.period),
   )
   const next = pendingOccurrences(forecast, horizon).find((p) => !skipped.has(p))
   return next ?? null
@@ -93,8 +90,8 @@ function nextOccurrencePeriod(forecast: ForecastRow): string | null {
  * this forecast before inserting, so calling it repeatedly (every time
  * the forecast list loads) never duplicates a row.
  */
-export function materialize(forecastId: number): { created: number } {
-  const forecast = db.select().from(cashFlowForecasts).where(eq(cashFlowForecasts.id, forecastId)).get()
+export async function materialize(forecastId: number): Promise<{ created: number }> {
+  const forecast = (await db.select().from(cashFlowForecasts).where(eq(cashFlowForecasts.id, forecastId)))[0]
   if (!forecast || !forecast.accountId) return { created: 0 }
 
   const horizon = addMonths(todayIso().slice(0, 7), MATERIALIZE_HORIZON_MONTHS - 1)
@@ -102,11 +99,12 @@ export function materialize(forecastId: number): { created: number } {
   if (wanted.length === 0) return { created: 0 }
 
   const existing = new Set(
-    db
-      .select({ occurrencePeriod: transactions.occurrencePeriod, postedOn: transactions.postedOn })
-      .from(transactions)
-      .where(eq(transactions.forecastId, forecastId))
-      .all()
+    (
+      await db
+        .select({ occurrencePeriod: transactions.occurrencePeriod, postedOn: transactions.postedOn })
+        .from(transactions)
+        .where(eq(transactions.forecastId, forecastId))
+    )
       // Legacy rows materialized before occurrencePeriod existed fall back to
       // their postedOn's month — still correct as long as nobody has since
       // edited that date (see the column's own comment in schema.ts).
@@ -116,12 +114,9 @@ export function materialize(forecastId: number): { created: number } {
   // Periods the user explicitly deleted from a pending widget — never
   // recreate those, or a delete would silently undo itself on next load.
   const skipped = new Set(
-    db
-      .select({ period: skippedOccurrences.period })
-      .from(skippedOccurrences)
-      .where(eq(skippedOccurrences.forecastId, forecastId))
-      .all()
-      .map((r) => r.period),
+    (
+      await db.select({ period: skippedOccurrences.period }).from(skippedOccurrences).where(eq(skippedOccurrences.forecastId, forecastId))
+    ).map((r) => r.period),
   )
 
   let created = 0
@@ -134,24 +129,22 @@ export function materialize(forecastId: number): { created: number } {
     const postedOn = `${period}-${String(day).padStart(2, '0')}`
     const description = forecast.description
     const descriptionNorm = normalizeDescription(description)
-    db.insert(transactions)
-      .values({
-        accountId: forecast.accountId,
-        postedOn,
-        description,
-        descriptionNorm,
-        amountCents: forecast.amountCents,
-        direction: directionOf(forecast.amountCents),
-        categoryId: forecast.categoryId,
-        source: 'manual',
-        categorizedBy: forecast.categoryId ? 'manual' : 'none',
-        dedupeHash: dedupeHash({ accountId: forecast.accountId, postedOn, amountCents: forecast.amountCents, descriptionNorm }),
-        pending: true,
-        forecastId: forecast.id,
-        occurrencePeriod: period,
-        notes: forecast.notes,
-      })
-      .run()
+    await db.insert(transactions).values({
+      accountId: forecast.accountId,
+      postedOn,
+      description,
+      descriptionNorm,
+      amountCents: forecast.amountCents,
+      direction: directionOf(forecast.amountCents),
+      categoryId: forecast.categoryId,
+      source: 'manual',
+      categorizedBy: forecast.categoryId ? 'manual' : 'none',
+      dedupeHash: dedupeHash({ accountId: forecast.accountId, postedOn, amountCents: forecast.amountCents, descriptionNorm }),
+      pending: true,
+      forecastId: forecast.id,
+      occurrencePeriod: period,
+      notes: forecast.notes,
+    })
     created++
   }
   return { created }
@@ -171,20 +164,31 @@ export type ForecastInput = {
   notes?: string | null
 }
 
-export function createForecast(input: ForecastInput) {
-  const row = db.insert(cashFlowForecasts).values(input).returning().get()
-  materialize(row.id)
+export async function createForecast(input: ForecastInput) {
+  const row = (
+    await db
+      .insert(cashFlowForecasts)
+      .values({ ...input, kind: input.kind as ForecastKind | undefined })
+      .returning()
+  )[0]!
+  await materialize(row.id)
   // Attached even when the first occurrence falls beyond the horizon and
   // `materialize` above produced zero rows — that used to look exactly
   // like the save had failed (decisions/0020).
-  return { ...row, nextOccurrencePeriod: nextOccurrencePeriod(row) }
+  return { ...row, nextOccurrencePeriod: await nextOccurrencePeriod(row) }
 }
 
-export function updateForecast(id: number, patch: Partial<ForecastInput> & { active?: boolean }) {
-  const updated = db.update(cashFlowForecasts).set(patch).where(eq(cashFlowForecasts.id, id)).returning().get()
+export async function updateForecast(id: number, patch: Partial<ForecastInput> & { active?: boolean }) {
+  const updated = (
+    await db
+      .update(cashFlowForecasts)
+      .set({ ...patch, kind: patch.kind as ForecastKind | undefined })
+      .where(eq(cashFlowForecasts.id, id))
+      .returning()
+  )[0]
   if (updated) {
-    syncMaterializedRows(updated)
-    materialize(id)
+    await syncMaterializedRows(updated)
+    await materialize(id)
   }
   return updated ?? null
 }
@@ -200,9 +204,9 @@ export function updateForecast(id: number, patch: Partial<ForecastInput> & { act
  * alone — the template stops being authoritative over that one
  * occurrence the moment the user touches it.
  */
-function syncMaterializedRows(forecast: ForecastRow) {
+async function syncMaterializedRows(forecast: ForecastRow): Promise<void> {
   if (!forecast.accountId) return
-  const rows = db
+  const rows = await db
     .select()
     .from(transactions)
     .where(
@@ -212,7 +216,6 @@ function syncMaterializedRows(forecast: ForecastRow) {
         eq(transactions.manuallyEdited, false),
       ),
     )
-    .all()
 
   for (const row of rows) {
     const period = row.occurrencePeriod ?? row.postedOn.slice(0, 7)
@@ -220,7 +223,8 @@ function syncMaterializedRows(forecast: ForecastRow) {
     const day = Math.min(forecast.dueDay, daysInMonth(year, month))
     const postedOn = `${period}-${String(day).padStart(2, '0')}`
     const descriptionNorm = normalizeDescription(forecast.description)
-    db.update(transactions)
+    await db
+      .update(transactions)
       .set({
         postedOn,
         description: forecast.description,
@@ -233,21 +237,20 @@ function syncMaterializedRows(forecast: ForecastRow) {
         dedupeHash: dedupeHash({ accountId: forecast.accountId, postedOn, amountCents: forecast.amountCents, descriptionNorm }),
       })
       .where(eq(transactions.id, row.id))
-      .run()
   }
 }
 
-export function deleteForecast(id: number) {
+export async function deleteForecast(id: number) {
   // Still-pending materialized rows cascade with it (schema onDelete:
   // 'cascade'); any already reconciled real transaction has no
   // forecastId anymore by then, so it is untouched.
-  return { removed: db.delete(cashFlowForecasts).where(eq(cashFlowForecasts.id, id)).run().changes }
+  return { removed: (await db.delete(cashFlowForecasts).where(eq(cashFlowForecasts.id, id))).count }
 }
 
 /** Re-materializes every active template — called opportunistically so the rolling horizon never runs dry. */
-export function materializeAll(): { created: number } {
+export async function materializeAll(): Promise<{ created: number }> {
   let created = 0
-  for (const f of listForecasts()) created += materialize(f.id).created
+  for (const f of await listForecasts()) created += (await materialize(f.id)).created
   return { created }
 }
 
@@ -277,10 +280,10 @@ export type PendingRow = {
  * `isOverdue`) until it's confirmed, settled, or deleted, so a forgotten
  * expense can't quietly fall out of view when the month rolls over.
  */
-export function listPending(flow: 'income' | 'expense', range?: { from: string; to: string }): PendingRow[] {
+export async function listPending(flow: 'income' | 'expense', range?: { from: string; to: string }): Promise<PendingRow[]> {
   const direction = flow === 'income' ? 'in' : 'out'
   const rangeFilter = range ? sql`and t.posted_on <= ${range.to}` : sql``
-  const rows = db.all<{
+  const rows = await db.execute<{
     id: number
     accountId: number
     accountName: string
@@ -298,17 +301,17 @@ export function listPending(flow: 'income' | 'expense', range?: { from: string; 
     manuallyEdited: boolean
   }>(sql`
     select
-      t.id, t.account_id as accountId, a.name as accountName, t.posted_on as postedOn,
-      t.description, t.amount_cents as amountCents, t.direction,
-      t.category_id as categoryId, c.name as categoryName,
-      t.forecast_id as forecastId, f.kind as forecastKind, f.start_period as startPeriod,
-      f.installment_count as installmentCount, f.installments_realized as installmentsRealized,
-      t.manually_edited as manuallyEdited
+      t.id, t.account_id as "accountId", a.name as "accountName", t.posted_on as "postedOn",
+      t.description, t.amount_cents as "amountCents", t.direction,
+      t.category_id as "categoryId", c.name as "categoryName",
+      t.forecast_id as "forecastId", f.kind as "forecastKind", f.start_period as "startPeriod",
+      f.installment_count as "installmentCount", f.installments_realized as "installmentsRealized",
+      t.manually_edited as "manuallyEdited"
     from transactions t
     join accounts a on a.id = t.account_id
     left join categories c on c.id = t.category_id
     left join cash_flow_forecasts f on f.id = t.forecast_id
-    where t.pending = 1 and t.direction = ${direction} ${rangeFilter}
+    where t.pending = true and t.direction = ${direction} ${rangeFilter}
     order by t.posted_on
   `)
 
@@ -340,8 +343,8 @@ export function listPending(flow: 'income' | 'expense', range?: { from: string; 
 
 export type PendingDeleteScope = 'only' | 'this_and_future' | 'all'
 
-function markSkipped(forecastId: number | null, debtId: number | null, period: string) {
-  db.insert(skippedOccurrences).values({ forecastId, debtId, period }).onConflictDoNothing().run()
+async function markSkipped(forecastId: number | null, debtId: number | null, period: string) {
+  await db.insert(skippedOccurrences).values({ forecastId, debtId, period }).onConflictDoNothing()
 }
 
 /**
@@ -368,31 +371,32 @@ function markSkipped(forecastId: number | null, debtId: number | null, period: s
  * Neither wider scope ever touches a row with `pending = false` — that is
  * real, already-confirmed history, not the template's future.
  */
-export function deletePending(id: number, scope: PendingDeleteScope = 'only') {
-  const row = db
-    .select({
-      forecastId: transactions.forecastId,
-      debtId: transactions.debtId,
-      occurrencePeriod: transactions.occurrencePeriod,
-      postedOn: transactions.postedOn,
-    })
-    .from(transactions)
-    .where(and(eq(transactions.id, id), eq(transactions.pending, true)))
-    .get()
+export async function deletePending(id: number, scope: PendingDeleteScope = 'only') {
+  const row = (
+    await db
+      .select({
+        forecastId: transactions.forecastId,
+        debtId: transactions.debtId,
+        occurrencePeriod: transactions.occurrencePeriod,
+        postedOn: transactions.postedOn,
+      })
+      .from(transactions)
+      .where(and(eq(transactions.id, id), eq(transactions.pending, true)))
+  )[0]
   if (!row) return { removed: 0 }
 
   const period = row.occurrencePeriod ?? row.postedOn.slice(0, 7)
 
   if (scope === 'only' || (!row.forecastId && !row.debtId)) {
-    const removed = db.delete(transactions).where(eq(transactions.id, id)).run().changes
-    if (removed > 0 && (row.forecastId || row.debtId)) markSkipped(row.forecastId, row.debtId, period)
+    const removed = (await db.delete(transactions).where(eq(transactions.id, id))).count
+    if (removed > 0 && (row.forecastId || row.debtId)) await markSkipped(row.forecastId, row.debtId, period)
     return { removed }
   }
 
   // 'this_and_future' or 'all', template-linked: gather every other still-
   // pending occurrence of the same template so they can be removed (and
   // skipped) alongside this one.
-  const siblings = db
+  const siblings = await db
     .select({ id: transactions.id, occurrencePeriod: transactions.occurrencePeriod, postedOn: transactions.postedOn })
     .from(transactions)
     .where(
@@ -401,51 +405,50 @@ export function deletePending(id: number, scope: PendingDeleteScope = 'only') {
         eq(transactions.pending, true),
       ),
     )
-    .all()
 
   const toRemove =
     scope === 'all' ? siblings : siblings.filter((s) => (s.occurrencePeriod ?? s.postedOn.slice(0, 7)) >= period)
 
   let removed = 0
   for (const s of toRemove) {
-    removed += db.delete(transactions).where(eq(transactions.id, s.id)).run().changes
-    markSkipped(row.forecastId, row.debtId, s.occurrencePeriod ?? s.postedOn.slice(0, 7))
+    removed += (await db.delete(transactions).where(eq(transactions.id, s.id))).count
+    await markSkipped(row.forecastId, row.debtId, s.occurrencePeriod ?? s.postedOn.slice(0, 7))
   }
 
   // Bound future materialization so it doesn't recreate what was just
   // removed once the rolling horizon moves forward — skippedOccurrences
   // alone only covers periods already enumerated above.
   if (row.forecastId) {
-    const forecast = db.select().from(cashFlowForecasts).where(eq(cashFlowForecasts.id, row.forecastId)).get()
+    const forecast = (await db.select().from(cashFlowForecasts).where(eq(cashFlowForecasts.id, row.forecastId)))[0]
     if (forecast) {
       if (scope === 'all') {
-        db.update(cashFlowForecasts).set({ active: false }).where(eq(cashFlowForecasts.id, forecast.id)).run()
+        await db.update(cashFlowForecasts).set({ active: false }).where(eq(cashFlowForecasts.id, forecast.id))
       } else if (forecast.kind === 'recurring') {
-        db.update(cashFlowForecasts)
+        await db
+          .update(cashFlowForecasts)
           .set({ endPeriod: addMonths(period, -1) })
           .where(eq(cashFlowForecasts.id, forecast.id))
-          .run()
       } else if (forecast.kind === 'installment') {
         const index = monthsBetween(forecast.startPeriod, period)
-        db.update(cashFlowForecasts).set({ installmentCount: index }).where(eq(cashFlowForecasts.id, forecast.id)).run()
+        await db.update(cashFlowForecasts).set({ installmentCount: index }).where(eq(cashFlowForecasts.id, forecast.id))
       }
       // 'single' never has a later occurrence to bound — nothing to do.
     }
   } else if (row.debtId) {
-    const debt = db.select().from(debts).where(eq(debts.id, row.debtId)).get()
+    const debt = (await db.select().from(debts).where(eq(debts.id, row.debtId)))[0]
     if (debt) {
       if (scope === 'all') {
-        db.update(debts).set({ active: false, closedOn: todayIso() }).where(eq(debts.id, debt.id)).run()
+        await db.update(debts).set({ active: false, closedOn: todayIso() }).where(eq(debts.id, debt.id))
       } else if (debt.installmentCount === null) {
-        db.update(debts).set({ endPeriod: addMonths(period, -1) }).where(eq(debts.id, debt.id)).run()
+        await db.update(debts).set({ endPeriod: addMonths(period, -1) }).where(eq(debts.id, debt.id))
       } else {
         // Installment debt schedules are recomputed from "now" each call
         // (see materializeDebtInstallments), not from a fixed start period
         // — this occurrence's index is `installmentsPaid` at this moment
         // plus how many months out it falls.
-        const { count: installmentsPaid } = paymentStats(debt.id)
+        const { count: installmentsPaid } = await paymentStats(debt.id)
         const index = installmentsPaid + monthsBetween(todayIso().slice(0, 7), period)
-        db.update(debts).set({ installmentCount: index }).where(eq(debts.id, debt.id)).run()
+        await db.update(debts).set({ installmentCount: index }).where(eq(debts.id, debt.id))
       }
     }
   }
@@ -460,29 +463,27 @@ export function deletePending(id: number, scope: PendingDeleteScope = 'only') {
  * already-imported real one; this is for cash or otherwise unbanked
  * income/expenses that will never show up in a CSV import.
  */
-export function settlePending(id: number) {
-  const row = db
-    .select()
-    .from(transactions)
-    .where(and(eq(transactions.id, id), eq(transactions.pending, true)))
-    .get()
+export async function settlePending(id: number) {
+  const row = (
+    await db
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.id, id), eq(transactions.pending, true)))
+  )[0]
   if (!row) return null
 
-  const updated = db
-    .update(transactions)
-    .set({ pending: false })
-    .where(eq(transactions.id, id))
-    .returning()
-    .get()
+  const updated = (
+    await db.update(transactions).set({ pending: false }).where(eq(transactions.id, id)).returning()
+  )[0]!
 
   // A debt-linked parcela settling here is the same event Endividamento's
   // "Registrar pagamento" logs manually — without this, marking it paid
   // from the pending widgets would never advance installmentsPaid there,
   // so the two screens would silently disagree about the same debt.
   if (row.debtId) {
-    db.insert(debtPayments)
+    await db
+      .insert(debtPayments)
       .values({ debtId: row.debtId, kind: 'payment', paidOn: row.postedOn, amountCents: Math.abs(row.amountCents) })
-      .run()
   }
 
   return updated
@@ -500,24 +501,22 @@ export type ReconciliationCandidate = {
  * by hand (see `confirmReconciliation`) — an amount match alone is not
  * proof, just a plausible candidate.
  */
-export function reconciliationCandidates(): ReconciliationCandidate[] {
-  const pendingRows = [...listPending('income'), ...listPending('expense')]
+export async function reconciliationCandidates(): Promise<ReconciliationCandidate[]> {
+  const pendingRows = [...(await listPending('income')), ...(await listPending('expense'))]
   const dismissed = new Set(
-    db
-      .select({ pendingId: reconciliationDismissals.pendingId, matchId: reconciliationDismissals.matchId })
-      .from(reconciliationDismissals)
-      .all()
-      .map((d) => `${d.pendingId}-${d.matchId}`),
+    (await db.select({ pendingId: reconciliationDismissals.pendingId, matchId: reconciliationDismissals.matchId }).from(reconciliationDismissals)).map(
+      (d) => `${d.pendingId}-${d.matchId}`,
+    ),
   )
   const out: ReconciliationCandidate[] = []
 
   for (const p of pendingRows) {
     const windowStart = addDays(p.postedOn, -15)
     const windowEnd = addDays(p.postedOn, 15)
-    const matches = db.all<{ id: number; postedOn: string; description: string; amountCents: number }>(sql`
-      select id, posted_on as postedOn, description, amount_cents as amountCents
+    const matches = await db.execute<{ id: number; postedOn: string; description: string; amountCents: number }>(sql`
+      select id, posted_on as "postedOn", description, amount_cents as "amountCents"
       from transactions
-      where pending = 0
+      where pending = false
         and account_id = ${p.accountId}
         and amount_cents = ${p.amountCents}
         and posted_on between ${windowStart} and ${windowEnd}
@@ -534,8 +533,8 @@ export function reconciliationCandidates(): ReconciliationCandidate[] {
 }
 
 /** The user said this suggested pair is NOT the same event — stop suggesting it. */
-export function dismissReconciliation(pendingId: number, matchId: number) {
-  db.insert(reconciliationDismissals).values({ pendingId, matchId }).onConflictDoNothing().run()
+export async function dismissReconciliation(pendingId: number, matchId: number) {
+  await db.insert(reconciliationDismissals).values({ pendingId, matchId }).onConflictDoNothing()
   return { dismissed: true }
 }
 
@@ -548,32 +547,34 @@ export function dismissReconciliation(pendingId: number, matchId: number) {
  * and recreates it on the very next load, which made a confirmed match
  * reappear as if nothing had happened.
  */
-export function confirmReconciliation(pendingId: number, matchId?: number) {
+export async function confirmReconciliation(pendingId: number, matchId?: number) {
   if (matchId) {
-    const pendingRow = db
-      .select({ forecastId: transactions.forecastId, debtId: transactions.debtId })
-      .from(transactions)
-      .where(and(eq(transactions.id, pendingId), eq(transactions.pending, true)))
-      .get()
+    const pendingRow = (
+      await db
+        .select({ forecastId: transactions.forecastId, debtId: transactions.debtId })
+        .from(transactions)
+        .where(and(eq(transactions.id, pendingId), eq(transactions.pending, true)))
+    )[0]
     if (pendingRow && (pendingRow.forecastId || pendingRow.debtId)) {
-      db.update(transactions)
+      await db
+        .update(transactions)
         .set({ forecastId: pendingRow.forecastId, debtId: pendingRow.debtId })
         .where(eq(transactions.id, matchId))
-        .run()
 
       // Same debt-payments sync as settlePending: a bank-confirmed parcela
       // is the same "parcela paga" event Endividamento tracks, whichever
       // path confirmed it.
       if (pendingRow.debtId) {
-        const match = db
-          .select({ postedOn: transactions.postedOn, amountCents: transactions.amountCents })
-          .from(transactions)
-          .where(eq(transactions.id, matchId))
-          .get()
+        const match = (
+          await db
+            .select({ postedOn: transactions.postedOn, amountCents: transactions.amountCents })
+            .from(transactions)
+            .where(eq(transactions.id, matchId))
+        )[0]
         if (match) {
-          db.insert(debtPayments)
+          await db
+            .insert(debtPayments)
             .values({ debtId: pendingRow.debtId, kind: 'payment', paidOn: match.postedOn, amountCents: Math.abs(match.amountCents) })
-            .run()
         }
       }
     }

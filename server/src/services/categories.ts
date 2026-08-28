@@ -15,8 +15,8 @@ export type CategoryNode = {
 }
 
 /** The whole tree with usage counts, in one query plus one pass. */
-export function categoryTree(): CategoryNode[] {
-  const rows = db.all<{
+export async function categoryTree(): Promise<CategoryNode[]> {
+  const rows = await db.execute<{
     id: number
     parentId: number | null
     name: string
@@ -27,11 +27,11 @@ export function categoryTree(): CategoryNode[] {
     transactionCount: number
   }>(sql`
     select
-      c.id, c.parent_id as parentId, c.name, c.kind, c.color, c.icon,
-      c.sort_order as sortOrder,
-      (select count(*) from transactions t where t.category_id = c.id) as transactionCount
+      c.id, c.parent_id as "parentId", c.name, c.kind, c.color, c.icon,
+      c.sort_order as "sortOrder",
+      (select count(*) from transactions t where t.category_id = c.id) as "transactionCount"
     from categories c
-    where c.archived = 0
+    where c.archived = false
     order by c.parent_id is not null, c.sort_order, c.name
   `)
 
@@ -47,8 +47,8 @@ export function categoryTree(): CategoryNode[] {
 }
 
 /** Flat list, used by every category picker in the UI. */
-export function categoryOptions() {
-  return db.all<{
+export async function categoryOptions() {
+  return db.execute<{
     id: number
     name: string
     parentName: string | null
@@ -60,19 +60,19 @@ export function categoryOptions() {
     select
       c.id,
       c.name,
-      p.name as parentName,
+      p.name as "parentName",
       case when p.name is null then c.name else p.name || ' / ' || c.name end as path,
       c.kind,
       c.color,
-      case when exists (select 1 from categories k where k.parent_id = c.id and k.archived = 0) then 0 else 1 end as isLeaf
+      case when exists (select 1 from categories k where k.parent_id = c.id and k.archived = false) then 0 else 1 end as "isLeaf"
     from categories c
     left join categories p on p.id = c.parent_id
-    where c.archived = 0
+    where c.archived = false
     order by coalesce(p.sort_order, c.sort_order), p.name is null desc, c.sort_order, c.name
   `)
 }
 
-export function createCategory(input: {
+export async function createCategory(input: {
   name: string
   parentId?: number | null
   kind?: string
@@ -86,45 +86,56 @@ export function createCategory(input: {
   let icon = input.icon ?? 'tag'
 
   if (input.parentId) {
-    const parent = db.select().from(categories).where(eq(categories.id, input.parentId)).get()
+    const parent = (await db.select().from(categories).where(eq(categories.id, input.parentId)))[0]
     if (!parent) throw new Error(`categoria pai ${input.parentId} não encontrada`)
     kind = parent.kind
     color = input.color ?? parent.color
     icon = input.icon ?? parent.icon
   }
 
-  const siblings = db
-    .select({ n: sql<number>`count(*)` })
-    .from(categories)
-    .where(input.parentId ? eq(categories.parentId, input.parentId) : isNull(categories.parentId))
-    .get()
+  const siblings = (
+    await db
+      .select({ n: sql<number>`count(*)` })
+      .from(categories)
+      .where(input.parentId ? eq(categories.parentId, input.parentId) : isNull(categories.parentId))
+  )[0]
 
-  return db
-    .insert(categories)
-    .values({
-      name: input.name.trim(),
-      parentId: input.parentId ?? null,
-      kind,
-      color,
-      icon,
-      sortOrder: siblings?.n ?? 0,
-    })
-    .returning()
-    .get()
+  return (
+    await db
+      .insert(categories)
+      .values({
+        name: input.name.trim(),
+        parentId: input.parentId ?? null,
+        kind: kind as (typeof categories.$inferInsert)['kind'],
+        color,
+        icon,
+        sortOrder: siblings?.n ?? 0,
+      })
+      .returning()
+  )[0]!
 }
 
-export function updateCategory(
+export async function updateCategory(
   id: number,
   patch: { name?: string; color?: string; icon?: string; kind?: string; sortOrder?: number },
 ) {
-  const updated = db.update(categories).set(patch).where(eq(categories.id, id)).returning().get()
+  const updated = (
+    await db
+      .update(categories)
+      .set(patch as Partial<typeof categories.$inferInsert>)
+      .where(eq(categories.id, id))
+      .returning()
+  )[0]
   if (!updated) return null
   // Recolouring a parent recolours its children, keeping the group coherent.
   if (patch.color && updated.parentId === null) {
-    db.update(categories).set({ color: patch.color }).where(eq(categories.parentId, id)).run()
+    await db.update(categories).set({ color: patch.color }).where(eq(categories.parentId, id))
   }
   if (patch.kind && updated.parentId === null) {
-    db.update(categories).set({ kind: patch.kind }).where(eq(categories.parentId, id)).run()
+    await db
+      .update(categories)
+      .set({ kind: patch.kind as (typeof categories.$inferInsert)['kind'] })
+      .where(eq(categories.parentId, id))
   }
   return updated
 }
@@ -133,47 +144,49 @@ export function updateCategory(
  * Archives rather than deletes when a category is in use, so historical
  * transactions never lose their classification silently.
  */
-export function removeCategory(id: number, options: { reassignTo?: number | null } = {}) {
+export async function removeCategory(id: number, options: { reassignTo?: number | null } = {}) {
   const used =
-    db
-      .select({ n: sql<number>`count(*)` })
-      .from(transactions)
-      .where(eq(transactions.categoryId, id))
-      .get()?.n ?? 0
+    (
+      await db
+        .select({ n: sql<number>`count(*)` })
+        .from(transactions)
+        .where(eq(transactions.categoryId, id))
+    )[0]?.n ?? 0
 
   const hasChildren =
-    db
-      .select({ n: sql<number>`count(*)` })
-      .from(categories)
-      .where(eq(categories.parentId, id))
-      .get()?.n ?? 0
+    (
+      await db
+        .select({ n: sql<number>`count(*)` })
+        .from(categories)
+        .where(eq(categories.parentId, id))
+    )[0]?.n ?? 0
 
   if (used > 0 && options.reassignTo === undefined) {
-    db.update(categories).set({ archived: true }).where(eq(categories.id, id)).run()
+    await db.update(categories).set({ archived: true }).where(eq(categories.id, id))
     return { archived: true, deleted: false, affected: used }
   }
 
   if (options.reassignTo !== undefined) {
-    db.update(transactions)
+    await db
+      .update(transactions)
       .set({ categoryId: options.reassignTo ?? null })
       .where(eq(transactions.categoryId, id))
-      .run()
   }
 
   if (hasChildren > 0) {
-    db.update(categories).set({ archived: true }).where(eq(categories.id, id)).run()
+    await db.update(categories).set({ archived: true }).where(eq(categories.id, id))
     return { archived: true, deleted: false, affected: used }
   }
 
-  db.delete(categories).where(eq(categories.id, id)).run()
+  await db.delete(categories).where(eq(categories.id, id))
   return { archived: false, deleted: true, affected: used }
 }
 
 /* ------------------------------------------------------------------ *
  * Rules
  * ------------------------------------------------------------------ */
-export function listRules() {
-  return db.all<{
+export async function listRules() {
+  return db.execute<{
     id: number
     categoryId: number
     categoryPath: string
@@ -185,14 +198,14 @@ export function listRules() {
     priority: number
     origin: string
     hitCount: number
-    active: number
+    active: boolean
   }>(sql`
     select
-      r.id, r.category_id as categoryId,
-      case when p.name is null then c.name else p.name || ' / ' || c.name end as categoryPath,
+      r.id, r.category_id as "categoryId",
+      case when p.name is null then c.name else p.name || ' / ' || c.name end as "categoryPath",
       c.color,
-      r.field, r.match_type as matchType, r.pattern, r.direction,
-      r.priority, r.origin, r.hit_count as hitCount, r.active
+      r.field, r.match_type as "matchType", r.pattern, r.direction,
+      r.priority, r.origin, r.hit_count as "hitCount", r.active
     from category_rules r
     join categories c on c.id = r.category_id
     left join categories p on p.id = c.parent_id
@@ -200,7 +213,7 @@ export function listRules() {
   `)
 }
 
-export function createRule(input: {
+export async function createRule(input: {
   categoryId: number
   pattern: string
   field?: string
@@ -211,29 +224,38 @@ export function createRule(input: {
   amountMaxCents?: number | null
   accountId?: number | null
 }) {
-  return db
-    .insert(categoryRules)
-    .values({ ...input, origin: 'user', priority: input.priority ?? 60 })
-    .onConflictDoUpdate({
-      target: [categoryRules.field, categoryRules.matchType, categoryRules.pattern, categoryRules.direction],
-      set: { categoryId: input.categoryId, active: true },
-    })
-    .returning()
-    .get()
+  return (
+    await db
+      .insert(categoryRules)
+      .values({ ...input, origin: 'user', priority: input.priority ?? 60 } as typeof categoryRules.$inferInsert)
+      .onConflictDoUpdate({
+        target: [categoryRules.field, categoryRules.matchType, categoryRules.pattern, categoryRules.direction],
+        set: { categoryId: input.categoryId, active: true },
+      })
+      .returning()
+  )[0]!
 }
 
-export function updateRule(id: number, patch: Record<string, unknown>) {
-  return db.update(categoryRules).set(patch).where(eq(categoryRules.id, id)).returning().get() ?? null
+export async function updateRule(id: number, patch: Record<string, unknown>) {
+  return (
+    (
+      await db
+        .update(categoryRules)
+        .set(patch as Partial<typeof categoryRules.$inferInsert>)
+        .where(eq(categoryRules.id, id))
+        .returning()
+    )[0] ?? null
+  )
 }
 
-export function deleteRule(id: number) {
-  db.update(categoryMemory).set({ promotedRuleId: null }).where(eq(categoryMemory.promotedRuleId, id)).run()
-  return { removed: db.delete(categoryRules).where(eq(categoryRules.id, id)).run().changes }
+export async function deleteRule(id: number) {
+  await db.update(categoryMemory).set({ promotedRuleId: null }).where(eq(categoryMemory.promotedRuleId, id))
+  return { removed: (await db.delete(categoryRules).where(eq(categoryRules.id, id))).count }
 }
 
 /** What the app has learned so far — shown so the user can audit it. */
-export function listMemory() {
-  return db.all<{
+export async function listMemory() {
+  return db.execute<{
     signature: string
     categoryPath: string
     color: string
@@ -243,9 +265,9 @@ export function listMemory() {
   }>(sql`
     select
       m.signature,
-      case when p.name is null then c.name else p.name || ' / ' || c.name end as categoryPath,
+      case when p.name is null then c.name else p.name || ' / ' || c.name end as "categoryPath",
       c.color,
-      m.hits, m.promoted_rule_id as promotedRuleId, m.last_seen_at as lastSeenAt
+      m.hits, m.promoted_rule_id as "promotedRuleId", m.last_seen_at as "lastSeenAt"
     from category_memory m
     join categories c on c.id = m.category_id
     left join categories p on p.id = c.parent_id
@@ -253,14 +275,14 @@ export function listMemory() {
   `)
 }
 
-export function forgetMemory(signature: string) {
+export async function forgetMemory(signature: string) {
   return {
-    removed: db.delete(categoryMemory).where(eq(categoryMemory.signature, signature)).run().changes,
+    removed: (await db.delete(categoryMemory).where(eq(categoryMemory.signature, signature))).count,
   }
 }
 
 /** Categories with no transactions and no rules — safe cleanup candidates. */
-export function unusedCategories() {
+export async function unusedCategories() {
   return db
     .select({ id: categories.id, name: categories.name })
     .from(categories)
@@ -273,5 +295,4 @@ export function unusedCategories() {
       ),
     )
     .orderBy(asc(categories.name))
-    .all()
 }

@@ -13,6 +13,9 @@ import { totals } from './analytics'
 
 const MAX_MONTHS = 600 // 50 years — the guard against a never-amortizing loan
 
+type DebtKind = (typeof debts.$inferSelect)['kind']
+type DebtPaymentKind = (typeof debtPayments.$inferSelect)['kind']
+
 export type DebtRow = {
   id: number
   name: string
@@ -38,57 +41,60 @@ export type DebtRow = {
 }
 
 /** Latest measured balance if there is one, otherwise the opening principal. */
-function currentBalance(debt: typeof debts.$inferSelect): number {
-  const snapshot = db
-    .select()
-    .from(debtSnapshots)
-    .where(eq(debtSnapshots.debtId, debt.id))
-    .orderBy(desc(debtSnapshots.asOf))
-    .limit(1)
-    .get()
+async function currentBalance(debt: typeof debts.$inferSelect): Promise<number> {
+  const snapshot = (
+    await db
+      .select()
+      .from(debtSnapshots)
+      .where(eq(debtSnapshots.debtId, debt.id))
+      .orderBy(desc(debtSnapshots.asOf))
+      .limit(1)
+  )[0]
   return snapshot?.balanceCents ?? debt.principalCents
 }
 
 /** Parcelas pagas + the most recent payment date, from the payment ledger. */
-export function paymentStats(debtId: number): { count: number; lastPaidOn: string | null } {
-  const row = db.get<{ count: number; lastPaidOn: string | null }>(sql`
-    select count(*) as count, max(paid_on) as lastPaidOn
+export async function paymentStats(debtId: number): Promise<{ count: number; lastPaidOn: string | null }> {
+  const rows = await db.execute<{ count: number; lastPaidOn: string | null }>(sql`
+    select count(*) as count, max(paid_on) as "lastPaidOn"
     from debt_payments
     where debt_id = ${debtId} and kind = 'payment'
   `)
+  const row = rows[0]
   return { count: row?.count ?? 0, lastPaidOn: row?.lastPaidOn ?? null }
 }
 
-export function listDebts(): DebtRow[] {
-  const rows = db
+export async function listDebts(): Promise<DebtRow[]> {
+  const rows = await db
     .select({ debt: debts, accountName: accounts.name })
     .from(debts)
     .leftJoin(accounts, eq(accounts.id, debts.accountId))
     .where(eq(debts.active, true))
-    .all()
-  const withBalance = rows.map(({ debt: d, accountName }) => {
-    const balanceCents = currentBalance(d)
-    const { count: installmentsPaid, lastPaidOn } = paymentStats(d.id)
-    return {
-      id: d.id,
-      name: d.name,
-      kind: d.kind,
-      institution: d.institution,
-      accountId: d.accountId,
-      accountName: accountName ?? null,
-      balanceCents,
-      aprBps: d.aprBps,
-      minimumPaymentCents: d.minimumPaymentCents,
-      scheduledPaymentCents: d.scheduledPaymentCents || d.minimumPaymentCents,
-      dueDay: d.dueDay,
-      monthlyInterestCents: Math.round(balanceCents * monthlyRate(d.aprBps)),
-      shareBps: 0,
-      installmentCount: d.installmentCount,
-      installmentsPaid,
-      installmentsRemaining: d.installmentCount === null ? null : Math.max(0, d.installmentCount - installmentsPaid),
-      lastPaymentOn: lastPaidOn,
-    }
-  })
+  const withBalance = await Promise.all(
+    rows.map(async ({ debt: d, accountName }) => {
+      const balanceCents = await currentBalance(d)
+      const { count: installmentsPaid, lastPaidOn } = await paymentStats(d.id)
+      return {
+        id: d.id,
+        name: d.name,
+        kind: d.kind,
+        institution: d.institution,
+        accountId: d.accountId,
+        accountName: accountName ?? null,
+        balanceCents,
+        aprBps: d.aprBps,
+        minimumPaymentCents: d.minimumPaymentCents,
+        scheduledPaymentCents: d.scheduledPaymentCents || d.minimumPaymentCents,
+        dueDay: d.dueDay,
+        monthlyInterestCents: Math.round(balanceCents * monthlyRate(d.aprBps)),
+        shareBps: 0,
+        installmentCount: d.installmentCount,
+        installmentsPaid,
+        installmentsRemaining: d.installmentCount === null ? null : Math.max(0, d.installmentCount - installmentsPaid),
+        lastPaymentOn: lastPaidOn,
+      }
+    }),
+  )
   const total = withBalance.reduce((sum, d) => sum + d.balanceCents, 0)
   return withBalance
     .map((d) => ({ ...d, shareBps: total > 0 ? Math.round((d.balanceCents / total) * 10_000) : 0 }))
@@ -110,36 +116,33 @@ export function listDebts(): DebtRow[] {
  */
 const MATERIALIZE_HORIZON_MONTHS = 6
 
-export function materializeDebtInstallments(debtId: number): { created: number } {
-  const debt = db.select().from(debts).where(eq(debts.id, debtId)).get()
+export async function materializeDebtInstallments(debtId: number): Promise<{ created: number }> {
+  const debt = (await db.select().from(debts).where(eq(debts.id, debtId)))[0]
   if (!debt || !debt.accountId || !debt.active) return { created: 0 }
 
   const amountCents = debt.scheduledPaymentCents || debt.minimumPaymentCents
   if (amountCents <= 0) return { created: 0 }
 
-  const { count: installmentsPaid } = paymentStats(debtId)
+  const { count: installmentsPaid } = await paymentStats(debtId)
   const currentPeriod = todayIso().slice(0, 7)
   const horizon = addMonths(currentPeriod, MATERIALIZE_HORIZON_MONTHS - 1)
 
   const existingPeriods = new Set(
-    db
-      .select({ occurrencePeriod: transactions.occurrencePeriod, postedOn: transactions.postedOn })
-      .from(transactions)
-      .where(eq(transactions.debtId, debtId))
-      .all()
-      .map((r) => r.occurrencePeriod ?? r.postedOn.slice(0, 7)),
+    (
+      await db
+        .select({ occurrencePeriod: transactions.occurrencePeriod, postedOn: transactions.postedOn })
+        .from(transactions)
+        .where(eq(transactions.debtId, debtId))
+    ).map((r) => r.occurrencePeriod ?? r.postedOn.slice(0, 7)),
   )
 
   // Same rationale as cashFlow.ts's materialize(): a period the user
   // explicitly deleted from a pending widget must stay gone, not come
   // back on the next load.
   const skippedPeriods = new Set(
-    db
-      .select({ period: skippedOccurrences.period })
-      .from(skippedOccurrences)
-      .where(eq(skippedOccurrences.debtId, debtId))
-      .all()
-      .map((r) => r.period),
+    (
+      await db.select({ period: skippedOccurrences.period }).from(skippedOccurrences).where(eq(skippedOccurrences.debtId, debtId))
+    ).map((r) => r.period),
   )
 
   const periods: string[] = []
@@ -168,36 +171,34 @@ export function materializeDebtInstallments(debtId: number): { created: number }
     const postedOn = `${period}-${String(day).padStart(2, '0')}`
     const description = debt.name
     const descriptionNorm = normalizeDescription(description)
-    db.insert(transactions)
-      .values({
+    await db.insert(transactions).values({
+      accountId: debt.accountId,
+      postedOn,
+      description,
+      descriptionNorm,
+      amountCents: -Math.abs(amountCents),
+      direction: directionOf(-Math.abs(amountCents)),
+      source: 'manual',
+      categorizedBy: 'none',
+      dedupeHash: dedupeHash({
         accountId: debt.accountId,
         postedOn,
-        description,
-        descriptionNorm,
         amountCents: -Math.abs(amountCents),
-        direction: directionOf(-Math.abs(amountCents)),
-        source: 'manual',
-        categorizedBy: 'none',
-        dedupeHash: dedupeHash({
-          accountId: debt.accountId,
-          postedOn,
-          amountCents: -Math.abs(amountCents),
-          descriptionNorm,
-        }),
-        pending: true,
-        debtId: debt.id,
-        occurrencePeriod: period,
-      })
-      .run()
+        descriptionNorm,
+      }),
+      pending: true,
+      debtId: debt.id,
+      occurrencePeriod: period,
+    })
     created++
   }
   return { created }
 }
 
-export function materializeAllDebts(): { created: number } {
-  const rows = db.select({ id: debts.id }).from(debts).where(eq(debts.active, true)).all()
+export async function materializeAllDebts(): Promise<{ created: number }> {
+  const rows = await db.select({ id: debts.id }).from(debts).where(eq(debts.active, true))
   let created = 0
-  for (const row of rows) created += materializeDebtInstallments(row.id).created
+  for (const row of rows) created += (await materializeDebtInstallments(row.id)).created
   return { created }
 }
 
@@ -212,12 +213,12 @@ export function materializeAllDebts(): { created: number } {
  * also left alone — the template stops being authoritative over that one
  * occurrence the moment the user touches it.
  */
-function syncMaterializedRows(debt: typeof debts.$inferSelect) {
+async function syncMaterializedRows(debt: typeof debts.$inferSelect): Promise<void> {
   if (!debt.accountId) return
   const amountCents = debt.scheduledPaymentCents || debt.minimumPaymentCents
   if (amountCents <= 0) return
 
-  const rows = db
+  const rows = await db
     .select()
     .from(transactions)
     .where(
@@ -227,7 +228,6 @@ function syncMaterializedRows(debt: typeof debts.$inferSelect) {
         eq(transactions.manuallyEdited, false),
       ),
     )
-    .all()
 
   const description = debt.name
   const descriptionNorm = normalizeDescription(description)
@@ -237,7 +237,8 @@ function syncMaterializedRows(debt: typeof debts.$inferSelect) {
     const [year, month] = period.split('-').map(Number) as [number, number]
     const day = Math.min(debt.dueDay, daysInMonth(year, month))
     const postedOn = `${period}-${String(day).padStart(2, '0')}`
-    db.update(transactions)
+    await db
+      .update(transactions)
       .set({
         postedOn,
         description,
@@ -253,7 +254,6 @@ function syncMaterializedRows(debt: typeof debts.$inferSelect) {
         }),
       })
       .where(eq(transactions.id, row.id))
-      .run()
   }
 }
 
@@ -267,8 +267,8 @@ export const monthlyRate = (aprBps: number) => Math.pow(1 + aprBps / 10_000, 1 /
 /* ------------------------------------------------------------------ *
  * Composition + exposure + debt-to-income
  * ------------------------------------------------------------------ */
-export function debtOverview(options: { period?: string } = {}) {
-  const rows = listDebts()
+export async function debtOverview(options: { period?: string } = {}) {
+  const rows = await listDebts()
   const totalCents = rows.reduce((sum, d) => sum + d.balanceCents, 0)
   const monthlyInterestCents = rows.reduce((sum, d) => sum + d.monthlyInterestCents, 0)
   const minimumCents = rows.reduce((sum, d) => sum + d.minimumPaymentCents, 0)
@@ -287,10 +287,10 @@ export function debtOverview(options: { period?: string } = {}) {
   // exactly the month-to-month swings the user wants to see. Defaults to
   // the last fully closed month: the current month's income is still
   // arriving, so showing it as final would understate how comprometida a
-  // renda really is.
+  // renda really é.
   const period = options.period ?? addMonths(todayIso().slice(0, 7), -1)
   const { start: from, end: to } = periodBounds(period)
-  const income = totals({ from, to })
+  const income = await totals({ from, to })
   const monthlyIncomeCents = income.incomeCents
 
   const byKind = new Map<string, number>()
@@ -357,17 +357,17 @@ type SimDebt = {
  * snowball). This is the standard model and it is deliberately simple —
  * the point is comparing two strategies, not predicting to the centavo.
  */
-export function projectPaydown(options: {
+export async function projectPaydown(options: {
   extraMonthlyCents?: number
   strategy?: 'avalanche' | 'snowball'
   label?: string
   startPeriod?: string
-}): Scenario {
+}): Promise<Scenario> {
   const extraMonthlyCents = Math.max(0, options.extraMonthlyCents ?? 0)
   const strategy = options.strategy ?? 'avalanche'
   const startPeriod = options.startPeriod ?? todayIso().slice(0, 7)
 
-  const sim: SimDebt[] = listDebts().map((d) => ({
+  const sim: SimDebt[] = (await listDebts()).map((d) => ({
     id: d.id,
     name: d.name,
     balance: d.balanceCents,
@@ -474,9 +474,11 @@ export function projectPaydown(options: {
 }
 
 /** Baseline vs accelerated, aligned on the same month axis for one chart. */
-export function paydownComparison(extraMonthlyCents: number, strategy: 'avalanche' | 'snowball' = 'avalanche') {
-  const baseline = projectPaydown({ extraMonthlyCents: 0, strategy, label: 'Pagamento atual' })
-  const accelerated = projectPaydown({ extraMonthlyCents, strategy, label: 'Com aporte extra' })
+export async function paydownComparison(extraMonthlyCents: number, strategy: 'avalanche' | 'snowball' = 'avalanche') {
+  const [baseline, accelerated] = await Promise.all([
+    projectPaydown({ extraMonthlyCents: 0, strategy, label: 'Pagamento atual' }),
+    projectPaydown({ extraMonthlyCents, strategy, label: 'Com aporte extra' }),
+  ])
 
   const horizon = Math.max(baseline.series.length, accelerated.series.length)
   const merged = Array.from({ length: horizon }, (_, i) => ({
@@ -516,42 +518,52 @@ export type DebtInput = {
   accountId?: number | null
 }
 
-export function createDebt(input: DebtInput) {
-  const row = db.insert(debts).values(input).returning().get()
+export async function createDebt(input: DebtInput) {
+  const row = (
+    await db
+      .insert(debts)
+      .values({ ...input, kind: input.kind as DebtKind | undefined })
+      .returning()
+  )[0]!
   // The opening principal is also the first measured point on the trend.
-  db.insert(debtSnapshots)
+  await db
+    .insert(debtSnapshots)
     .values({ debtId: row.id, asOf: todayIso(), balanceCents: input.principalCents })
     .onConflictDoNothing()
-    .run()
   return row
 }
 
-export function updateDebt(id: number, patch: Partial<DebtInput> & { active?: boolean }) {
-  const updated = db.update(debts).set(patch).where(eq(debts.id, id)).returning().get() ?? null
-  if (updated) syncMaterializedRows(updated)
+export async function updateDebt(id: number, patch: Partial<DebtInput> & { active?: boolean }) {
+  const updated =
+    (
+      await db
+        .update(debts)
+        .set({ ...patch, kind: patch.kind as DebtKind | undefined })
+        .where(eq(debts.id, id))
+        .returning()
+    )[0] ?? null
+  if (updated) await syncMaterializedRows(updated)
   return updated
 }
 
-export function deleteDebt(id: number) {
-  const result = db.delete(debts).where(eq(debts.id, id)).run()
-  return { removed: result.changes }
+export async function deleteDebt(id: number) {
+  const result = await db.delete(debts).where(eq(debts.id, id))
+  return { removed: result.count }
 }
 
-export function recordSnapshot(debtId: number, asOf: string, balanceCents: number) {
-  const existing = db
-    .select()
-    .from(debtSnapshots)
-    .where(sql`${debtSnapshots.debtId} = ${debtId} and ${debtSnapshots.asOf} = ${asOf}`)
-    .get()
+export async function recordSnapshot(debtId: number, asOf: string, balanceCents: number) {
+  const existing = (
+    await db
+      .select()
+      .from(debtSnapshots)
+      .where(sql`${debtSnapshots.debtId} = ${debtId} and ${debtSnapshots.asOf} = ${asOf}`)
+  )[0]
   if (existing) {
-    return db
-      .update(debtSnapshots)
-      .set({ balanceCents })
-      .where(eq(debtSnapshots.id, existing.id))
-      .returning()
-      .get()
+    return (
+      await db.update(debtSnapshots).set({ balanceCents }).where(eq(debtSnapshots.id, existing.id)).returning()
+    )[0]!
   }
-  return db.insert(debtSnapshots).values({ debtId, asOf, balanceCents }).returning().get()
+  return (await db.insert(debtSnapshots).values({ debtId, asOf, balanceCents }).returning())[0]!
 }
 
 export type PaymentRow = {
@@ -564,7 +576,7 @@ export type PaymentRow = {
   notes: string | null
 }
 
-export function listPayments(debtId?: number): PaymentRow[] {
+export async function listPayments(debtId?: number): Promise<PaymentRow[]> {
   const query = db
     .select({
       id: debtPayments.id,
@@ -578,34 +590,39 @@ export function listPayments(debtId?: number): PaymentRow[] {
     .from(debtPayments)
     .innerJoin(debts, eq(debts.id, debtPayments.debtId))
     .orderBy(desc(debtPayments.paidOn))
-  return debtId ? query.where(eq(debtPayments.debtId, debtId)).all() : query.all()
+  return debtId ? query.where(eq(debtPayments.debtId, debtId)) : query
 }
 
-export function createPayment(input: {
+export async function createPayment(input: {
   debtId: number
   kind?: string
   paidOn: string
   amountCents: number
   notes?: string | null
 }) {
-  return db.insert(debtPayments).values(input).returning().get()
+  return (
+    await db
+      .insert(debtPayments)
+      .values({ ...input, kind: input.kind as DebtPaymentKind | undefined })
+      .returning()
+  )[0]!
 }
 
-export function deletePayment(id: number) {
-  return { removed: db.delete(debtPayments).where(eq(debtPayments.id, id)).run().changes }
+export async function deletePayment(id: number) {
+  return { removed: (await db.delete(debtPayments).where(eq(debtPayments.id, id))).count }
 }
 
 /** Measured total debt over time — the actual trend, not a projection. */
-export function debtTrend() {
-  return db.all<{ asOf: string; balanceCents: number }>(sql`
+export async function debtTrend() {
+  return db.execute<{ asOf: string; balanceCents: number }>(sql`
     with points as (
       select distinct as_of from debt_snapshots
     )
     select
-      p.as_of as asOf,
-      coalesce(sum(latest.balance_cents), 0) as balanceCents
+      p.as_of as "asOf",
+      coalesce(sum(latest.balance_cents), 0) as "balanceCents"
     from points p
-    left join debts d on d.active = 1
+    left join debts d on d.active = true
     left join (
       select s1.debt_id, s1.as_of, s1.balance_cents
       from debt_snapshots s1

@@ -82,8 +82,8 @@ export const DEFAULT_LIQUID_ASSET_CLASSES = ['cash', 'fixed_income', 'treasury']
 /** Window for "dívida de curto prazo" in the runway's net worth. */
 const SHORT_TERM_DEBT_DAYS = 30
 
-export function getSettings(): HealthSettings {
-  const row = db.select().from(financialHealthSettings).where(eq(financialHealthSettings.id, 1)).get()
+export async function getSettings(): Promise<HealthSettings> {
+  const row = (await db.select().from(financialHealthSettings).where(eq(financialHealthSettings.id, 1)))[0]
   if (!row) return { ...DEFAULT_HEALTH_SETTINGS }
   return {
     weightLiquidity: row.weightLiquidity,
@@ -101,12 +101,12 @@ export function getSettings(): HealthSettings {
   }
 }
 
-export function setSettings(patch: Partial<HealthSettings>): HealthSettings {
-  const existing = db.select().from(financialHealthSettings).where(eq(financialHealthSettings.id, 1)).get()
+export async function setSettings(patch: Partial<HealthSettings>): Promise<HealthSettings> {
+  const existing = (await db.select().from(financialHealthSettings).where(eq(financialHealthSettings.id, 1)))[0]
   if (existing) {
-    db.update(financialHealthSettings).set(patch).where(eq(financialHealthSettings.id, 1)).run()
+    await db.update(financialHealthSettings).set(patch).where(eq(financialHealthSettings.id, 1))
   } else {
-    db.insert(financialHealthSettings).values({ id: 1, ...DEFAULT_HEALTH_SETTINGS, ...patch }).run()
+    await db.insert(financialHealthSettings).values({ id: 1, ...DEFAULT_HEALTH_SETTINGS, ...patch })
   }
   return getSettings()
 }
@@ -338,8 +338,8 @@ export type ScoreInputs = {
   allocation: Parameters<typeof allocationIndicator>[0]
 }
 
-export function gatherScoreInputs(period: string, accountId: number | null = null): ScoreInputs {
-  const settings = getSettings()
+export async function gatherScoreInputs(period: string, accountId: number | null = null): Promise<ScoreInputs> {
+  const settings = await getSettings()
 
   // Custo mensal médio over the configured window, ending at the month
   // before `period`: the period itself is the thing being measured, so
@@ -347,18 +347,22 @@ export function gatherScoreInputs(period: string, accountId: number | null = nul
   // this indicator exists to show.
   const costFrom = periodBounds(addMonths(period, -settings.costLookbackMonths)).start
   const costTo = periodBounds(addMonths(period, -1)).end
-  const costWindow = totals({ from: costFrom, to: costTo, accountId })
+  const [costWindow, balances, debt, goals, reserve, allocationSlices] = await Promise.all([
+    totals({ from: costFrom, to: costTo, accountId }),
+    accountBalances(),
+    debtOverview({ period }),
+    getPeriodProgress(period, accountId),
+    reserveStatus(),
+    allocation(),
+  ])
   const monthlyCostCents =
     settings.costLookbackMonths > 0 ? Math.round(costWindow.expenseCents / settings.costLookbackMonths) : 0
 
-  const availableBalanceCents = accountBalances()
+  const availableBalanceCents = balances
     .filter((a) => (accountId ? a.id === accountId : true))
     .reduce((sum, a) => sum + a.balanceCents, 0)
 
-  const debt = debtOverview({ period })
-  const goals = getPeriodProgress(period, accountId)
-  const reserve = reserveStatus()
-  const drifts = allocation()
+  const drifts = allocationSlices
     .filter((slice) => slice.driftBps !== null)
     .map((slice) => ({ assetClass: slice.assetClass, label: slice.label, driftBps: slice.driftBps! }))
 
@@ -403,9 +407,9 @@ export function composeScoreFromInputs(inputs: ScoreInputs) {
   ])
 }
 
-export function healthScore(period: string, accountId: number | null = null): HealthScore {
+export async function healthScore(period: string, accountId: number | null = null): Promise<HealthScore> {
   const { start, end } = periodBounds(period)
-  const inputs = gatherScoreInputs(period, accountId)
+  const inputs = await gatherScoreInputs(period, accountId)
   const settings = inputs.settings
 
   const { scoreBps, indicators, activeWeight } = composeScoreFromInputs(inputs)
@@ -454,22 +458,22 @@ export type RunwayScope = {
  * pendentes" widget shows, so the runway and that widget can never
  * disagree about what is about to leave the account.
  */
-function shortTermDebtCents(accountId: number | null): number {
+async function shortTermDebtCents(accountId: number | null): Promise<number> {
   const today = todayIso()
   const horizon = addDays(today, SHORT_TERM_DEBT_DAYS)
-  const row = db.get<{ total: number }>(sql`
+  const rows = await db.execute<{ total: number }>(sql`
     select coalesce(sum(abs(amount_cents)), 0) as total
     from transactions
-    where pending = 1
+    where pending = true
       and debt_id is not null
       and posted_on between ${today} and ${horizon}
       ${accountId ? sql`and account_id = ${accountId}` : sql``}
   `)
-  return row?.total ?? 0
+  return rows[0]?.total ?? 0
 }
 
-function liquidInvestmentsCents(liquidClasses: readonly string[]): number {
-  return positions()
+async function liquidInvestmentsCents(liquidClasses: readonly string[]): Promise<number> {
+  return (await positions())
     .filter((p) => p.countsTowardReserve || liquidClasses.includes(p.assetClass))
     .reduce((sum, p) => sum + p.marketValueCents, 0)
 }
@@ -477,17 +481,20 @@ function liquidInvestmentsCents(liquidClasses: readonly string[]): number {
 /** Ajustes hipotéticos do simulador. Ausentes em toda chamada de produção. */
 export type RunwayOverrides = { balanceDeltaCents?: number; investmentsDeltaCents?: number }
 
-function runwayFor(
+async function runwayFor(
   accountId: number | null,
   label: string,
   settings: HealthSettings,
   liquidClasses: readonly string[],
   overrides: RunwayOverrides = {},
-): RunwayScope {
+): Promise<RunwayScope> {
   const currentPeriod = todayIso().slice(0, 7)
   const costFrom = periodBounds(addMonths(currentPeriod, -settings.costLookbackMonths)).start
   const costTo = periodBounds(addMonths(currentPeriod, -1)).end
-  const costWindow = totals({ from: costFrom, to: costTo, accountId })
+  const [costWindow, balances] = await Promise.all([
+    totals({ from: costFrom, to: costTo, accountId }),
+    accountBalances(),
+  ])
   const monthlyCostCents =
     settings.costLookbackMonths > 0 ? Math.round(costWindow.expenseCents / settings.costLookbackMonths) : 0
 
@@ -495,7 +502,7 @@ function runwayFor(
   const investmentsDeltaCents = overrides.investmentsDeltaCents ?? 0
 
   const balanceCents =
-    accountBalances()
+    balances
       .filter((a) => (accountId ? a.id === accountId : true))
       .reduce((sum, a) => sum + a.balanceCents, 0) + balanceDeltaCents
 
@@ -504,8 +511,8 @@ function runwayFor(
   // PJ would be a guess, and a guess is exactly what the memory of
   // calculation is supposed to make impossible.
   const investmentsCents =
-    accountId === null ? liquidInvestmentsCents(liquidClasses) + investmentsDeltaCents : 0
-  const shortTermCents = shortTermDebtCents(accountId)
+    accountId === null ? (await liquidInvestmentsCents(liquidClasses)) + investmentsDeltaCents : 0
+  const shortTermCents = await shortTermDebtCents(accountId)
   const netWorthCents = balanceCents + investmentsCents - shortTermCents
 
   const assumptions: Assumptions = {
@@ -564,19 +571,20 @@ function runwayFor(
  * at the page level, and repeating that guess in a service would bake
  * account naming into the calculation layer.
  */
-export function runway(
+export async function runway(
   liquidClasses: readonly string[] = DEFAULT_LIQUID_ASSET_CLASSES,
   overrides: RunwayOverrides = {},
-): {
+): Promise<{
   scopes: RunwayScope[]
   consolidated: RunwayScope
-} {
-  const settings = getSettings()
+}> {
+  const settings = await getSettings()
   // Os deltas valem só na linha consolidada: investimentos não são
   // atribuíveis a uma conta corrente (ver `runwayFor`), então um ajuste de
   // investimento numa linha por conta não teria onde ser aplicado.
-  const consolidated = runwayFor(null, 'Consolidado', settings, liquidClasses, overrides)
-  const perAccount = accountBalances().map((a) => runwayFor(a.id, a.name, settings, liquidClasses))
+  const consolidated = await runwayFor(null, 'Consolidado', settings, liquidClasses, overrides)
+  const balances = await accountBalances()
+  const perAccount = await Promise.all(balances.map((a) => runwayFor(a.id, a.name, settings, liquidClasses)))
   return { scopes: [consolidated, ...perAccount], consolidated }
 }
 
@@ -616,12 +624,12 @@ export type RiskRule = {
  * reported as being within range, which would be a claim the data does
  * not support.
  */
-export function riskRadar(period: string, accountId: number | null = null): {
+export async function riskRadar(period: string, accountId: number | null = null): Promise<{
   period: string
   rules: RiskRule[]
   assumptions: Assumptions
-} {
-  const settings = getSettings()
+}> {
+  const settings = await getSettings()
   const rules: RiskRule[] = []
 
   const flagged = (valueBps: number, thresholdBps: number, direction: 'above' | 'below') =>
@@ -642,8 +650,13 @@ export function riskRadar(period: string, accountId: number | null = null): {
 
   /* Limite de cartão comprometido contra a receita do período. Ver ADR 0015:
      este número é uma medição de limite usado, nunca a fatura de um ciclo. */
-  const cards = listCards()
-  const goals = getPeriodProgress(period, accountId)
+  const [cards, goals, reserve, allocationSlices, debt] = await Promise.all([
+    listCards(),
+    getPeriodProgress(period, accountId),
+    reserveStatus(),
+    allocation(),
+    debtOverview({ period }),
+  ])
   const billCents = cards.reduce((sum, c) => sum + c.usedCents, 0)
   if (cards.length > 0 && goals.actual.incomeCents > 0) {
     const valueBps = Math.round((billCents / goals.actual.incomeCents) * 10_000)
@@ -667,7 +680,6 @@ export function riskRadar(period: string, accountId: number | null = null): {
   }
 
   /* Cobertura da reserva de emergência. */
-  const reserve = reserveStatus()
   if (reserve.targetCents > 0) {
     rules.push({
       key: 'reserve_coverage',
@@ -689,7 +701,7 @@ export function riskRadar(period: string, accountId: number | null = null): {
   }
 
   /* Desvio de alocação, a maior distância entre carteira e política. */
-  const drifts = allocation().filter((slice) => slice.driftBps !== null)
+  const drifts = allocationSlices.filter((slice) => slice.driftBps !== null)
   if (drifts.length > 0) {
     const worst = drifts.reduce((max, s) => (Math.abs(s.driftBps!) > Math.abs(max.driftBps!) ? s : max))
     const valueBps = Math.abs(worst.driftBps!)
@@ -735,7 +747,6 @@ export function riskRadar(period: string, accountId: number | null = null): {
   }
 
   /* Comprometimento de renda com dívida. */
-  const debt = debtOverview({ period })
   if (debt.debts.length > 0 && debt.debtToIncomeBps !== null) {
     rules.push({
       key: 'debt_to_income',
@@ -808,18 +819,16 @@ export type NetWorth = {
   assumptions: Assumptions
 }
 
-export function netWorth(): NetWorth {
-  const balances = accountBalances()
+export async function netWorth(): Promise<NetWorth> {
+  const [balances, holdings, debts] = await Promise.all([accountBalances(), positions(), listDebts()])
   const balanceCents = balances.reduce((sum, a) => sum + a.balanceCents, 0)
 
   // TODOS os investimentos, não só os que contam para a reserva: aqui a
   // pergunta é patrimônio, não liquidez de emergência.
-  const holdings = positions()
   const investmentsCents = holdings.reduce((sum, p) => sum + p.marketValueCents, 0)
 
   // Dívida TOTAL (saldo corrente de toda dívida ativa), a mesma soma que
   // `debtOverview` publica, lida da mesma origem em vez de recalculada.
-  const debts = listDebts()
   const debtCents = debts.reduce((sum, d) => sum + d.balanceCents, 0)
 
   return {

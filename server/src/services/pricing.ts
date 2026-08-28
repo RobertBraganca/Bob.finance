@@ -49,8 +49,8 @@ export const DEFAULT_PRICING_SETTINGS: PricingSettings = {
   billablePercentageBps: 6_000,
 }
 
-export function getSettings(): PricingSettings {
-  const row = db.select().from(pricingSettings).where(eq(pricingSettings.id, 1)).get()
+export async function getSettings(): Promise<PricingSettings> {
+  const row = (await db.select().from(pricingSettings).where(eq(pricingSettings.id, 1)))[0]
   if (!row) return { ...DEFAULT_PRICING_SETTINGS }
   return {
     availableHoursPerMonth: row.availableHoursPerMonth,
@@ -58,12 +58,12 @@ export function getSettings(): PricingSettings {
   }
 }
 
-export function updateSettings(patch: Partial<PricingSettings>): PricingSettings {
-  const existing = db.select().from(pricingSettings).where(eq(pricingSettings.id, 1)).get()
+export async function updateSettings(patch: Partial<PricingSettings>): Promise<PricingSettings> {
+  const existing = (await db.select().from(pricingSettings).where(eq(pricingSettings.id, 1)))[0]
   if (existing) {
-    db.update(pricingSettings).set(patch).where(eq(pricingSettings.id, 1)).run()
+    await db.update(pricingSettings).set(patch).where(eq(pricingSettings.id, 1))
   } else {
-    db.insert(pricingSettings).values({ id: 1, ...DEFAULT_PRICING_SETTINGS, ...patch }).run()
+    await db.insert(pricingSettings).values({ id: 1, ...DEFAULT_PRICING_SETTINGS, ...patch })
   }
   return getSettings()
 }
@@ -81,33 +81,44 @@ export type MultiplierOption = {
   active: boolean
 }
 
-export function listMultipliers(dimension?: string): MultiplierOption[] {
+export async function listMultipliers(dimension?: string): Promise<MultiplierOption[]> {
   const base = db
     .select()
     .from(pricingMultiplierOptions)
     .orderBy(asc(pricingMultiplierOptions.dimension), asc(pricingMultiplierOptions.sortOrder))
-  const rows = dimension
-    ? base.where(eq(pricingMultiplierOptions.dimension, dimension)).all()
-    : base.all()
+  const rows = dimension ? await base.where(eq(pricingMultiplierOptions.dimension, dimension as (typeof pricingMultiplierOptions.$inferSelect)['dimension'])) : await base
   return rows.map((r) => ({ ...r, active: !!r.active }))
 }
 
-export function createMultiplier(input: {
+export async function createMultiplier(input: {
   dimension: string
   label: string
   description?: string | null
   multiplierBps: number
   sortOrder?: number
 }) {
-  return db.insert(pricingMultiplierOptions).values(input).returning().get()
+  return (
+    await db
+      .insert(pricingMultiplierOptions)
+      .values({ ...input, dimension: input.dimension as (typeof pricingMultiplierOptions.$inferSelect)['dimension'] })
+      .returning()
+  )[0]!
 }
 
-export function updateMultiplier(id: number, patch: Record<string, unknown>) {
-  return db.update(pricingMultiplierOptions).set(patch).where(eq(pricingMultiplierOptions.id, id)).returning().get() ?? null
+export async function updateMultiplier(id: number, patch: Record<string, unknown>) {
+  return (
+    (
+      await db
+        .update(pricingMultiplierOptions)
+        .set(patch as Partial<typeof pricingMultiplierOptions.$inferInsert>)
+        .where(eq(pricingMultiplierOptions.id, id))
+        .returning()
+    )[0] ?? null
+  )
 }
 
-export function deleteMultiplier(id: number) {
-  return { removed: db.delete(pricingMultiplierOptions).where(eq(pricingMultiplierOptions.id, id)).run().changes }
+export async function deleteMultiplier(id: number) {
+  return { removed: (await db.delete(pricingMultiplierOptions).where(eq(pricingMultiplierOptions.id, id))).count }
 }
 
 /* ------------------------------------------------------------------ *
@@ -168,7 +179,7 @@ function combineMultipliers(applied: AppliedMultiplier[]): number {
   )
 }
 
-function resolveMultipliers(input: SimulateInput): AppliedMultiplier[] {
+async function resolveMultipliers(input: SimulateInput): Promise<AppliedMultiplier[]> {
   const wanted: Array<{ dimension: PricingDimension; optionId: number | null }> = [
     { dimension: 'complexity', optionId: input.complexityOptionId ?? null },
     { dimension: 'urgency', optionId: input.urgencyOptionId ?? null },
@@ -178,7 +189,7 @@ function resolveMultipliers(input: SimulateInput): AppliedMultiplier[] {
 
   const ids = wanted.map((w) => w.optionId).filter((id): id is number => id !== null)
   const rows = ids.length
-    ? db.select().from(pricingMultiplierOptions).where(inArray(pricingMultiplierOptions.id, ids)).all()
+    ? await db.select().from(pricingMultiplierOptions).where(inArray(pricingMultiplierOptions.id, ids))
     : []
   const byId = new Map(rows.map((r) => [r.id, r] as const))
 
@@ -206,12 +217,12 @@ function resolveMultipliers(input: SimulateInput): AppliedMultiplier[] {
   })
 }
 
-export function simulate(input: SimulateInput): Simulation {
+export async function simulate(input: SimulateInput): Promise<Simulation> {
   const period = input.period ?? periodOf(todayIso())
-  const settings = getSettings()
+  const settings = await getSettings()
 
   // The one source of truth for "how much do I need to bill this month".
-  const breakEven = financialEngine.breakEven(period)
+  const breakEven = await financialEngine.breakEven(period)
   if (breakEven.breakEvenCents === null) {
     throw new PricingError(
       'não há ponto de equilíbrio para este mês (a alíquota configurada é igual ou maior que 100% do faturamento), então não há base para calcular a hora',
@@ -241,14 +252,14 @@ export function simulate(input: SimulateInput): Simulation {
   const directCostsCents = directCosts.reduce((sum, c) => sum + c.amountCents, 0)
   const basePriceCents = minimumPriceCents + directCostsCents
 
-  const multipliers = resolveMultipliers(input)
+  const multipliers = await resolveMultipliers(input)
   const combinedMultiplierBps = combineMultipliers(multipliers)
   const adjustedPriceCents = Math.round((basePriceCents * combinedMultiplierBps) / 10_000)
 
   // Gross-up with the SAME rate the break-even uses. Not a second tax
   // setting: the tax is embedded in what the client pays, never discounted
   // from what the professional meant to receive.
-  const engineParams = financialEngine.getSettings()
+  const engineParams = await financialEngine.getSettings()
   const taxRateBps = engineParams.taxRateBps
   const priceWithTaxCents =
     taxRateBps > 0 ? Math.round(adjustedPriceCents / (1 - taxRateBps / 10_000)) : adjustedPriceCents
@@ -346,40 +357,36 @@ const toQuoteRow = (row: typeof projectQuotes.$inferSelect): QuoteRow => ({
  * a client must not change because the user edited their monthly costs the
  * week after (spec, "números congelados").
  */
-export function saveQuote(input: SimulateInput & { clientLabel: string }): QuoteRow {
-  const result = simulate(input)
-  const row = db
-    .insert(projectQuotes)
-    .values({
-      clientLabel: input.clientLabel,
-      estimatedHours: input.estimatedHours,
-      directCosts: input.directCosts ?? [],
-      complexityOptionId: input.complexityOptionId ?? null,
-      urgencyOptionId: input.urgencyOptionId ?? null,
-      clientSizeOptionId: input.clientSizeOptionId ?? null,
-      usageRightsOptionId: input.usageRightsOptionId ?? null,
-      extraMarginBps: input.extraMarginBps ?? 0,
-      hourlyBaseCents: result.hourlyBaseCents,
-      minimumPriceCents: result.minimumPriceCents,
-      recommendedPriceCents: result.recommendedPriceCents,
-    })
-    .returning()
-    .get()
+export async function saveQuote(input: SimulateInput & { clientLabel: string }): Promise<QuoteRow> {
+  const result = await simulate(input)
+  const row = (
+    await db
+      .insert(projectQuotes)
+      .values({
+        clientLabel: input.clientLabel,
+        estimatedHours: input.estimatedHours,
+        directCosts: input.directCosts ?? [],
+        complexityOptionId: input.complexityOptionId ?? null,
+        urgencyOptionId: input.urgencyOptionId ?? null,
+        clientSizeOptionId: input.clientSizeOptionId ?? null,
+        usageRightsOptionId: input.usageRightsOptionId ?? null,
+        extraMarginBps: input.extraMarginBps ?? 0,
+        hourlyBaseCents: result.hourlyBaseCents,
+        minimumPriceCents: result.minimumPriceCents,
+        recommendedPriceCents: result.recommendedPriceCents,
+      })
+      .returning()
+  )[0]!
   return toQuoteRow(row)
 }
 
-export function listQuotes(): QuoteRow[] {
-  return db
-    .select()
-    .from(projectQuotes)
-    .orderBy(asc(projectQuotes.id))
-    .all()
-    .map(toQuoteRow)
-    .reverse()
+export async function listQuotes(): Promise<QuoteRow[]> {
+  const rows = await db.select().from(projectQuotes).orderBy(asc(projectQuotes.id))
+  return rows.map(toQuoteRow).reverse()
 }
 
-export function getQuote(id: number): QuoteRow | null {
-  const row = db.select().from(projectQuotes).where(eq(projectQuotes.id, id)).get()
+export async function getQuote(id: number): Promise<QuoteRow | null> {
+  const row = (await db.select().from(projectQuotes).where(eq(projectQuotes.id, id)))[0]
   return row ? toQuoteRow(row) : null
 }
 
@@ -405,8 +412,8 @@ const CALCULATION_FIELDS = [
  * specific amount, and recalculating afterward would make the quote
  * disagree with the ledger.
  */
-export function updateQuote(id: number, patch: QuoteEdit): QuoteRow | null {
-  const existing = db.select().from(projectQuotes).where(eq(projectQuotes.id, id)).get()
+export async function updateQuote(id: number, patch: QuoteEdit): Promise<QuoteRow | null> {
+  const existing = (await db.select().from(projectQuotes).where(eq(projectQuotes.id, id)))[0]
   if (!existing) return null
 
   const touchesCalculation = CALCULATION_FIELDS.some((field) => patch[field] !== undefined)
@@ -430,7 +437,7 @@ export function updateQuote(id: number, patch: QuoteEdit): QuoteRow | null {
       usageRightsOptionId: patch.usageRightsOptionId !== undefined ? patch.usageRightsOptionId : existing.usageRightsOptionId,
       extraMarginBps: patch.extraMarginBps ?? existing.extraMarginBps,
     }
-    const result = simulate(mergedInput)
+    const result = await simulate(mergedInput)
     Object.assign(updateValues, {
       estimatedHours: mergedInput.estimatedHours,
       directCosts: mergedInput.directCosts,
@@ -447,18 +454,24 @@ export function updateQuote(id: number, patch: QuoteEdit): QuoteRow | null {
 
   if (Object.keys(updateValues).length === 0) return toQuoteRow(existing)
 
-  updateValues.updatedAt = sql`(strftime('%Y-%m-%dT%H:%M:%SZ','now'))`
-  const row = db.update(projectQuotes).set(updateValues).where(eq(projectQuotes.id, id)).returning().get()
+  updateValues.updatedAt = sql`now_iso()`
+  const row = (
+    await db
+      .update(projectQuotes)
+      .set(updateValues as Partial<typeof projectQuotes.$inferInsert>)
+      .where(eq(projectQuotes.id, id))
+      .returning()
+  )[0]
   return row ? toQuoteRow(row) : null
 }
 
-export function deleteQuote(id: number) {
-  return { removed: db.delete(projectQuotes).where(eq(projectQuotes.id, id)).run().changes }
+export async function deleteQuote(id: number) {
+  return { removed: (await db.delete(projectQuotes).where(eq(projectQuotes.id, id))).count }
 }
 
 /** Status is always manually editable back and forth — never a locked state machine. */
-export function setQuoteStatus(id: number, status: QuoteStatus): QuoteRow | null {
-  const row = db.update(projectQuotes).set({ status }).where(eq(projectQuotes.id, id)).returning().get()
+export async function setQuoteStatus(id: number, status: QuoteStatus): Promise<QuoteRow | null> {
+  const row = (await db.update(projectQuotes).set({ status }).where(eq(projectQuotes.id, id)).returning())[0]
   return row ? toQuoteRow(row) : null
 }
 
@@ -468,12 +481,12 @@ export function setQuoteStatus(id: number, status: QuoteStatus): QuoteRow | null
  * recurring template. Blocked once already approved so the same quote can
  * never create the transaction twice.
  */
-export function approveQuote(id: number, input: { accountId: number; paidOn: string }): QuoteRow {
-  const quote = getQuote(id)
+export async function approveQuote(id: number, input: { accountId: number; paidOn: string }): Promise<QuoteRow> {
+  const quote = await getQuote(id)
   if (!quote) throw new PricingError('cotação não encontrada')
   if (quote.status === 'approved') throw new PricingError('esta cotação já foi aprovada')
 
-  createTransaction({
+  await createTransaction({
     accountId: input.accountId,
     postedOn: input.paidOn,
     description: `Projeto: ${quote.clientLabel}`,
@@ -481,15 +494,17 @@ export function approveQuote(id: number, input: { accountId: number; paidOn: str
     source: 'manual',
   })
 
-  const row = db.update(projectQuotes).set({ status: 'approved' }).where(eq(projectQuotes.id, id)).returning().get()!
+  const row = (
+    await db.update(projectQuotes).set({ status: 'approved' }).where(eq(projectQuotes.id, id)).returning()
+  )[0]!
   return toQuoteRow(row)
 }
 
 /** Grouped for the four selectors in the form, active options only. */
-export function multipliersByDimension(): Record<string, MultiplierOption[]> {
+export async function multipliersByDimension(): Promise<Record<string, MultiplierOption[]>> {
   const grouped: Record<string, MultiplierOption[]> = {}
   for (const dimension of PRICING_DIMENSIONS) grouped[dimension] = []
-  for (const option of listMultipliers()) {
+  for (const option of await listMultipliers()) {
     if (!option.active) continue
     ;(grouped[option.dimension] ??= []).push(option)
   }
@@ -507,9 +522,9 @@ export function multipliersByDimension(): Record<string, MultiplierOption[]> {
  * Devolve `null` sem nenhuma cotação salva, nunca zero: zero dividiria a
  * meta por nada e produziria um número inventado.
  */
-export function averageRecentQuoteCents(n = 5): { averageCents: number | null; sampleSize: number } {
+export async function averageRecentQuoteCents(n = 5): Promise<{ averageCents: number | null; sampleSize: number }> {
   // `listQuotes` já vem do mais recente para o mais antigo.
-  const recent = listQuotes().slice(0, n)
+  const recent = (await listQuotes()).slice(0, n)
   if (recent.length === 0) return { averageCents: null, sampleSize: 0 }
   const total = recent.reduce((sum, q) => sum + q.recommendedPriceCents, 0)
   return { averageCents: Math.round(total / recent.length), sampleSize: recent.length }

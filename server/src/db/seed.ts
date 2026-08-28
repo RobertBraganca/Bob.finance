@@ -1,6 +1,6 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { db } from './client'
-import { isEntryPoint, runMigrations } from './migrate'
+import { isEntryPoint } from './migrate'
 import {
   accounts,
   categories,
@@ -434,7 +434,7 @@ const RULES: Array<[string, string, number?]> = [
  * without it every internal top-up counts as revenue on one side and spending
  * on the other, and the whole dashboard becomes fiction.
  *
- * Deliberately NOT a blanket rule on "transferência recebida" — an incoming
+ * Deliberadamente NOT a blanket rule on "transferência recebida" — an incoming
  * Pix from a client is real revenue, and a broad rule there would erase it.
  * Anything this list does not match stays uncategorized for the user to
  * triage, which is the honest default.
@@ -456,72 +456,71 @@ const OWNER_RULES: Array<[string, string, number]> = OWNER_NAMES.map((name) => [
 
 /* ---------------------------------------------------------------- */
 
-function seedAccounts(): Map<string, number> {
+async function seedAccounts(): Promise<Map<string, number>> {
   const byName = new Map<string, number>()
   for (const account of ACCOUNTS) {
-    const existing = db.select().from(accounts).where(eq(accounts.name, account.name)).get()
+    const existing = (await db.select().from(accounts).where(eq(accounts.name, account.name)))[0]
     if (existing) {
       byName.set(account.name, existing.id)
       continue
     }
-    const inserted = db
-      .insert(accounts)
-      .values({ name: account.name, institution: account.institution, kind: account.kind })
-      .returning({ id: accounts.id })
-      .get()
+    const inserted = (
+      await db
+        .insert(accounts)
+        .values({
+          name: account.name,
+          institution: account.institution,
+          kind: account.kind as (typeof accounts.$inferInsert)['kind'],
+        })
+        .returning({ id: accounts.id })
+    )[0]!
     byName.set(account.name, inserted.id)
   }
   return byName
 }
 
-function seedCategories(): Map<string, number> {
+async function seedCategories(): Promise<Map<string, number>> {
   const byPath = new Map<string, number>()
 
-  TREE.forEach((entry, parentIndex) => {
+  for (const [parentIndex, entry] of TREE.entries()) {
     const parentRow =
-      db
-        .select()
-        .from(categories)
-        .where(and(isNull(categories.parentId), eq(categories.name, entry.node.name)))
-        .get() ??
-      db
-        .insert(categories)
-        .values({
-          parentId: null,
-          name: entry.node.name,
-          kind: entry.kind,
-          color: entry.color,
-          icon: entry.icon,
-          sortOrder: parentIndex,
-        })
-        .returning()
-        .get()
+      (await db.select().from(categories).where(and(isNull(categories.parentId), eq(categories.name, entry.node.name))))[0] ??
+      (
+        await db
+          .insert(categories)
+          .values({
+            parentId: null,
+            name: entry.node.name,
+            kind: entry.kind as (typeof categories.$inferInsert)['kind'],
+            color: entry.color,
+            icon: entry.icon,
+            sortOrder: parentIndex,
+          })
+          .returning()
+      )[0]!
 
     byPath.set(entry.node.name, parentRow.id)
 
-    entry.node.children.forEach((child, childIndex) => {
+    for (const [childIndex, child] of entry.node.children.entries()) {
       const path = `${entry.node.name}/${child}`
       const childRow =
-        db
-          .select()
-          .from(categories)
-          .where(and(eq(categories.parentId, parentRow.id), eq(categories.name, child)))
-          .get() ??
-        db
-          .insert(categories)
-          .values({
-            parentId: parentRow.id,
-            name: child,
-            kind: entry.kind,
-            color: entry.color,
-            icon: entry.icon,
-            sortOrder: childIndex,
-          })
-          .returning()
-          .get()
+        (await db.select().from(categories).where(and(eq(categories.parentId, parentRow.id), eq(categories.name, child))))[0] ??
+        (
+          await db
+            .insert(categories)
+            .values({
+              parentId: parentRow.id,
+              name: child,
+              kind: entry.kind as (typeof categories.$inferInsert)['kind'],
+              color: entry.color,
+              icon: entry.icon,
+              sortOrder: childIndex,
+            })
+            .returning()
+        )[0]!
       byPath.set(path, childRow.id)
-    })
-  })
+    }
+  }
 
   // "Reajuste de saldo" is a child of Financeiro (expense) but is itself
   // kind 'transfer': a balance correction is neither income nor expense,
@@ -532,32 +531,34 @@ function seedCategories(): Map<string, number> {
   const financeiroId = byPath.get('Financeiro')
   if (financeiroId !== undefined) {
     const path = 'Financeiro/Reajuste de saldo'
-    const existing = db
-      .select()
-      .from(categories)
-      .where(and(eq(categories.parentId, financeiroId), eq(categories.name, 'Reajuste de saldo')))
-      .get()
+    const existing = (
+      await db
+        .select()
+        .from(categories)
+        .where(and(eq(categories.parentId, financeiroId), eq(categories.name, 'Reajuste de saldo')))
+    )[0]
     const row =
       existing ??
-      db
-        .insert(categories)
-        .values({
-          parentId: financeiroId,
-          name: 'Reajuste de saldo',
-          kind: 'transfer',
-          color: BOB_BLUE,
-          icon: 'landmark',
-          sortOrder: 99,
-        })
-        .returning()
-        .get()
+      (
+        await db
+          .insert(categories)
+          .values({
+            parentId: financeiroId,
+            name: 'Reajuste de saldo',
+            kind: 'transfer',
+            color: BOB_BLUE,
+            icon: 'landmark',
+            sortOrder: 99,
+          })
+          .returning()
+      )[0]!
     byPath.set(path, row.id)
   }
 
   return byPath
 }
 
-function seedProfiles(accountsByName: Map<string, number>) {
+async function seedProfiles(accountsByName: Map<string, number>) {
   const defaultAccount: Record<string, string> = {
     'Nubank Conta': 'Conta Nubank',
     'Nubank Cartão de Crédito': 'Cartão de Crédito Nubank',
@@ -568,36 +569,30 @@ function seedProfiles(accountsByName: Map<string, number>) {
   }
 
   for (const profile of PROFILES) {
-    const existing = db
-      .select()
-      .from(parserProfiles)
-      .where(eq(parserProfiles.name, profile.name))
-      .get()
+    const existing = (await db.select().from(parserProfiles).where(eq(parserProfiles.name, profile.name)))[0]
     if (existing) continue
 
     const accountName = defaultAccount[profile.name]
-    db.insert(parserProfiles)
-      .values({
-        name: profile.name,
-        institution: profile.institution,
-        delimiter: profile.delimiter,
-        encoding: profile.encoding,
-        dateFormat: profile.dateFormat,
-        decimalSeparator: profile.decimalSeparator,
-        thousandsSeparator: profile.thousandsSeparator,
-        signConvention: profile.signConvention,
-        hasHeader: profile.hasHeader,
-        skipRows: profile.skipRows,
-        columnMap: profile.columnMap,
-        headerSignature: profile.headerSignature,
-        ignorePatterns: profile.ignorePatterns,
-        defaultAccountId: accountName ? (accountsByName.get(accountName) ?? null) : null,
-      })
-      .run()
+    await db.insert(parserProfiles).values({
+      name: profile.name,
+      institution: profile.institution,
+      delimiter: profile.delimiter as (typeof parserProfiles.$inferInsert)['delimiter'],
+      encoding: profile.encoding,
+      dateFormat: profile.dateFormat as (typeof parserProfiles.$inferInsert)['dateFormat'],
+      decimalSeparator: profile.decimalSeparator,
+      thousandsSeparator: profile.thousandsSeparator,
+      signConvention: profile.signConvention as (typeof parserProfiles.$inferInsert)['signConvention'],
+      hasHeader: profile.hasHeader,
+      skipRows: profile.skipRows,
+      columnMap: profile.columnMap,
+      headerSignature: profile.headerSignature,
+      ignorePatterns: profile.ignorePatterns,
+      defaultAccountId: accountName ? (accountsByName.get(accountName) ?? null) : null,
+    })
   }
 }
 
-function seedRules(categoriesByPath: Map<string, number>) {
+async function seedRules(categoriesByPath: Map<string, number>) {
   let created = 0
   let skipped = 0
   let realigned = 0
@@ -609,11 +604,12 @@ function seedRules(categoriesByPath: Map<string, number>) {
       skipped++
       continue
     }
-    const existing = db
-      .select()
-      .from(categoryRules)
-      .where(and(eq(categoryRules.pattern, pattern), eq(categoryRules.field, 'description')))
-      .get()
+    const existing = (
+      await db
+        .select()
+        .from(categoryRules)
+        .where(and(eq(categoryRules.pattern, pattern), eq(categoryRules.field, 'description')))
+    )[0]
 
     if (existing) {
       // Converge, don't skip. If a seeded rule's target category changed
@@ -622,24 +618,22 @@ function seedRules(categoriesByPath: Map<string, number>) {
       // classified as an expense instead of a transfer, double-counting
       // every card purchase. User-authored rules are never touched.
       if (existing.origin === 'user' && existing.categoryId !== categoryId) {
-        db.update(categoryRules).set({ categoryId }).where(eq(categoryRules.id, existing.id)).run()
+        await db.update(categoryRules).set({ categoryId }).where(eq(categoryRules.id, existing.id))
         realigned++
       } else {
         skipped++
       }
       continue
     }
-    db.insert(categoryRules)
-      .values({
-        categoryId,
-        field: 'description',
-        matchType: 'contains',
-        pattern,
-        direction: 'any',
-        priority: priority ?? 100,
-        origin: 'user',
-      })
-      .run()
+    await db.insert(categoryRules).values({
+      categoryId,
+      field: 'description',
+      matchType: 'contains',
+      pattern,
+      direction: 'any',
+      priority: priority ?? 100,
+      origin: 'user',
+    })
     created++
   }
   return { created, skipped, realigned }
@@ -699,19 +693,20 @@ const CRITERIA_BANK: Record<string, string[]> = {
   ],
 }
 
-function seedCriteria() {
+async function seedCriteria() {
   let created = 0
   for (const [assetClass, labels] of Object.entries(CRITERIA_BANK)) {
-    labels.forEach((label, sortOrder) => {
-      const existing = db
-        .select()
-        .from(criteria)
-        .where(and(eq(criteria.assetClass, assetClass), eq(criteria.label, label)))
-        .get()
-      if (existing) return
-      db.insert(criteria).values({ assetClass, label, sortOrder }).run()
+    for (const [sortOrder, label] of labels.entries()) {
+      const existing = (
+        await db
+          .select()
+          .from(criteria)
+          .where(and(eq(criteria.assetClass, assetClass as (typeof criteria.$inferInsert)['assetClass']), eq(criteria.label, label)))
+      )[0]
+      if (existing) continue
+      await db.insert(criteria).values({ assetClass: assetClass as (typeof criteria.$inferInsert)['assetClass'], label, sortOrder })
       created++
-    })
+    }
   }
   return { created }
 }
@@ -751,55 +746,60 @@ const MULTIPLIER_BANK: Record<string, Array<{ label: string; multiplierBps: numb
   ],
 }
 
-function seedPricingMultipliers() {
+async function seedPricingMultipliers() {
   let created = 0
   for (const [dimension, options] of Object.entries(MULTIPLIER_BANK)) {
-    options.forEach((option, sortOrder) => {
+    for (const [sortOrder, option] of options.entries()) {
       // Idempotent by (dimension, label), same as the criteria bank: a label
       // the user edited or removed is never resurrected on the next boot.
-      const existing = db
-        .select()
-        .from(pricingMultiplierOptions)
-        .where(
-          and(
-            eq(pricingMultiplierOptions.dimension, dimension),
-            eq(pricingMultiplierOptions.label, option.label),
-          ),
-        )
-        .get()
-      if (existing) return
-      db.insert(pricingMultiplierOptions)
-        .values({
-          dimension,
-          label: option.label,
-          description: option.description ?? null,
-          multiplierBps: option.multiplierBps,
-          sortOrder,
-        })
-        .run()
+      const existing = (
+        await db
+          .select()
+          .from(pricingMultiplierOptions)
+          .where(
+            and(
+              eq(pricingMultiplierOptions.dimension, dimension as (typeof pricingMultiplierOptions.$inferInsert)['dimension']),
+              eq(pricingMultiplierOptions.label, option.label),
+            ),
+          )
+      )[0]
+      if (existing) continue
+      await db.insert(pricingMultiplierOptions).values({
+        dimension: dimension as (typeof pricingMultiplierOptions.$inferInsert)['dimension'],
+        label: option.label,
+        description: option.description ?? null,
+        multiplierBps: option.multiplierBps,
+        sortOrder,
+      })
       created++
-    })
+    }
   }
   return { created }
 }
 
-export function seed() {
-  runMigrations()
-  const accountsByName = seedAccounts()
-  const categoriesByPath = seedCategories()
-  seedProfiles(accountsByName)
-  const rules = seedRules(categoriesByPath)
-  const criteriaResult = seedCriteria()
-  const multipliersResult = seedPricingMultipliers()
+export async function seed() {
+  const accountsByName = await seedAccounts()
+  const categoriesByPath = await seedCategories()
+  await seedProfiles(accountsByName)
+  const rules = await seedRules(categoriesByPath)
+  const criteriaResult = await seedCriteria()
+  const multipliersResult = await seedPricingMultipliers()
 
+  const [accountsCount, categoriesCount, profilesCount, rulesCount, criteriaCount, multipliersCount] = await Promise.all([
+    db.select({ n: sql<number>`count(*)` }).from(accounts),
+    db.select({ n: sql<number>`count(*)` }).from(categories),
+    db.select({ n: sql<number>`count(*)` }).from(parserProfiles),
+    db.select({ n: sql<number>`count(*)` }).from(categoryRules),
+    db.select({ n: sql<number>`count(*)` }).from(criteria),
+    db.select({ n: sql<number>`count(*)` }).from(pricingMultiplierOptions),
+  ])
   const counts = {
-    accounts: db.select({ n: sql<number>`count(*)` }).from(accounts).get()?.n ?? 0,
-    categories: db.select({ n: sql<number>`count(*)` }).from(categories).get()?.n ?? 0,
-    profiles: db.select({ n: sql<number>`count(*)` }).from(parserProfiles).get()?.n ?? 0,
-    rules: db.select({ n: sql<number>`count(*)` }).from(categoryRules).get()?.n ?? 0,
-    criteria: db.select({ n: sql<number>`count(*)` }).from(criteria).get()?.n ?? 0,
-    pricingMultipliers:
-      db.select({ n: sql<number>`count(*)` }).from(pricingMultiplierOptions).get()?.n ?? 0,
+    accounts: accountsCount[0]?.n ?? 0,
+    categories: categoriesCount[0]?.n ?? 0,
+    profiles: profilesCount[0]?.n ?? 0,
+    rules: rulesCount[0]?.n ?? 0,
+    criteria: criteriaCount[0]?.n ?? 0,
+    pricingMultipliers: multipliersCount[0]?.n ?? 0,
   }
   return {
     ...counts,
@@ -811,6 +811,6 @@ export function seed() {
 }
 
 if (isEntryPoint('db/seed.ts')) {
-  const result = seed()
+  const result = await seed()
   console.log('[seed]', result)
 }

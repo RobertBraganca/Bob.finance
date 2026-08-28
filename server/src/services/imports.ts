@@ -17,16 +17,12 @@ import { loadCategorizer } from './categorization'
 /* ------------------------------------------------------------------ *
  * Profile access
  * ------------------------------------------------------------------ */
-export function listProfiles(): ResolvedProfile[] {
-  return db
-    .select()
-    .from(parserProfiles)
-    .all()
-    .map(toResolved)
+export async function listProfiles(): Promise<ResolvedProfile[]> {
+  return (await db.select().from(parserProfiles)).map(toResolved)
 }
 
-export function getProfile(id: number): ResolvedProfile | null {
-  const row = db.select().from(parserProfiles).where(eq(parserProfiles.id, id)).get()
+export async function getProfile(id: number): Promise<ResolvedProfile | null> {
+  const row = (await db.select().from(parserProfiles).where(eq(parserProfiles.id, id)))[0]
   return row ? toResolved(row) : null
 }
 
@@ -54,14 +50,14 @@ function toResolved(row: typeof parserProfiles.$inferSelect): ResolvedProfile {
 /* ------------------------------------------------------------------ *
  * Detection — a hint for the upload screen; the user always confirms.
  * ------------------------------------------------------------------ */
-export function detect(buffer: Buffer) {
-  const profiles = listProfiles().filter((p) => p.active)
+export async function detect(buffer: Buffer) {
+  const profiles = (await listProfiles()).filter((p) => p.active)
   // Sniff the encoding first: a latin1 file decoded as UTF-8 loses every
   // accented header character, which makes signature matching fail.
   const encoding = sniffEncoding(buffer)
   const preview = decodeBuffer(buffer, encoding)
   const detection = detectProfile(preview, profiles)
-  const profile = detection.profileId ? getProfile(detection.profileId) : null
+  const profile = detection.profileId ? await getProfile(detection.profileId) : null
   return {
     ...detection,
     detectedEncoding: encoding,
@@ -84,42 +80,42 @@ export type StageInput = {
   accountId: number
 }
 
-export function stageImport(input: StageInput) {
-  const profile = getProfile(input.profileId)
+export async function stageImport(input: StageInput) {
+  const profile = await getProfile(input.profileId)
   if (!profile) throw new Error(`perfil ${input.profileId} não encontrado`)
 
   const text = decodeBuffer(input.buffer, profile.encoding)
   const parsed = parseCsvWithProfile(text, profile, { accountId: input.accountId })
-  const categorizer = loadCategorizer()
+  const categorizer = await loadCategorizer()
 
   // In-ledger duplicates: every hash this account already holds.
   const existing = new Map<string, number>()
-  for (const row of db
+  for (const row of await db
     .select({ id: transactions.id, dedupeHash: transactions.dedupeHash })
     .from(transactions)
-    .where(eq(transactions.accountId, input.accountId))
-    .all()) {
+    .where(eq(transactions.accountId, input.accountId))) {
     if (!existing.has(row.dedupeHash)) existing.set(row.dedupeHash, row.id)
   }
 
   const seenInBatch = new Set<string>()
   let duplicateCount = 0
 
-  const batch = db
-    .insert(importBatches)
-    .values({
-      profileId: profile.id,
-      accountId: input.accountId,
-      filename: input.filename,
-      rowCount: parsed.rowCount,
-      parsedCount: parsed.parsedCount,
-      errorCount: parsed.errorCount,
-      status: 'staged',
-    })
-    .returning()
-    .get()
+  const batch = (
+    await db
+      .insert(importBatches)
+      .values({
+        profileId: profile.id,
+        accountId: input.accountId,
+        filename: input.filename,
+        rowCount: parsed.rowCount,
+        parsedCount: parsed.parsedCount,
+        errorCount: parsed.errorCount,
+        status: 'staged',
+      })
+      .returning()
+  )[0]!
 
-  db.transaction((tx) => {
+  await db.transaction(async (tx) => {
     for (const row of parsed.rows) {
       let duplicateOf: 'none' | 'in_batch' | 'in_ledger' = 'none'
       let duplicateTxnId: number | null = null
@@ -147,32 +143,30 @@ export function stageImport(input: StageInput) {
             })
           : { categoryId: null, source: 'none' as const, detail: null, ruleId: null }
 
-      tx.insert(stagedTransactions)
-        .values({
-          batchId: batch.id,
-          rowIndex: row.rowIndex,
-          postedOn: row.postedOn,
-          description: row.description,
-          descriptionNorm: row.descriptionNorm,
-          amountCents: row.amountCents,
-          rawCategory: row.rawCategory,
-          dedupeHash: row.dedupeHash,
-          duplicateOf,
-          duplicateTxnId,
-          suggestedCategoryId: suggestion.categoryId,
-          suggestionSource: suggestion.source,
-          suggestionDetail: suggestion.detail,
-          categoryId: suggestion.categoryId,
-          // Duplicates and unparseable rows arrive unchecked; everything else
-          // is pre-selected so a clean import is one click.
-          include: duplicateOf === 'none' && row.parseError === null,
-          parseError: row.parseError,
-          rawLine: row.rawLine,
-        })
-        .run()
+      await tx.insert(stagedTransactions).values({
+        batchId: batch.id,
+        rowIndex: row.rowIndex,
+        postedOn: row.postedOn,
+        description: row.description,
+        descriptionNorm: row.descriptionNorm,
+        amountCents: row.amountCents,
+        rawCategory: row.rawCategory,
+        dedupeHash: row.dedupeHash,
+        duplicateOf,
+        duplicateTxnId,
+        suggestedCategoryId: suggestion.categoryId,
+        suggestionSource: suggestion.source,
+        suggestionDetail: suggestion.detail,
+        categoryId: suggestion.categoryId,
+        // Duplicates and unparseable rows arrive unchecked; everything else
+        // is pre-selected so a clean import is one click.
+        include: duplicateOf === 'none' && row.parseError === null,
+        parseError: row.parseError,
+        rawLine: row.rawLine,
+      })
     }
 
-    tx.update(importBatches).set({ duplicateCount }).where(eq(importBatches.id, batch.id)).run()
+    await tx.update(importBatches).set({ duplicateCount }).where(eq(importBatches.id, batch.id))
   })
 
   return {
@@ -192,11 +186,11 @@ export function stageImport(input: StageInput) {
 /* ------------------------------------------------------------------ *
  * Review screen data
  * ------------------------------------------------------------------ */
-export function getBatch(batchId: number) {
-  const batch = db.select().from(importBatches).where(eq(importBatches.id, batchId)).get()
+export async function getBatch(batchId: number) {
+  const batch = (await db.select().from(importBatches).where(eq(importBatches.id, batchId)))[0]
   if (!batch) return null
 
-  const rows = db
+  const rows = await db
     .select({
       id: stagedTransactions.id,
       rowIndex: stagedTransactions.rowIndex,
@@ -217,9 +211,8 @@ export function getBatch(batchId: number) {
     .from(stagedTransactions)
     .where(eq(stagedTransactions.batchId, batchId))
     .orderBy(stagedTransactions.rowIndex)
-    .all()
 
-  const profile = batch.profileId ? getProfile(batch.profileId) : null
+  const profile = batch.profileId ? await getProfile(batch.profileId) : null
 
   return {
     batch: { ...batch, profileName: profile?.name ?? null },
@@ -243,17 +236,17 @@ export type StagedPatch = {
   include?: boolean
 }
 
-export function patchStagedRows(batchId: number, patches: StagedPatch[]) {
-  db.transaction((tx) => {
+export async function patchStagedRows(batchId: number, patches: StagedPatch[]) {
+  await db.transaction(async (tx) => {
     for (const patch of patches) {
       const set: Record<string, unknown> = {}
       if (patch.categoryId !== undefined) set.categoryId = patch.categoryId
       if (patch.include !== undefined) set.include = patch.include
       if (Object.keys(set).length === 0) continue
-      tx.update(stagedTransactions)
-        .set(set)
+      await tx
+        .update(stagedTransactions)
+        .set(set as Partial<typeof stagedTransactions.$inferInsert>)
         .where(and(eq(stagedTransactions.id, patch.id), eq(stagedTransactions.batchId, batchId)))
-        .run()
     }
   })
   return getBatch(batchId)
@@ -262,34 +255,30 @@ export function patchStagedRows(batchId: number, patches: StagedPatch[]) {
 /* ------------------------------------------------------------------ *
  * Commit — the only path from staging into the ledger.
  * ------------------------------------------------------------------ */
-export function commitImport(batchId: number) {
-  const batch = db.select().from(importBatches).where(eq(importBatches.id, batchId)).get()
+export async function commitImport(batchId: number) {
+  const batch = (await db.select().from(importBatches).where(eq(importBatches.id, batchId)))[0]
   if (!batch) throw new Error(`lote ${batchId} não encontrado`)
   if (batch.status === 'committed') throw new Error(`lote ${batchId} já foi importado`)
 
-  const rows = db
-    .select()
-    .from(stagedTransactions)
-    .where(eq(stagedTransactions.batchId, batchId))
-    .all()
+  const rows = await db.select().from(stagedTransactions).where(eq(stagedTransactions.batchId, batchId))
 
   const committable = rows.filter(
     (r) => r.include && r.parseError === null && r.postedOn !== null && r.amountCents !== null,
   )
 
-  const validCategoryIds = new Set(db.select({ id: categories.id }).from(categories).all().map((c) => c.id))
+  const validCategoryIds = new Set((await db.select({ id: categories.id }).from(categories)).map((c) => c.id))
 
   let committed = 0
   const ruleHits = new Map<number, number>()
 
-  db.transaction((tx) => {
+  await db.transaction(async (tx) => {
     for (const row of committable) {
       const categoryId =
         row.categoryId !== null && validCategoryIds.has(row.categoryId) ? row.categoryId : null
 
       // How this row ended up in its category, tracked so the UI can explain
       // itself and so re-categorization knows what it may overwrite.
-      let categorizedBy = 'none'
+      let categorizedBy: (typeof transactions.$inferInsert)['categorizedBy'] = 'none'
       let ruleId: number | null = null
       if (categoryId !== null) {
         if (row.suggestedCategoryId === categoryId && row.suggestionSource !== 'none') {
@@ -303,40 +292,38 @@ export function commitImport(batchId: number) {
         }
       }
 
-      tx.insert(transactions)
-        .values({
-          accountId: batch.accountId,
-          postedOn: row.postedOn!,
-          description: row.description,
-          descriptionNorm: row.descriptionNorm,
-          amountCents: row.amountCents!,
-          direction: directionOf(row.amountCents!),
-          categoryId,
-          rawCategory: row.rawCategory,
-          source: 'csv',
-          categorizedBy,
-          ruleId,
-          importBatchId: batch.id,
-          dedupeHash: row.dedupeHash!,
-          duplicateAccepted: row.duplicateOf !== 'none',
-        })
-        .run()
+      await tx.insert(transactions).values({
+        accountId: batch.accountId,
+        postedOn: row.postedOn!,
+        description: row.description,
+        descriptionNorm: row.descriptionNorm,
+        amountCents: row.amountCents!,
+        direction: directionOf(row.amountCents!),
+        categoryId,
+        rawCategory: row.rawCategory,
+        source: 'csv',
+        categorizedBy,
+        ruleId,
+        importBatchId: batch.id,
+        dedupeHash: row.dedupeHash!,
+        duplicateAccepted: row.duplicateOf !== 'none',
+      })
 
       if (ruleId !== null) ruleHits.set(ruleId, (ruleHits.get(ruleId) ?? 0) + 1)
       committed++
     }
 
     for (const [ruleId, hits] of ruleHits) {
-      tx.update(categoryRules)
+      await tx
+        .update(categoryRules)
         .set({ hitCount: sql`${categoryRules.hitCount} + ${hits}` })
         .where(eq(categoryRules.id, ruleId))
-        .run()
     }
 
-    tx.update(importBatches)
+    await tx
+      .update(importBatches)
       .set({ status: 'committed', committedCount: committed })
       .where(eq(importBatches.id, batchId))
-      .run()
   })
 
   return {
@@ -348,15 +335,15 @@ export function commitImport(batchId: number) {
   }
 }
 
-export function discardImport(batchId: number) {
-  db.transaction((tx) => {
-    tx.delete(stagedTransactions).where(eq(stagedTransactions.batchId, batchId)).run()
-    tx.update(importBatches).set({ status: 'discarded' }).where(eq(importBatches.id, batchId)).run()
+export async function discardImport(batchId: number) {
+  await db.transaction(async (tx) => {
+    await tx.delete(stagedTransactions).where(eq(stagedTransactions.batchId, batchId))
+    await tx.update(importBatches).set({ status: 'discarded' }).where(eq(importBatches.id, batchId))
   })
   return { batchId, status: 'discarded' as const }
 }
 
-export function listBatches(limit = 25) {
+export async function listBatches(limit = 25) {
   return db
     .select({
       id: importBatches.id,
@@ -375,21 +362,20 @@ export function listBatches(limit = 25) {
     .leftJoin(parserProfiles, eq(parserProfiles.id, importBatches.profileId))
     .orderBy(sql`${importBatches.id} desc`)
     .limit(limit)
-    .all()
 }
 
 /** Removes an entire committed import from the ledger. */
-export function revertBatch(batchId: number) {
-  const deleted = db.delete(transactions).where(eq(transactions.importBatchId, batchId)).run()
-  db.update(importBatches)
+export async function revertBatch(batchId: number) {
+  const deleted = await db.delete(transactions).where(eq(transactions.importBatchId, batchId))
+  await db
+    .update(importBatches)
     .set({ status: 'discarded', committedCount: 0 })
     .where(eq(importBatches.id, batchId))
-    .run()
-  return { batchId, removed: deleted.changes }
+  return { batchId, removed: deleted.count }
 }
 
-export function deleteStagedByIds(ids: number[]) {
+export async function deleteStagedByIds(ids: number[]) {
   if (ids.length === 0) return { removed: 0 }
-  const result = db.delete(stagedTransactions).where(inArray(stagedTransactions.id, ids)).run()
-  return { removed: result.changes }
+  const result = await db.delete(stagedTransactions).where(inArray(stagedTransactions.id, ids))
+  return { removed: result.count }
 }

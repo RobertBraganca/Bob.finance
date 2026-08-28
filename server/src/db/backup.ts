@@ -1,29 +1,25 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { dirname, resolve } from 'node:path'
-import { DB_PATH, sqlite } from './client'
+import { resolve } from 'node:path'
 
 /**
  * Snapshots of the working database, versioned and indexed outside it.
  *
- * See `decisions/0014`. The three load-bearing choices:
- *
- *  - `VACUUM INTO`, never a file copy. The database runs in WAL mode
- *    (`client.ts`), so the `.db` file alone can be missing transactions that
- *    still live in `-wal`. VACUUM INTO asks SQLite itself for one
- *    self-contained, consistent file from the live connection.
- *  - The manifest is a JSON file, NOT a table. If the reason to restore is a
- *    corrupt database, the index of "which backups exist" cannot require
- *    opening that same database to be read.
- *  - Versions are sequential and never reused, even after a prune. A version
- *    identifies a moment in history; deleting the file does not free the
- *    number.
+ * PENDING REDESIGN (decisions/0026, Fase 4): this file's mechanism —
+ * `VACUUM INTO` a local SQLite file, close/reopen the connection to
+ * restore — has no equivalent against Supabase Postgres, a live shared
+ * database this process does not exclusively own. `createSnapshot` and
+ * `restoreSnapshot` are stubbed to fail loudly rather than silently do
+ * nothing or corrupt something, until that redesign happens. Manifest
+ * read/write and pruning stay implemented (plain JSON file I/O, no DB
+ * dialect involved) so the shape of the module doesn't change out from
+ * under `routes/backups.ts` twice.
  */
 
 /** Mirrors FINANCE_DB: the verification harness points both at throwaway paths. */
 const BACKUP_DIR = process.env.FINANCE_BACKUP_DIR
   ? resolve(process.env.FINANCE_BACKUP_DIR)
-  : resolve(dirname(DB_PATH), 'backups')
+  : resolve('data/backups')
 
 const MANIFEST_PATH = resolve(BACKUP_DIR, 'manifest.json')
 const MARKER_PATH = resolve(BACKUP_DIR, '.last-migration-marker.json')
@@ -93,28 +89,14 @@ function nextVersion(entries: ManifestEntry[]): number {
   return entries.reduce((max, e) => Math.max(max, e.version), 0) + 1
 }
 
-export function createSnapshot(label: string, trigger: BackupTrigger): ManifestEntry {
-  mkdirSync(BACKUP_DIR, { recursive: true })
-  const entries = readManifest()
-  const version = nextVersion(entries)
-  const fileName = `financeiro-v${String(version).padStart(4, '0')}-${timestamp()}-${slug(label)}.db`
-  const filePath = resolve(BACKUP_DIR, fileName)
-
-  // VACUUM INTO takes a SQL literal, not a bound parameter. The path is built
-  // here from our own constants and never from a route or user input, so
-  // escaping the quote is enough.
-  sqlite.exec(`VACUUM INTO '${filePath.replace(/'/g, "''")}'`)
-
-  const entry: ManifestEntry = {
-    version,
-    timestampIso: new Date().toISOString(),
-    label,
-    trigger,
-    filePath,
-    sizeBytes: statSync(filePath).size,
-  }
-  writeManifest([...entries, entry])
-  return entry
+export function createSnapshot(_label: string, _trigger: BackupTrigger): ManifestEntry {
+  // See the module comment: `VACUUM INTO` has no Postgres equivalent, and
+  // this needs a real design (supabase db dump? a separate managed backup?)
+  // before it does anything, rather than silently no-op or write a fake
+  // manifest entry pointing at a file that doesn't exist.
+  throw new BackupError(
+    'backup automático ainda não reimplementado para o Postgres/Supabase (decisions/0026, Fase 4) — pendente de decisão de design',
+  )
 }
 
 /** Most recent first, the order the UI lists them in. */
@@ -174,22 +156,14 @@ export class BackupError extends Error {}
  * afterwards rather than keep serving from a handle to a file that no longer
  * exists.
  */
-export function restoreSnapshot(version: number): { restored: ManifestEntry; preRestore: ManifestEntry } {
-  const target = findSnapshot(version)
-  if (!target) throw new BackupError(`backup versão ${version} não encontrado no manifesto`)
-  if (!existsSync(target.filePath)) {
-    throw new BackupError(`o arquivo do backup versão ${version} não está mais em disco: ${target.filePath}`)
-  }
-
-  const preRestore = createSnapshot('pre-restore', 'pre-restore')
-
-  // Close before overwriting, then drop the sidecar files so the restored
-  // database is not read through a WAL belonging to the replaced one.
-  sqlite.close()
-  for (const suffix of ['-wal', '-shm']) rmSync(`${DB_PATH}${suffix}`, { force: true })
-  writeFileSync(DB_PATH, readFileSync(target.filePath))
-
-  return { restored: target, preRestore }
+export function restoreSnapshot(_version: number): { restored: ManifestEntry; preRestore: ManifestEntry } {
+  // See the module comment: restoring against a live, shared Postgres
+  // database is a fundamentally different (and riskier) operation than
+  // overwriting a local SQLite file, and needs its own explicit design
+  // before this does anything.
+  throw new BackupError(
+    'restauração ainda não reimplementada para o Postgres/Supabase (decisions/0026, Fase 4) — pendente de decisão de design',
+  )
 }
 
 export type PruneResult = { removed: ManifestEntry[]; kept: ManifestEntry[] }

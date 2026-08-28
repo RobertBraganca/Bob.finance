@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { db } from '../db/client'
 import { benchmarkReturns } from '../db/schema'
 import { periodOf } from '../core/dates'
@@ -46,16 +46,17 @@ export const BENCHMARK_LABELS: Record<BenchmarkCode, string> = {
 
 export class BenchmarkError extends Error {}
 
-function upsert(code: BenchmarkCode, period: string, returnBps: number, source: 'bcb' | 'brapi_etf') {
-  const existing = db
-    .select({ id: benchmarkReturns.id })
-    .from(benchmarkReturns)
-    .where(and(eq(benchmarkReturns.code, code), eq(benchmarkReturns.period, period)))
-    .get()
+async function upsert(code: BenchmarkCode, period: string, returnBps: number, source: 'bcb' | 'brapi_etf') {
+  const existing = (
+    await db
+      .select({ id: benchmarkReturns.id })
+      .from(benchmarkReturns)
+      .where(and(eq(benchmarkReturns.code, code), eq(benchmarkReturns.period, period)))
+  )[0]
   if (existing) {
-    db.update(benchmarkReturns).set({ returnBps, source }).where(eq(benchmarkReturns.id, existing.id)).run()
+    await db.update(benchmarkReturns).set({ returnBps, source }).where(eq(benchmarkReturns.id, existing.id))
   } else {
-    db.insert(benchmarkReturns).values({ code, period, returnBps, source }).run()
+    await db.insert(benchmarkReturns).values({ code, period, returnBps, source })
   }
 }
 
@@ -73,7 +74,7 @@ async function syncBcb(code: BenchmarkCode, sgsSeries: number): Promise<{ months
   for (const row of rows) {
     const returnBps = Math.round(Number(row.valor) * 100)
     if (!Number.isFinite(returnBps)) continue
-    upsert(code, bcbDateToPeriod(row.data), returnBps, 'bcb')
+    await upsert(code, bcbDateToPeriod(row.data), returnBps, 'bcb')
   }
   return { months: rows.length }
 }
@@ -119,7 +120,7 @@ async function syncEtf(code: BenchmarkCode, ticker: string): Promise<{ months: n
     const prevClose = closes.get(prevPeriod)!
     const close = closes.get(period)!
     const returnBps = Math.round((close / prevClose - 1) * 10_000)
-    upsert(code, period, returnBps, 'brapi_etf')
+    await upsert(code, period, returnBps, 'brapi_etf')
     months++
   }
   return { months }
@@ -150,13 +151,12 @@ export async function refreshBenchmarks(): Promise<{ results: RefreshOutcome[] }
 
 export type BenchmarkSeriesPoint = { period: string; returnBps: number }
 
-export function listBenchmarkSeries(codes: BenchmarkCode[]): Record<string, BenchmarkSeriesPoint[]> {
-  const rows = db
+export async function listBenchmarkSeries(codes: BenchmarkCode[]): Promise<Record<string, BenchmarkSeriesPoint[]>> {
+  const rows = await db
     .select({ code: benchmarkReturns.code, period: benchmarkReturns.period, returnBps: benchmarkReturns.returnBps })
     .from(benchmarkReturns)
     .where(inArray(benchmarkReturns.code, codes))
     .orderBy(asc(benchmarkReturns.period))
-    .all()
   const out: Record<string, BenchmarkSeriesPoint[]> = {}
   for (const code of codes) out[code] = []
   for (const row of rows) out[row.code]?.push({ period: row.period, returnBps: row.returnBps })

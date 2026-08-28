@@ -65,25 +65,27 @@ function dayCounts(period: string) {
   return { daysTotal, daysElapsed, isCurrent }
 }
 
-export function getPeriodProgress(period: string, accountId?: number | null): PeriodProgress {
+export async function getPeriodProgress(period: string, accountId?: number | null): Promise<PeriodProgress> {
   const { start, end } = periodBounds(period)
   const range: Range = { from: start, to: end, accountId: accountId ?? null }
-  const actual = totals(range)
-  const goal = db.select().from(monthlyGoals).where(eq(monthlyGoals.period, period)).get()
+  const [actual, goal, caps, expenseLeaf, categoryRows] = await Promise.all([
+    totals(range),
+    db.select().from(monthlyGoals).where(eq(monthlyGoals.period, period)).then((r) => r[0]),
+    db
+      .select({
+        categoryId: categoryCaps.categoryId,
+        capCents: categoryCaps.capCents,
+        name: categories.name,
+        color: categories.color,
+      })
+      .from(categoryCaps)
+      .innerJoin(categories, eq(categories.id, categoryCaps.categoryId))
+      .where(eq(categoryCaps.period, period)),
+    categoryBreakdown(range, { flow: 'expense', level: 'leaf' }),
+    db.select({ id: categories.id, parentId: categories.parentId }).from(categories),
+  ])
   const { daysTotal, daysElapsed, isCurrent } = dayCounts(period)
   const elapsedShare = daysTotal > 0 ? daysElapsed / daysTotal : 0
-
-  const caps = db
-    .select({
-      categoryId: categoryCaps.categoryId,
-      capCents: categoryCaps.capCents,
-      name: categories.name,
-      color: categories.color,
-    })
-    .from(categoryCaps)
-    .innerJoin(categories, eq(categories.id, categoryCaps.categoryId))
-    .where(eq(categoryCaps.period, period))
-    .all()
 
   /**
    * LEAF level only. The leaf breakdown groups by the category actually on
@@ -93,12 +95,12 @@ export function getPeriodProgress(period: string, accountId?: number | null): Pe
    * already includes its children and the loop below adds them again.
    */
   const spentByCategory = new Map<number, number>()
-  for (const slice of categoryBreakdown(range, { flow: 'expense', level: 'leaf' })) {
+  for (const slice of expenseLeaf) {
     if (slice.categoryId !== null) spentByCategory.set(slice.categoryId, slice.amountCents)
   }
   // A cap on a parent category covers its children too.
   const childrenOf = new Map<number, number[]>()
-  for (const c of db.select({ id: categories.id, parentId: categories.parentId }).from(categories).all()) {
+  for (const c of categoryRows) {
     if (c.parentId === null) continue
     const bucket = childrenOf.get(c.parentId)
     if (bucket) bucket.push(c.id)
@@ -213,57 +215,55 @@ export type GoalPatch = {
   note?: string | null
 }
 
-export function upsertGoal(period: string, patch: GoalPatch) {
-  const existing = db.select().from(monthlyGoals).where(eq(monthlyGoals.period, period)).get()
+export async function upsertGoal(period: string, patch: GoalPatch) {
+  const existing = (await db.select().from(monthlyGoals).where(eq(monthlyGoals.period, period)))[0]
   if (existing) {
-    return db
-      .update(monthlyGoals)
-      .set({ ...patch, updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%SZ','now'))` })
-      .where(eq(monthlyGoals.period, period))
-      .returning()
-      .get()
+    return (
+      await db
+        .update(monthlyGoals)
+        .set({ ...patch, updatedAt: sql`now_iso()` })
+        .where(eq(monthlyGoals.period, period))
+        .returning()
+    )[0]!
   }
-  return db.insert(monthlyGoals).values({ period, ...patch }).returning().get()
+  return (await db.insert(monthlyGoals).values({ period, ...patch }).returning())[0]!
 }
 
-export function upsertCap(period: string, categoryId: number, capCents: number) {
-  const existing = db
-    .select()
-    .from(categoryCaps)
-    .where(and(eq(categoryCaps.period, period), eq(categoryCaps.categoryId, categoryId)))
-    .get()
+export async function upsertCap(period: string, categoryId: number, capCents: number) {
+  const existing = (
+    await db
+      .select()
+      .from(categoryCaps)
+      .where(and(eq(categoryCaps.period, period), eq(categoryCaps.categoryId, categoryId)))
+  )[0]
   if (existing) {
-    return db
-      .update(categoryCaps)
-      .set({ capCents })
-      .where(eq(categoryCaps.id, existing.id))
-      .returning()
-      .get()
+    return (
+      await db.update(categoryCaps).set({ capCents }).where(eq(categoryCaps.id, existing.id)).returning()
+    )[0]!
   }
-  return db.insert(categoryCaps).values({ period, categoryId, capCents }).returning().get()
+  return (await db.insert(categoryCaps).values({ period, categoryId, capCents }).returning())[0]!
 }
 
-export function deleteCap(period: string, categoryId: number) {
-  const result = db
+export async function deleteCap(period: string, categoryId: number) {
+  const result = await db
     .delete(categoryCaps)
     .where(and(eq(categoryCaps.period, period), eq(categoryCaps.categoryId, categoryId)))
-    .run()
-  return { removed: result.changes }
+  return { removed: result.count }
 }
 
 /** Copies a period's whole budget forward — the common "same as last month". */
-export function copyGoals(fromPeriod: string, toPeriod: string) {
-  const source = db.select().from(monthlyGoals).where(eq(monthlyGoals.period, fromPeriod)).get()
+export async function copyGoals(fromPeriod: string, toPeriod: string) {
+  const source = (await db.select().from(monthlyGoals).where(eq(monthlyGoals.period, fromPeriod)))[0]
   if (source) {
-    upsertGoal(toPeriod, {
+    await upsertGoal(toPeriod, {
       incomeTargetCents: source.incomeTargetCents,
       spendCapCents: source.spendCapCents,
       savingsRateTargetBps: source.savingsRateTargetBps,
       note: source.note,
     })
   }
-  const caps = db.select().from(categoryCaps).where(eq(categoryCaps.period, fromPeriod)).all()
-  for (const cap of caps) upsertCap(toPeriod, cap.categoryId, cap.capCents)
+  const caps = await db.select().from(categoryCaps).where(eq(categoryCaps.period, fromPeriod))
+  for (const cap of caps) await upsertCap(toPeriod, cap.categoryId, cap.capCents)
   return { goal: source !== undefined, caps: caps.length }
 }
 
@@ -281,29 +281,31 @@ export type PeriodOutcome = {
   hasTargets: boolean
 }
 
-export function goalHistory(months = 12, accountId?: number | null) {
+export async function goalHistory(months = 12, accountId?: number | null) {
   const currentPeriod = todayIso().slice(0, 7)
   const periods = periodRange(addMonths(currentPeriod, -(months - 1)), currentPeriod)
 
-  const outcomes: PeriodOutcome[] = periods.map((period) => {
-    const progress = getPeriodProgress(period, accountId)
-    const checks = [
-      progress.progress.income.state,
-      progress.progress.spend.state,
-      progress.progress.savings.state,
-    ].filter((s) => s !== 'no_target')
-    const hits = checks.filter((s) => s === 'met' || s === 'on_track').length
-    return {
-      period,
-      incomeCents: progress.actual.incomeCents,
-      expenseCents: progress.actual.expenseCents,
-      savingsRateBps: progress.actual.savingsRateBps,
-      targets: checks.length,
-      hits,
-      allHit: checks.length > 0 && hits === checks.length,
-      hasTargets: checks.length > 0,
-    }
-  })
+  const outcomes: PeriodOutcome[] = await Promise.all(
+    periods.map(async (period) => {
+      const progress = await getPeriodProgress(period, accountId)
+      const checks = [
+        progress.progress.income.state,
+        progress.progress.spend.state,
+        progress.progress.savings.state,
+      ].filter((s) => s !== 'no_target')
+      const hits = checks.filter((s) => s === 'met' || s === 'on_track').length
+      return {
+        period,
+        incomeCents: progress.actual.incomeCents,
+        expenseCents: progress.actual.expenseCents,
+        savingsRateBps: progress.actual.savingsRateBps,
+        targets: checks.length,
+        hits,
+        allHit: checks.length > 0 && hits === checks.length,
+        hasTargets: checks.length > 0,
+      }
+    }),
+  )
 
   // Streak counts back from the most recent CLOSED period, so an unfinished
   // month can neither inflate nor break the streak.
@@ -328,10 +330,10 @@ export function goalHistory(months = 12, accountId?: number | null) {
 }
 
 /** Suggests caps from the median of the last N months of actual spending. */
-export function suggestCaps(period: string, lookbackMonths = 3) {
+export async function suggestCaps(period: string, lookbackMonths = 3) {
   const from = periodBounds(addMonths(period, -lookbackMonths)).start
   const to = periodBounds(addMonths(period, -1)).end
-  const slices = categoryBreakdown({ from, to }, { flow: 'expense', level: 'parent' })
+  const slices = await categoryBreakdown({ from, to }, { flow: 'expense', level: 'parent' })
   return slices
     .filter((s) => s.categoryId !== null)
     .map((s) => ({
@@ -361,12 +363,12 @@ export type GapInProjects = {
   assumptions: Record<string, unknown>
 }
 
-export function gapInProjects(period: string, sampleWindow = 5): GapInProjects {
-  const progress = getPeriodProgress(period)
+export async function gapInProjects(period: string, sampleWindow = 5): Promise<GapInProjects> {
+  const progress = await getPeriodProgress(period)
   const target = progress.goal.incomeTargetCents
   const gapCents = target === null ? null : target - progress.actual.incomeCents
 
-  const { averageCents, sampleSize } = averageRecentQuoteCents(sampleWindow)
+  const { averageCents, sampleSize } = await averageRecentQuoteCents(sampleWindow)
 
   /**
    * Sempre arredondado para CIMA: "1,7 projeto" não é uma coisa que se

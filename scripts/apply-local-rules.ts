@@ -36,7 +36,7 @@ const config = JSON.parse(readFileSync(FILE, 'utf8')) as {
   revisar?: LocalRule[]
 }
 
-const byPath = new Map(categoryOptions().map((option) => [option.path, option.id] as const))
+const byPath = new Map((await categoryOptions()).map((option) => [option.path, option.id] as const))
 
 let created = 0
 let updated = 0
@@ -56,41 +56,37 @@ for (const rule of config.aplicar ?? []) {
   const pattern = rule.pattern.trim().toLowerCase()
   const direction = rule.direction ?? 'any'
 
-  const existing = db
-    .select()
-    .from(categoryRules)
-    .where(
-      and(
-        eq(categoryRules.field, 'description'),
-        eq(categoryRules.matchType, 'contains'),
-        eq(categoryRules.pattern, pattern),
-        eq(categoryRules.direction, direction),
-      ),
-    )
-    .get()
+  const existing = (
+    await db
+      .select()
+      .from(categoryRules)
+      .where(
+        and(
+          eq(categoryRules.field, 'description'),
+          eq(categoryRules.matchType, 'contains'),
+          eq(categoryRules.pattern, pattern),
+          eq(categoryRules.direction, direction),
+        ),
+      )
+  )[0]
 
   if (existing) {
     if (existing.categoryId !== categoryId) {
-      db.update(categoryRules)
-        .set({ categoryId, active: true })
-        .where(eq(categoryRules.id, existing.id))
-        .run()
+      await db.update(categoryRules).set({ categoryId, active: true }).where(eq(categoryRules.id, existing.id))
       updated++
     }
     continue
   }
 
-  db.insert(categoryRules)
-    .values({
-      categoryId,
-      field: 'description',
-      matchType: 'contains',
-      pattern,
-      direction,
-      priority: rule.prioridade ?? 40,
-      origin: 'user',
-    })
-    .run()
+  await db.insert(categoryRules).values({
+    categoryId,
+    field: 'description',
+    matchType: 'contains',
+    pattern,
+    direction,
+    priority: rule.prioridade ?? 40,
+    origin: 'user',
+  })
   created++
   console.log(
     `  + ${pattern.padEnd(32)} ${direction.padEnd(4)} -> ${rule.categoria}` +
@@ -111,4 +107,4 @@ if (pending.length > 0) {
 }
 
 console.log('\n--- recategorizando ---')
-console.log(recategorize({ onlyUncategorized: true }))
+console.log(await recategorize({ onlyUncategorized: true }))

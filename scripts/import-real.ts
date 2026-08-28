@@ -8,8 +8,6 @@
  * least three files are outright re-downloads), so most of the work here is
  * letting the dedupe fingerprint do its job.
  *
- * Nothing is uploaded anywhere. Everything lands in the local SQLite file.
- *
  * Run: npm run import:real -- "<pasta raiz>"
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -53,25 +51,21 @@ const ROUTES: Array<{ prefix: string; profile: string; account: string }> = [
   { prefix: 'Inter/', profile: 'Banco Inter Extrato', account: 'Inter' },
 ]
 
-seed()
+await seed()
 
 // Archive the demo accounts and bring up the real ones. Archiving rather than
 // deleting keeps any history that already referenced them intact.
-db.update(accounts).set({ archived: true }).run()
+await db.update(accounts).set({ archived: true })
 const accountId = new Map<string, number>()
 for (const account of REAL_ACCOUNTS) {
-  const existing = db
-    .select()
-    .from(accounts)
-    .all()
-    .find((a) => a.name === account.name)
+  const existing = (await db.select().from(accounts)).find((a) => a.name === account.name)
   const row = existing
-    ? db.update(accounts).set({ archived: false }).where(eq(accounts.id, existing.id)).returning().get()
-    : db.insert(accounts).values(account).returning().get()
+    ? (await db.update(accounts).set({ archived: false }).where(eq(accounts.id, existing.id)).returning())[0]!
+    : (await db.insert(accounts).values(account).returning())[0]!
   accountId.set(account.name, row.id)
 }
 
-const profileId = new Map(imports.listProfiles().map((p) => [p.name, p.id] as const))
+const profileId = new Map((await imports.listProfiles()).map((p) => [p.name, p.id] as const))
 
 /* ------------------------------------------------------------------ *
  * Collect the files
@@ -158,7 +152,7 @@ for (const job of jobs) {
     continue
   }
 
-  const staged = imports.stageImport({
+  const staged = await imports.stageImport({
     buffer: readFileSync(job.path),
     filename: job.label,
     profileId: profile,
@@ -166,13 +160,13 @@ for (const job of jobs) {
   })
 
   if (staged.errorCount > 0 && errorSamples.length < 12) {
-    const batch = imports.getBatch(staged.batchId)!
+    const batch = (await imports.getBatch(staged.batchId))!
     for (const row of batch.rows.filter((r) => r.parseError !== null).slice(0, 3)) {
       errorSamples.push(`${job.label} linha ${row.rowIndex}: ${row.parseError} | ${String(row.rawLine).slice(0, 70)}`)
     }
   }
 
-  const committed = imports.commitImport(staged.batchId)
+  const committed = await imports.commitImport(staged.batchId)
 
   totalRead += staged.rowCount
   totalCommitted += committed.committed
@@ -210,15 +204,15 @@ if (errorSamples.length > 0) {
  * Report
  * ------------------------------------------------------------------ */
 console.log('\n--- recategorização final ---')
-console.log(recategorize({ onlyUncategorized: true }))
+console.log(await recategorize({ onlyUncategorized: true }))
 console.log('  (rode `npm run regras:locais` para aplicar as regras de clientes/contrapartes)')
 
-const bounds = ledgerBounds()
+const bounds = await ledgerBounds()
 console.log('\n--- ledger ---')
 console.log(`lançamentos: ${bounds.count}`)
 console.log(`período:     ${bounds.min} .. ${bounds.max}`)
 
-const all = totals({ from: bounds.min ?? '1970-01-01', to: bounds.max ?? '2100-01-01' })
+const all = await totals({ from: bounds.min ?? '1970-01-01', to: bounds.max ?? '2100-01-01' })
 const fmt = (cents: number) => `R$ ${(cents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 console.log(`entradas:      ${fmt(all.incomeCents)}`)
 console.log(`saídas:        ${fmt(all.expenseCents)}`)
@@ -230,11 +224,13 @@ console.log(
 )
 
 console.log('\n--- saldo por conta (derivado dos lançamentos) ---')
-for (const account of db.select().from(accounts).all().filter((a) => !a.archived)) {
-  const row = db.get<{ total: number; n: number }>(
-    sql`select coalesce(sum(amount_cents),0) as total, count(*) as n
+for (const account of (await db.select().from(accounts)).filter((a) => !a.archived)) {
+  const row = (
+    await db.execute<{ total: number; n: number }>(
+      sql`select coalesce(sum(amount_cents),0) as total, count(*) as n
         from transactions where account_id = ${account.id}`,
-  )
+    )
+  )[0]
   console.log(
     `${account.name.padEnd(12)} ${fmt(row?.total ?? 0).padStart(18)}  ${String(row?.n ?? 0).padStart(6)} lançamentos`,
   )

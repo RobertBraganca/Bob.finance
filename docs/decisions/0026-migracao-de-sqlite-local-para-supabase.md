@@ -164,6 +164,107 @@ eram só o meio de carregar os dados.
 Fases 3-5 (reescrita do client, backup/verify, corte) continuam
 pendentes.
 
+## Fase 3 — concluída (28/08/2026)
+`server/src/db/client.ts` reescrito para `postgres-js` +
+`drizzle-orm/postgres-js` (session pooler, porta 5432). Todos os 227
+pontos síncronos identificados nos 16 arquivos — mais `db/seed.ts`,
+`db/migrate.ts`, `db/backup.ts` e 6 scripts avulsos — convertidos para
+`async`/`await`, arquivo por arquivo, com `npm run typecheck` limpo a
+cada lote (ordem de dependência: `analytics`/`benchmarks`/`categories`/
+`categorization`/`creditCards`/`criteria` primeiro; depois `debt`/
+`transfers`/`investments`; depois `cashFlow`/`dre`; depois
+`transactions`; depois o ciclo `goals`↔`pricing`↔`financialEngine`↔
+`financialHealth` — mutuamente dependente, convertido como uma unidade;
+depois `imports`/`simulator`/`quotes`; por fim as rotas Fastify e o
+bootstrap do banco).
+
+`server/src/db/migrate.ts` (migrator SQLite do Drizzle) e a parte de
+schema de `db/backup.ts`/`db/seed.ts` que dependiam dele foram
+removidas — o schema agora só é gerenciado por `supabase db push`
+(CLI), nunca pelo app no boot.
+
+**Bugs reais encontrados testando contra o Postgres ao vivo, não pelo
+typecheck** (typecheck limpo não prova comportamento correto — só
+testar contra dado real prova):
+
+- **Ordem de avaliação de módulos ESM**: `.env` era carregado em
+  `index.ts`, mas todo import é avaliado antes do próprio código do
+  módulo importador rodar — `db/client.ts` tentava ler
+  `process.env.SUPABASE_DB_*` antes de `index.ts` chegar a carregar o
+  `.env`. Corrigido carregando o `.env` dentro do próprio
+  `db/client.ts`.
+- **`bigint`/`numeric` do Postgres voltam como `string` por padrão** no
+  `postgres-js` (para não perder precisão em valores fora do range
+  seguro de `Number`) — colunas tipadas do Drizzle já corrigem isso
+  sozinhas (`PgBigInt53.mapFromDriverValue` sempre chama `Number()`),
+  mas as várias queries de agregação em SQL cru (`db.execute(sql\`...\`)`
+  usadas em `analytics.ts`, `categories.ts`, `debt.ts`, `cashFlow.ts`,
+  `transactions.ts` etc.) não passam por essa camada — todo `count(*)`
+  e `sum(coluna bigint)` chegava como string, corrompendo silenciosamente
+  aritmética posterior (`sum + row.amount` concatenando texto em vez de
+  somar). Corrigido registrando um parser de tipo para os OIDs 20
+  (int8) e 1700 (numeric) na conexão, convertendo para `Number` —
+  seguro aqui porque todo valor monetário é centavos, bem dentro de
+  `Number.MAX_SAFE_INTEGER`.
+- **`CASE` comparando enum com texto**: `FLOW_KIND` (o `case when
+  c.kind is null then ... else c.kind end` reusado em quase toda
+  query de `analytics.ts`) falhava com "CASE types category_kind and
+  text cannot be matched" — Postgres, ao contrário do SQLite, exige que
+  os dois lados de um CASE resolvam pro mesmo tipo. Corrigido com
+  `c.kind::text`.
+- **Pool de conexões do session pooler**: o projeto Supabase limita a
+  15 clientes simultâneos nesse pooler. As muitas conversões para
+  `Promise.all` (paralelizando o que antes era sequencial por
+  necessidade do SQLite síncrono) geravam picos de conexões
+  concorrentes suficientes para estourar esse teto sozinhas. Corrigido
+  limitando o pool do próprio app (`max: 5`) — excesso de queries
+  concorrentes agora enfileira no lado do `postgres-js` em vez de
+  estourar o limite do lado do Supabase.
+- **Promise "perdida" dentro de objeto literal**: em `routes/pricing.ts`,
+  vários handlers faziam `return { settings: pricing.getSettings() }`
+  ou `const quote = pricing.getQuote(id); if (!quote) ...` sem `await`.
+  O Fastify só espera automaticamente quando o HANDLER INTEIRO devolve
+  a Promise diretamente — uma Promise dentro de uma propriedade de
+  objeto, ou usada num teste de verdade (`if (!quote)`, sempre
+  verdadeiro para qualquer Promise, mesmo resolvendo pra `null`), nunca
+  é esperada. O TypeScript não acusa isso: `{ settings: Promise<T> }` é
+  um tipo perfeitamente válido. Só apareceu testando de verdade (as
+  respostas vinham como `{}` em vez do objeto real, e o 404 de "cotação
+  não encontrada" nunca disparava). Corrigido com `await` em cada
+  chamada; auditado o mesmo padrão em todas as outras rotas e nos
+  services — nenhuma outra ocorrência.
+
+**Verificação**: servidor de fato inicializado contra o projeto
+Supabase real (não só typecheck), testado manualmente contra mais de
+20 endpoints reais — dashboard, transações, investimentos, dívidas,
+saúde financeira, motor financeiro, simulador, precificação, cartões,
+metas, categorias, regras, importações, critérios, reserva de
+emergência — todos devolvendo dado real e correto.
+
+## Fase 4 — pendente (decisão em aberto)
+`server/src/db/backup.ts` (snapshot via `VACUUM INTO`, restore via
+fechar a conexão e sobrescrever o arquivo) e `scripts/verify.ts`/
+`verify-backup.ts` (546+37 checks contra um SQLite descartável
+recriado a cada execução) não têm equivalente direto no Postgres:
+
+- Não há `pg_dump`/`psql` instalados nesta máquina, mas `supabase db
+  dump --linked` empacota isso — viável para CRIAR um snapshot.
+- RESTAURAR contra um Postgres compartilhado ao vivo é uma operação
+  fundamentalmente mais arriscada que sobrescrever um arquivo SQLite
+  local — precisa de desenho próprio antes de existir.
+- `verify.ts` recriar um banco inteiro a cada execução (o que faz hoje
+  com SQLite em milissegundos) não é viável nem seguro contra um
+  projeto Supabase real.
+
+`createSnapshot`/`restoreSnapshot` foram deixados como stubs que
+falham alto (erro claro, não um no-op silencioso nem corrupção) até
+essa decisão ser tomada. `db/reset.ts` (apaga o arquivo SQLite local)
+ainda funciona sem alteração — só não apaga mais nada que o app leia.
+
+## Fase 5 — pendente
+Depende da Fase 4. Só depois de backup/verify redesenhados é que faz
+sentido declarar o SQLite oficialmente fora do caminho de produção.
+
 ## Consequências
 - Este ADR não implementa nada sozinho — é o registro da decisão e do
   plano faseado. Cada fase acima vira trabalho próprio, com sua própria

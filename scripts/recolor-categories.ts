@@ -3,13 +3,7 @@
  * BOB.OS brand palette introduced 2026-08-20.
  *
  * This is plain DML (UPDATE ... WHERE name = ...) against existing rows —
- * deliberately NOT a schema migration. Changing a column's declared
- * DEFAULT on `categories` forces drizzle-kit's SQLite dialect to rebuild
- * the whole table (create/copy/drop/rename), and that DROP TABLE fails
- * against a table other tables reference by foreign key, even under
- * `PRAGMA foreign_keys=OFF` (SQLite no-ops that pragma inside a
- * transaction). See the seed's TREE array for where these same colours
- * are assigned to freshly-seeded categories.
+ * deliberately NOT a schema migration.
  *
  * Safe to re-run. Only touches the `color` column; never touches rows by
  * id, only by name, so it works whether this is the real ledger or a
@@ -45,8 +39,8 @@ const PARENT_COLOR: Record<string, string> = {
 let updatedParents = 0
 let updatedChildren = 0
 
-db.transaction((tx) => {
-  const parents = tx.select().from(categories).where(isNull(categories.parentId)).all()
+await db.transaction(async (tx) => {
+  const parents = await tx.select().from(categories).where(isNull(categories.parentId))
 
   for (const parent of parents) {
     const color = PARENT_COLOR[parent.name]
@@ -56,30 +50,23 @@ db.transaction((tx) => {
     }
 
     if (parent.color !== color) {
-      tx.update(categories).set({ color }).where(eq(categories.id, parent.id)).run()
+      await tx.update(categories).set({ color }).where(eq(categories.id, parent.id))
       updatedParents++
     }
 
     // Children inherit the parent's hue — same rule seedCategories() and
     // updateCategory() already enforce for newly created/edited categories.
-    const result = tx
-      .update(categories)
-      .set({ color })
-      .where(eq(categories.parentId, parent.id))
-      .run()
-    updatedChildren += result.changes
+    const result = await tx.update(categories).set({ color }).where(eq(categories.parentId, parent.id))
+    updatedChildren += result.count
   }
 })
 
 console.log(`[recolor] ${updatedParents} categoria(s)-mãe atualizadas`)
 console.log(`[recolor] ${updatedChildren} subcategoria(s) atualizadas (sempre, para herdar a cor da mãe)`)
 
-const remaining = db
-  .select({ name: categories.name, color: categories.color })
-  .from(categories)
-  .where(isNull(categories.parentId))
-  .all()
-  .filter((c) => !Object.values(PARENT_COLOR).includes(c.color))
+const remaining = (
+  await db.select({ name: categories.name, color: categories.color }).from(categories).where(isNull(categories.parentId))
+).filter((c) => !Object.values(PARENT_COLOR).includes(c.color))
 if (remaining.length > 0) {
   console.log('[recolor] categorias-mãe com cor fora da paleta da marca:')
   for (const r of remaining) console.log(`  ${r.name} -> ${r.color}`)

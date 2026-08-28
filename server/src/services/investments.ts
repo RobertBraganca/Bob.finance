@@ -33,6 +33,10 @@ export const ASSET_CLASSES = [
   'other',
 ] as const
 
+type AssetClass = (typeof assets.$inferSelect)['assetClass']
+type TradeKind = (typeof assetTrades.$inferSelect)['kind']
+type GoalPurpose = (typeof investmentGoals.$inferSelect)['purpose']
+
 export const ASSET_CLASS_LABELS: Record<string, string> = {
   stocks: 'Ações',
   // Short on purpose: these labels become y-axis categories in the
@@ -103,14 +107,14 @@ export type Position = {
   countsTowardReserve: boolean
 }
 
-export function positions(): Position[] {
-  const rows = db.all<{
+export async function positions(): Promise<Position[]> {
+  const rows = await db.execute<{
     assetId: number
     name: string
     ticker: string | null
     assetClass: string
     sector: string | null
-    countsTowardReserve: number
+    countsTowardReserve: boolean
     boughtQty: number
     soldQty: number
     boughtCents: number
@@ -121,30 +125,30 @@ export function positions(): Position[] {
     lastPricedOn: string | null
   }>(sql`
     select
-      a.id as assetId,
+      a.id as "assetId",
       a.name,
       a.ticker,
-      a.asset_class as assetClass,
+      a.asset_class as "assetClass",
       a.sector as sector,
-      a.counts_toward_reserve as countsTowardReserve,
-      coalesce(sum(case when t.kind = 'buy'  then t.quantity else 0 end), 0) as boughtQty,
-      coalesce(sum(case when t.kind = 'sell' then t.quantity else 0 end), 0) as soldQty,
-      coalesce(sum(case when t.kind = 'buy'  then round(t.quantity * t.unit_price_cents) else 0 end), 0) as boughtCents,
-      coalesce(sum(case when t.kind = 'sell' then round(t.quantity * t.unit_price_cents) else 0 end), 0) as soldCents,
-      coalesce(sum(t.fees_cents), 0) as feesCents,
-      coalesce(sum(case when t.kind = 'dividend' then round(t.quantity * t.unit_price_cents) else 0 end), 0) as dividendsCents,
+      a.counts_toward_reserve as "countsTowardReserve",
+      coalesce(sum(case when t.kind = 'buy'  then t.quantity else 0 end), 0) as "boughtQty",
+      coalesce(sum(case when t.kind = 'sell' then t.quantity else 0 end), 0) as "soldQty",
+      coalesce(sum(case when t.kind = 'buy'  then round(t.quantity * t.unit_price_cents) else 0 end), 0) as "boughtCents",
+      coalesce(sum(case when t.kind = 'sell' then round(t.quantity * t.unit_price_cents) else 0 end), 0) as "soldCents",
+      coalesce(sum(t.fees_cents), 0) as "feesCents",
+      coalesce(sum(case when t.kind = 'dividend' then round(t.quantity * t.unit_price_cents) else 0 end), 0) as "dividendsCents",
       (select v.unit_price_cents from asset_valuations v
-        where v.asset_id = a.id order by v.as_of desc limit 1) as lastUnitPriceCents,
+        where v.asset_id = a.id order by v.as_of desc limit 1) as "lastUnitPriceCents",
       (select v.as_of from asset_valuations v
-        where v.asset_id = a.id order by v.as_of desc limit 1) as lastPricedOn
+        where v.asset_id = a.id order by v.as_of desc limit 1) as "lastPricedOn"
     from assets a
     left join asset_trades t on t.asset_id = a.id
-    where a.archived = 0
+    where a.archived = false
     group by a.id
     order by a.name
   `)
 
-  const notes = notesForAssets(rows.map((r) => r.assetId))
+  const notes = await notesForAssets(rows.map((r) => r.assetId))
 
   return rows.map((r) => {
     const quantity = r.boughtQty - r.soldQty
@@ -201,42 +205,45 @@ export const RESERVE_ASSET_NAME = 'Reserva de emergência'
 /** Its unit price is pinned at R$1,00/"cota" — quantity in reais *is* the amount, so no valuation step is ever needed. */
 const RESERVE_UNIT_PRICE_CENTS = 100
 
-export function ensureReserveAsset(): number {
-  const existing = db
-    .select({ id: assets.id, countsTowardReserve: assets.countsTowardReserve })
-    .from(assets)
-    .where(eq(assets.name, RESERVE_ASSET_NAME))
-    .get()
+export async function ensureReserveAsset(): Promise<number> {
+  const existing = (
+    await db
+      .select({ id: assets.id, countsTowardReserve: assets.countsTowardReserve })
+      .from(assets)
+      .where(eq(assets.name, RESERVE_ASSET_NAME))
+  )[0]
   if (existing) {
     if (!existing.countsTowardReserve) {
-      db.update(assets).set({ countsTowardReserve: true }).where(eq(assets.id, existing.id)).run()
+      await db.update(assets).set({ countsTowardReserve: true }).where(eq(assets.id, existing.id))
     }
     return existing.id
   }
-  const created = db
-    .insert(assets)
-    .values({ name: RESERVE_ASSET_NAME, assetClass: 'cash', countsTowardReserve: true })
-    .returning({ id: assets.id })
-    .get()
+  const created = (
+    await db
+      .insert(assets)
+      .values({ name: RESERVE_ASSET_NAME, assetClass: 'cash', countsTowardReserve: true })
+      .returning({ id: assets.id })
+  )[0]!
   return created.id
 }
 
 /** One buy (or sell, to record a withdrawal) trade against the dedicated reserve asset — creating it on first use. */
-export function contributeToReserve(input: { amountCents: number; tradedOn: string; kind?: 'buy' | 'sell' }) {
-  const assetId = ensureReserveAsset()
+export async function contributeToReserve(input: { amountCents: number; tradedOn: string; kind?: 'buy' | 'sell' }) {
+  const assetId = await ensureReserveAsset()
   const amountCents = Math.abs(input.amountCents)
-  return db
-    .insert(assetTrades)
-    .values({
-      assetId,
-      kind: input.kind ?? 'buy',
-      tradedOn: input.tradedOn,
-      quantity: amountCents / 100,
-      unitPriceCents: RESERVE_UNIT_PRICE_CENTS,
-      feesCents: 0,
-    })
-    .returning()
-    .get()
+  return (
+    await db
+      .insert(assetTrades)
+      .values({
+        assetId,
+        kind: input.kind ?? 'buy',
+        tradedOn: input.tradedOn,
+        quantity: amountCents / 100,
+        unitPriceCents: RESERVE_UNIT_PRICE_CENTS,
+        feesCents: 0,
+      })
+      .returning()
+  )[0]!
 }
 
 export type ReserveStatus = {
@@ -254,43 +261,41 @@ export type ReserveStatus = {
 
 type ReserveSettingsRow = { multiple: number; lookbackMonths: number; manualLivingCostCents: number | null }
 
-function reserveSettings(): ReserveSettingsRow {
-  const row = db.select().from(emergencyReserveSettings).where(eq(emergencyReserveSettings.id, 1)).get()
+async function reserveSettings(): Promise<ReserveSettingsRow> {
+  const row = (await db.select().from(emergencyReserveSettings).where(eq(emergencyReserveSettings.id, 1)))[0]
   return row
     ? { multiple: row.multiple, lookbackMonths: row.lookbackMonths, manualLivingCostCents: row.manualLivingCostCents }
     : { multiple: 6, lookbackMonths: 3, manualLivingCostCents: null }
 }
 
-export function setReserveSettings(patch: {
+export async function setReserveSettings(patch: {
   multiple?: number
   lookbackMonths?: number
   /** pass null to clear the override and go back to the computed average */
   manualLivingCostCents?: number | null
-}): ReserveSettingsRow {
-  const existing = db.select().from(emergencyReserveSettings).where(eq(emergencyReserveSettings.id, 1)).get()
+}): Promise<ReserveSettingsRow> {
+  const existing = (await db.select().from(emergencyReserveSettings).where(eq(emergencyReserveSettings.id, 1)))[0]
   if (existing) {
-    const updated = db
-      .update(emergencyReserveSettings)
-      .set(patch)
-      .where(eq(emergencyReserveSettings.id, 1))
-      .returning()
-      .get()
+    const updated = (
+      await db.update(emergencyReserveSettings).set(patch).where(eq(emergencyReserveSettings.id, 1)).returning()
+    )[0]!
     return {
       multiple: updated.multiple,
       lookbackMonths: updated.lookbackMonths,
       manualLivingCostCents: updated.manualLivingCostCents,
     }
   }
-  const created = db
-    .insert(emergencyReserveSettings)
-    .values({
-      id: 1,
-      multiple: patch.multiple ?? 6,
-      lookbackMonths: patch.lookbackMonths ?? 3,
-      manualLivingCostCents: patch.manualLivingCostCents ?? null,
-    })
-    .returning()
-    .get()
+  const created = (
+    await db
+      .insert(emergencyReserveSettings)
+      .values({
+        id: 1,
+        multiple: patch.multiple ?? 6,
+        lookbackMonths: patch.lookbackMonths ?? 3,
+        manualLivingCostCents: patch.manualLivingCostCents ?? null,
+      })
+      .returning()
+  )[0]!
   return {
     multiple: created.multiple,
     lookbackMonths: created.lookbackMonths,
@@ -298,8 +303,8 @@ export function setReserveSettings(patch: {
   }
 }
 
-export function reserveStatus(): ReserveStatus {
-  const { multiple, lookbackMonths, manualLivingCostCents } = reserveSettings()
+export async function reserveStatus(): Promise<ReserveStatus> {
+  const { multiple, lookbackMonths, manualLivingCostCents } = await reserveSettings()
 
   let monthlyLivingCostCents: number
   if (manualLivingCostCents !== null) {
@@ -311,18 +316,18 @@ export function reserveStatus(): ReserveStatus {
     // The average mixes every account (PF personal AND PJ business) — a
     // real value, but one that can overstate PERSONAL cost of living,
     // which is exactly why a manual override exists above.
-    const expenseCents = lookbackMonths > 0 ? totals({ from, to }).expenseCents : 0
+    const expenseCents = lookbackMonths > 0 ? (await totals({ from, to })).expenseCents : 0
     monthlyLivingCostCents = lookbackMonths > 0 ? Math.round(expenseCents / lookbackMonths) : 0
   }
 
   const targetCents = monthlyLivingCostCents * multiple
-  const currentCents = positions()
+  const currentCents = (await positions())
     .filter((p) => p.countsTowardReserve)
     .reduce((s, p) => s + p.marketValueCents, 0)
   const gapCents = Math.max(0, targetCents - currentCents)
   // Not auto-created here — reading the reserve card shouldn't conjure the
   // asset into "Meus ativos" before the user actually contributes once.
-  const reserveAsset = db.select({ id: assets.id }).from(assets).where(eq(assets.name, RESERVE_ASSET_NAME)).get()
+  const reserveAsset = (await db.select({ id: assets.id }).from(assets).where(eq(assets.name, RESERVE_ASSET_NAME)))[0]
 
   return {
     assetId: reserveAsset?.id ?? null,
@@ -337,8 +342,8 @@ export function reserveStatus(): ReserveStatus {
   }
 }
 
-export function portfolioSummary() {
-  const rows = positions()
+export async function portfolioSummary() {
+  const rows = await positions()
   const marketValueCents = rows.reduce((s, p) => s + p.marketValueCents, 0)
   const contributedCents = rows.reduce((s, p) => s + p.contributedCents, 0)
   const dividendsCents = rows.reduce((s, p) => s + p.dividendsCents, 0)
@@ -370,19 +375,19 @@ export type AllocationSlice = {
   rebalanceCents: number | null
 }
 
-export function allocation(goalId?: number | null): AllocationSlice[] {
-  const rows = positions()
+export async function allocation(goalId?: number | null): Promise<AllocationSlice[]> {
+  const rows = await positions()
   const total = rows.reduce((s, p) => s + p.marketValueCents, 0)
 
   const byClass = new Map<string, number>()
   for (const p of rows) byClass.set(p.assetClass, (byClass.get(p.assetClass) ?? 0) + p.marketValueCents)
 
   const targets = new Map<string, number>()
-  for (const t of db
+  const targetRows = await db
     .select()
     .from(targetAllocations)
     .where(goalId ? eq(targetAllocations.goalId, goalId) : sql`goal_id is null`)
-    .all()) {
+  for (const t of targetRows) {
     targets.set(t.assetClass, t.targetBps)
   }
 
@@ -440,11 +445,11 @@ export type AllocationDeviation = {
   deviationBps: number
 }
 
-export function allocationDeviation(goalId?: number | null): {
+export async function allocationDeviation(goalId?: number | null): Promise<{
   classes: AllocationDeviation[]
   assumptions: Record<string, unknown>
-} {
-  const classes = allocation(goalId)
+}> {
+  const classes = (await allocation(goalId))
     .filter((slice) => slice.targetBps !== null)
     .map((slice) => ({
       assetClass: slice.assetClass,
@@ -506,30 +511,31 @@ export type ClassAllocationDetail = {
   assets: AssetAllocationSlice[]
 }
 
-export function assetAllocationWithinClass(
+export async function assetAllocationWithinClass(
   assetClass: string,
   goalId?: number | null,
-): ClassAllocationDetail {
-  const allRows = positions()
+): Promise<ClassAllocationDetail> {
+  const allRows = await positions()
   const totalPortfolioCents = allRows.reduce((s, p) => s + p.marketValueCents, 0)
   const classRows = allRows.filter((p) => p.assetClass === assetClass)
   const classValueCents = classRows.reduce((s, p) => s + p.marketValueCents, 0)
 
-  const classTarget = db
-    .select({ targetBps: targetAllocations.targetBps })
-    .from(targetAllocations)
-    .where(
-      and(
-        eq(targetAllocations.assetClass, assetClass),
-        goalId ? eq(targetAllocations.goalId, goalId) : sql`goal_id is null`,
-      ),
-    )
-    .get()
+  const classTarget = (
+    await db
+      .select({ targetBps: targetAllocations.targetBps })
+      .from(targetAllocations)
+      .where(
+        and(
+          eq(targetAllocations.assetClass, assetClass as AssetClass),
+          goalId ? eq(targetAllocations.goalId, goalId) : sql`goal_id is null`,
+        ),
+      )
+  )[0]
   const classTargetBps = classTarget?.targetBps ?? null
   const classTargetValueCents =
     classTargetBps === null ? null : Math.round((classTargetBps / 10_000) * totalPortfolioCents)
 
-  const notes = notesForAssets(classRows.map((p) => p.assetId))
+  const notes = await notesForAssets(classRows.map((p) => p.assetId))
   // An asset with no note (nothing answered yet) has no valid weight —
   // excluding it from the sum is what makes "unscored" mean "claims
   // nothing yet" rather than "scored zero", which is a very different,
@@ -718,32 +724,33 @@ function allocateAcrossSectors(
   return suggestions
 }
 
-export function suggestContribution(amountCents: number, goalId?: number | null): ContributionPlan {
-  const totalBeforeCents = positions().reduce((s, p) => s + p.marketValueCents, 0)
+export async function suggestContribution(amountCents: number, goalId?: number | null): Promise<ContributionPlan> {
+  const totalBeforeCents = (await positions()).reduce((s, p) => s + p.marketValueCents, 0)
   const totalAfterCents = totalBeforeCents + amountCents
 
-  const reserve = reserveStatus()
+  const reserve = await reserveStatus()
   const reserveAllocatedCents = Math.min(amountCents, reserve.gapCents)
 
-  const classTargets = db
+  const classTargets = await db
     .select({ assetClass: targetAllocations.assetClass, targetBps: targetAllocations.targetBps })
     .from(targetAllocations)
     .where(goalId ? eq(targetAllocations.goalId, goalId) : sql`goal_id is null`)
-    .all()
 
   // Kept unfiltered (unlike classQueue below) so LEVEL 4 can still reach a
   // class that started at or above its own target — see decisions/0019.
-  const allClasses = classTargets.map((ct) => {
-    const detail = assetAllocationWithinClass(ct.assetClass, goalId)
-    const targetValueCents = Math.round((ct.targetBps / 10_000) * totalAfterCents)
-    return {
-      assetClass: ct.assetClass,
-      label: detail.label,
-      detail,
-      targetBps: ct.targetBps,
-      deltaCents: targetValueCents - detail.classValueCents,
-    }
-  })
+  const allClasses = await Promise.all(
+    classTargets.map(async (ct) => {
+      const detail = await assetAllocationWithinClass(ct.assetClass, goalId)
+      const targetValueCents = Math.round((ct.targetBps / 10_000) * totalAfterCents)
+      return {
+        assetClass: ct.assetClass,
+        label: detail.label,
+        detail,
+        targetBps: ct.targetBps,
+        deltaCents: targetValueCents - detail.classValueCents,
+      }
+    }),
+  )
 
   const classQueue = allClasses.filter((c) => c.deltaCents > 0).sort((a, b) => b.deltaCents - a.deltaCents)
 
@@ -947,28 +954,31 @@ export type PerformancePoint = {
 const classFilter = (assetClass?: string | null) =>
   assetClass ? sql`and a.asset_class = ${assetClass}` : sql``
 
-export function performanceSeries(months = 24, assetClass?: string | null): PerformancePoint[] {
-  const first = db.get<{ first: string | null }>(sql`
+export async function performanceSeries(months = 24, assetClass?: string | null): Promise<PerformancePoint[]> {
+  const rows = await db.execute<{ first: string | null }>(sql`
     select min(t.traded_on) as first
     from asset_trades t join assets a on a.id = t.asset_id
-    where a.archived = 0 ${classFilter(assetClass)}
+    where a.archived = false ${classFilter(assetClass)}
   `)
+  const first = rows[0]
   if (!first?.first) return []
 
   const endPeriod = todayIso().slice(0, 7)
   const startPeriod = periodOf(first.first)
   const window = periodRange(startPeriod, endPeriod).slice(-months)
 
-  return window.map((period) => {
-    const cutoff = `${period}-31`
-    const snap = snapshotAsOf(cutoff, assetClass)
-    return {
-      period,
-      contributedCents: snap.contributedCents,
-      valueCents: snap.valueCents,
-      gainCents: snap.valueCents - snap.contributedCents,
-    }
-  })
+  return Promise.all(
+    window.map(async (period) => {
+      const cutoff = `${period}-31`
+      const snap = await snapshotAsOf(cutoff, assetClass)
+      return {
+        period,
+        contributedCents: snap.contributedCents,
+        valueCents: snap.valueCents,
+        gainCents: snap.valueCents - snap.contributedCents,
+      }
+    }),
+  )
 }
 
 export type MonthlyReturnPoint = { period: string; returnBps: number | null }
@@ -982,8 +992,8 @@ export type MonthlyReturnPoint = { period: string; returnBps: number | null }
  * prior value to divide by, so it comes back `null` rather than a
  * misleading 0%.
  */
-export function portfolioMonthlyReturns(assetClass?: string | null): MonthlyReturnPoint[] {
-  const series = performanceSeries(100_000, assetClass)
+export async function portfolioMonthlyReturns(assetClass?: string | null): Promise<MonthlyReturnPoint[]> {
+  const series = await performanceSeries(100_000, assetClass)
   return series.map((point, i) => {
     if (i === 0) return { period: point.period, returnBps: null }
     const prev = series[i - 1]!
@@ -1004,8 +1014,8 @@ export type ProfitabilityYearRow = {
 }
 
 /** Year rows (most recent first) × month columns, plus annual and running-cumulative return. */
-export function profitabilityTable(assetClass?: string | null): ProfitabilityYearRow[] {
-  const monthly = portfolioMonthlyReturns(assetClass)
+export async function profitabilityTable(assetClass?: string | null): Promise<ProfitabilityYearRow[]> {
+  const monthly = await portfolioMonthlyReturns(assetClass)
   const byYear = new Map<number, Array<number | null>>()
   for (const point of monthly) {
     const year = Number(point.period.slice(0, 4))
@@ -1045,8 +1055,8 @@ export function profitabilityTable(assetClass?: string | null): ProfitabilityYea
  */
 export type Snapshot = { contributedCents: number; valueCents: number; dividendsCents: number }
 
-export function snapshotAsOf(cutoffIso: string, assetClass?: string | null): Snapshot {
-  const row = db.get<{ contributed: number; value: number; dividends: number }>(sql`
+export async function snapshotAsOf(cutoffIso: string, assetClass?: string | null): Promise<Snapshot> {
+  const rows = await db.execute<{ contributed: number; value: number; dividends: number }>(sql`
     select
       coalesce(sum(net.contributed), 0) as contributed,
       coalesce(sum(net.value), 0) as value,
@@ -1072,10 +1082,11 @@ export function snapshotAsOf(cutoffIso: string, assetClass?: string | null): Sna
         ) as value
       from assets a
       left join asset_trades t on t.asset_id = a.id and t.traded_on <= ${cutoffIso}
-      where a.archived = 0 ${classFilter(assetClass)}
+      where a.archived = false ${classFilter(assetClass)}
       group by a.id
     ) net
   `)
+  const row = rows[0]
   return { contributedCents: row?.contributed ?? 0, valueCents: row?.value ?? 0, dividendsCents: row?.dividends ?? 0 }
 }
 
@@ -1103,8 +1114,8 @@ export type RangeSummary = {
   valueGrowthBpsInRange: number | null
 }
 
-export function rangeSummary(fromIso: string | null, toIso: string, assetClass?: string | null): RangeSummary {
-  const now = snapshotAsOf(toIso, assetClass)
+export async function rangeSummary(fromIso: string | null, toIso: string, assetClass?: string | null): Promise<RangeSummary> {
+  const now = await snapshotAsOf(toIso, assetClass)
   // `snapshotAsOf` is inclusive of its cutoff date, so diffing two snapshots
   // taken AT `fromIso` and `toIso` would silently drop anything traded on
   // `fromIso` itself from the "in range" figures (dividends, contributions)
@@ -1112,7 +1123,7 @@ export function rangeSummary(fromIso: string | null, toIso: string, assetClass?:
   // it. Snapshotting the day BEFORE `fromIso` instead makes the diff cover
   // the whole inclusive [fromIso, toIso] range.
   const start = fromIso
-    ? snapshotAsOf(addDays(fromIso, -1), assetClass)
+    ? await snapshotAsOf(addDays(fromIso, -1), assetClass)
     : { contributedCents: 0, valueCents: 0, dividendsCents: 0 }
 
   const contributedInRangeCents = now.contributedCents - start.contributedCents
@@ -1152,11 +1163,11 @@ export type GoalProjectionPoint = {
   contributedCents: number
 }
 
-export function goalProjection(goalId: number, horizonMonths = 120) {
-  const goal = db.select().from(investmentGoals).where(eq(investmentGoals.id, goalId)).get()
+export async function goalProjection(goalId: number, horizonMonths = 120) {
+  const goal = (await db.select().from(investmentGoals).where(eq(investmentGoals.id, goalId)))[0]
   if (!goal) return null
 
-  const summary = portfolioSummary()
+  const summary = await portfolioSummary()
   const monthlyReturn = Math.pow(1 + goal.expectedReturnBps / 10_000, 1 / 12) - 1
   const startPeriod = todayIso().slice(0, 7)
 
@@ -1248,28 +1259,35 @@ const monthsBetween = (from: string, to: string) => {
 /* ------------------------------------------------------------------ *
  * Writes
  * ------------------------------------------------------------------ */
-export function listAssets() {
-  return db.select().from(assets).where(eq(assets.archived, false)).all()
+export async function listAssets() {
+  return db.select().from(assets).where(eq(assets.archived, false))
 }
 
-export function createAsset(input: {
+export async function createAsset(input: {
   name: string
   ticker?: string | null
   assetClass?: string
   accountId?: number | null
 }) {
-  return db.insert(assets).values(input).returning().get()
+  return (
+    await db
+      .insert(assets)
+      .values({ ...input, assetClass: input.assetClass as AssetClass | undefined })
+      .returning()
+  )[0]!
 }
 
-export function updateAsset(id: number, patch: Record<string, unknown>) {
-  return db.update(assets).set(patch).where(eq(assets.id, id)).returning().get() ?? null
+export async function updateAsset(id: number, patch: Record<string, unknown>) {
+  return (
+    (await db.update(assets).set(patch as Partial<typeof assets.$inferInsert>).where(eq(assets.id, id)).returning())[0] ?? null
+  )
 }
 
-export function deleteAsset(id: number) {
-  return { removed: db.delete(assets).where(eq(assets.id, id)).run().changes }
+export async function deleteAsset(id: number) {
+  return { removed: (await db.delete(assets).where(eq(assets.id, id))).count }
 }
 
-export function listTrades(assetId?: number) {
+export async function listTrades(assetId?: number) {
   const query = db
     .select({
       id: assetTrades.id,
@@ -1284,10 +1302,10 @@ export function listTrades(assetId?: number) {
     .from(assetTrades)
     .innerJoin(assets, eq(assets.id, assetTrades.assetId))
     .orderBy(desc(assetTrades.tradedOn))
-  return assetId ? query.where(eq(assetTrades.assetId, assetId)).all() : query.all()
+  return assetId ? query.where(eq(assetTrades.assetId, assetId)) : query
 }
 
-export function createTrade(input: {
+export async function createTrade(input: {
   assetId: number
   kind?: string
   tradedOn: string
@@ -1295,11 +1313,16 @@ export function createTrade(input: {
   unitPriceCents: number
   feesCents?: number
 }) {
-  return db.insert(assetTrades).values(input).returning().get()
+  return (
+    await db
+      .insert(assetTrades)
+      .values({ ...input, kind: input.kind as TradeKind | undefined })
+      .returning()
+  )[0]!
 }
 
 /** Corrects a posting mistake in place — same fields `createTrade` accepts, all optional. */
-export function updateTrade(
+export async function updateTrade(
   id: number,
   patch: {
     assetId?: number
@@ -1310,35 +1333,41 @@ export function updateTrade(
     feesCents?: number
   },
 ) {
-  return db.update(assetTrades).set(patch).where(eq(assetTrades.id, id)).returning().get() ?? null
+  return (
+    (
+      await db
+        .update(assetTrades)
+        .set({ ...patch, kind: patch.kind as TradeKind | undefined })
+        .where(eq(assetTrades.id, id))
+        .returning()
+    )[0] ?? null
+  )
 }
 
-export function deleteTrade(id: number) {
-  return { removed: db.delete(assetTrades).where(eq(assetTrades.id, id)).run().changes }
+export async function deleteTrade(id: number) {
+  return { removed: (await db.delete(assetTrades).where(eq(assetTrades.id, id))).count }
 }
 
-export function recordValuation(assetId: number, asOf: string, unitPriceCents: number) {
-  const existing = db
-    .select()
-    .from(assetValuations)
-    .where(sql`${assetValuations.assetId} = ${assetId} and ${assetValuations.asOf} = ${asOf}`)
-    .get()
+export async function recordValuation(assetId: number, asOf: string, unitPriceCents: number) {
+  const existing = (
+    await db
+      .select()
+      .from(assetValuations)
+      .where(sql`${assetValuations.assetId} = ${assetId} and ${assetValuations.asOf} = ${asOf}`)
+  )[0]
   if (existing) {
-    return db
-      .update(assetValuations)
-      .set({ unitPriceCents })
-      .where(eq(assetValuations.id, existing.id))
-      .returning()
-      .get()
+    return (
+      await db.update(assetValuations).set({ unitPriceCents }).where(eq(assetValuations.id, existing.id)).returning()
+    )[0]!
   }
-  return db.insert(assetValuations).values({ assetId, asOf, unitPriceCents }).returning().get()
+  return (await db.insert(assetValuations).values({ assetId, asOf, unitPriceCents }).returning())[0]!
 }
 
-export function listGoals() {
-  return db.select().from(investmentGoals).where(eq(investmentGoals.active, true)).all()
+export async function listGoals() {
+  return db.select().from(investmentGoals).where(eq(investmentGoals.active, true))
 }
 
-export function createGoal(input: {
+export async function createGoal(input: {
   name: string
   targetValueCents: number
   targetDate?: string | null
@@ -1346,25 +1375,39 @@ export function createGoal(input: {
   expectedReturnBps?: number
   purpose?: string | null
 }) {
-  return db.insert(investmentGoals).values(input).returning().get()
+  return (
+    await db
+      .insert(investmentGoals)
+      .values({ ...input, purpose: input.purpose as GoalPurpose | undefined })
+      .returning()
+  )[0]!
 }
 
-export function updateGoal(id: number, patch: Record<string, unknown>) {
-  return db.update(investmentGoals).set(patch).where(eq(investmentGoals.id, id)).returning().get() ?? null
+export async function updateGoal(id: number, patch: Record<string, unknown>) {
+  return (
+    (
+      await db
+        .update(investmentGoals)
+        .set(patch as Partial<typeof investmentGoals.$inferInsert>)
+        .where(eq(investmentGoals.id, id))
+        .returning()
+    )[0] ?? null
+  )
 }
 
-export function deleteGoal(id: number) {
-  return { removed: db.delete(investmentGoals).where(eq(investmentGoals.id, id)).run().changes }
+export async function deleteGoal(id: number) {
+  return { removed: (await db.delete(investmentGoals).where(eq(investmentGoals.id, id))).count }
 }
 
-export function setTargetAllocation(goalId: number | null, entries: Array<{ assetClass: string; targetBps: number }>) {
-  db.transaction((tx) => {
-    tx.delete(targetAllocations)
-      .where(goalId === null ? sql`goal_id is null` : eq(targetAllocations.goalId, goalId))
-      .run()
+export async function setTargetAllocation(
+  goalId: number | null,
+  entries: Array<{ assetClass: string; targetBps: number }>,
+) {
+  await db.transaction(async (tx) => {
+    await tx.delete(targetAllocations).where(goalId === null ? sql`goal_id is null` : eq(targetAllocations.goalId, goalId))
     for (const entry of entries) {
       if (entry.targetBps <= 0) continue
-      tx.insert(targetAllocations).values({ goalId, ...entry }).run()
+      await tx.insert(targetAllocations).values({ goalId, assetClass: entry.assetClass as AssetClass, targetBps: entry.targetBps })
     }
   })
   return allocation(goalId)

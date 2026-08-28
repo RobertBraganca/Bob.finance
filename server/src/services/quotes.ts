@@ -61,7 +61,7 @@ export type RefreshResult = {
 
 /** One asset, one BRAPI request — used by the per-asset "atualizar cotação" button. */
 export async function refreshAssetQuote(assetId: number): Promise<RefreshResult> {
-  const asset = db.select().from(assets).where(eq(assets.id, assetId)).get()
+  const asset = (await db.select().from(assets).where(eq(assets.id, assetId)))[0]
   if (!asset) throw new QuoteError('ativo não encontrado')
   if (!asset.ticker) return { assetId, name: asset.name, ticker: '', status: 'skipped', error: 'sem ticker cadastrado' }
   if (!QUOTABLE_CLASSES.has(asset.assetClass)) {
@@ -70,8 +70,8 @@ export async function refreshAssetQuote(assetId: number): Promise<RefreshResult>
 
   try {
     const quote = await fetchOne(asset.ticker)
-    recordValuation(assetId, todayIso(), quote.priceCents)
-    if (quote.sector && quote.sector !== asset.sector) updateAsset(assetId, { sector: quote.sector })
+    await recordValuation(assetId, todayIso(), quote.priceCents)
+    if (quote.sector && quote.sector !== asset.sector) await updateAsset(assetId, { sector: quote.sector })
     return { assetId, name: asset.name, ticker: asset.ticker, status: 'updated', priceCents: quote.priceCents }
   } catch (error) {
     return {
@@ -100,7 +100,7 @@ export async function refreshAllQuotes(positions: Position[]): Promise<{ results
 }
 
 /** Guards the caller from asking for assets outside this app's own ledger. */
-export function assertOwnedAssets(assetIds: number[]): void {
-  const rows = db.select({ id: assets.id }).from(assets).where(inArray(assets.id, assetIds)).all()
+export async function assertOwnedAssets(assetIds: number[]): Promise<void> {
+  const rows = await db.select({ id: assets.id }).from(assets).where(inArray(assets.id, assetIds))
   if (rows.length !== assetIds.length) throw new QuoteError('ativo desconhecido')
 }

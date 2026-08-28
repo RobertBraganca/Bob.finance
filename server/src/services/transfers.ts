@@ -88,9 +88,9 @@ export type AccountFlow = {
   }
 }
 
-export function accountFlows(range: Range): AccountFlow {
-  const nodes = db.all<{ id: number; name: string; institution: string; kind: string }>(sql`
-    select id, name, institution, kind from accounts where archived = 0 order by name`)
+export async function accountFlows(range: Range): Promise<AccountFlow> {
+  const nodes = await db.execute<{ id: number; name: string; institution: string; kind: string }>(sql`
+    select id, name, institution, kind from accounts where archived = false order by name`)
 
   /**
    * Every row in the window, flagged for whether it is a classified transfer.
@@ -100,20 +100,20 @@ export function accountFlows(range: Range): AccountFlow {
    * Nubank -> PicPay move. Pairing requires only that ONE side is a known
    * transfer, which keeps the signal strong without discarding the partner.
    */
-  const all = db.all<Leg>(sql`
+  const all = await db.execute<Leg>(sql`
     select
       t.id,
-      t.account_id as accountId,
-      a.name as accountName,
-      t.posted_on as postedOn,
-      t.amount_cents as amountCents,
-      t.description_norm as descriptionNorm,
-      case when c.kind = 'transfer' then 1 else 0 end as isTransfer
+      t.account_id as "accountId",
+      a.name as "accountName",
+      t.posted_on as "postedOn",
+      t.amount_cents as "amountCents",
+      t.description_norm as "descriptionNorm",
+      case when c.kind = 'transfer' then true else false end as "isTransfer"
     from transactions t
-    join accounts a on a.id = t.account_id and a.archived = 0
+    join accounts a on a.id = t.account_id and a.archived = false
     left join categories c on c.id = t.category_id
     where t.posted_on between ${range.from} and ${range.to}
-      and t.pending = 0
+      and t.pending = false
     order by abs(t.amount_cents) desc, t.posted_on`)
 
   // `legs` is what the unpaired remainder is measured against: the rows that

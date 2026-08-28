@@ -35,13 +35,13 @@ export type UncategorizedGroup = {
 
 const GROUP_LIMIT = 30
 
-function uncategorizedGroups(range: Range): { groups: UncategorizedGroup[]; groupCount: number; totalCount: number } {
-  const rows = db.all<{ id: number; description: string; amountCents: number }>(sql`
-    select id, description, amount_cents as amountCents
+async function uncategorizedGroups(range: Range): Promise<{ groups: UncategorizedGroup[]; groupCount: number; totalCount: number }> {
+  const rows = await db.execute<{ id: number; description: string; amountCents: number }>(sql`
+    select id, description, amount_cents as "amountCents"
     from transactions
     where posted_on between ${range.from} and ${range.to}
       and category_id is null
-      and pending = 0
+      and pending = false
       ${range.accountId ? sql`and account_id = ${range.accountId}` : sql``}
   `)
 
@@ -68,11 +68,15 @@ function uncategorizedGroups(range: Range): { groups: UncategorizedGroup[]; grou
   return { groups, groupCount: groups.length, totalCount: rows.length }
 }
 
-export function dreReport(range: Range): DreReport {
-  const totals = analytics.totals(range)
-  const income = analytics.categoryBreakdown(range, { flow: 'income', level: 'leaf' })
-  const expense = analytics.categoryBreakdown(range, { flow: 'expense', level: 'leaf' })
-  const { groups, groupCount, totalCount } = uncategorizedGroups(range)
+export async function dreReport(range: Range): Promise<DreReport> {
+  const [totals, income, expense, uncategorized, serviceAverages] = await Promise.all([
+    analytics.totals(range),
+    analytics.categoryBreakdown(range, { flow: 'income', level: 'leaf' }),
+    analytics.categoryBreakdown(range, { flow: 'expense', level: 'leaf' }),
+    uncategorizedGroups(range),
+    range.accountId ? analytics.historicalServiceAverages(range.accountId) : Promise.resolve(null),
+  ])
+  const { groups, groupCount, totalCount } = uncategorized
 
   return {
     range,
@@ -85,6 +89,6 @@ export function dreReport(range: Range): DreReport {
       totalCount,
       hasMore: groupCount > GROUP_LIMIT,
     },
-    serviceAverages: range.accountId ? analytics.historicalServiceAverages(range.accountId) : null,
+    serviceAverages,
   }
 }

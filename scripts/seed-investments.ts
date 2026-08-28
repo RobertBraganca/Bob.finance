@@ -63,49 +63,49 @@ const TARGET_ALLOCATION_BPS: Record<string, number> = {
   etf_intl: 500,
 }
 
-function assetExists(name: string): boolean {
-  return db.select({ id: assets.id }).from(assets).where(eq(assets.name, name)).get() !== undefined
+async function assetExists(name: string): Promise<boolean> {
+  return (await db.select({ id: assets.id }).from(assets).where(eq(assets.name, name)))[0] !== undefined
 }
 
 let created = 0
 let skipped = 0
 
 for (const item of DETAILED) {
-  if (assetExists(item.name)) {
+  if (await assetExists(item.name)) {
     skipped++
     continue
   }
-  const asset = investments.createAsset({ name: item.name, ticker: item.ticker, assetClass: item.assetClass })
-  investments.createTrade({
+  const asset = await investments.createAsset({ name: item.name, ticker: item.ticker, assetClass: item.assetClass })
+  await investments.createTrade({
     assetId: asset.id,
     kind: 'buy',
     tradedOn: TODAY,
     quantity: item.quantity,
     unitPriceCents: item.avgPriceCents,
   })
-  investments.recordValuation(asset.id, TODAY, item.currentPriceCents)
+  await investments.recordValuation(asset.id, TODAY, item.currentPriceCents)
   created++
 }
 
 for (const group of AGGREGATES) {
-  if (assetExists(group.name)) {
+  if (await assetExists(group.name)) {
     skipped++
     continue
   }
   const contributedCents = Math.round(group.valueCents / (1 + group.returnRate))
-  const asset = investments.createAsset({ name: group.name, ticker: null, assetClass: group.assetClass })
-  investments.createTrade({
+  const asset = await investments.createAsset({ name: group.name, ticker: null, assetClass: group.assetClass })
+  await investments.createTrade({
     assetId: asset.id,
     kind: 'buy',
     tradedOn: TODAY,
     quantity: 1,
     unitPriceCents: contributedCents,
   })
-  investments.recordValuation(asset.id, TODAY, group.valueCents)
+  await investments.recordValuation(asset.id, TODAY, group.valueCents)
   created++
 }
 
-investments.setTargetAllocation(
+await investments.setTargetAllocation(
   null,
   Object.entries(TARGET_ALLOCATION_BPS).map(([assetClass, targetBps]) => ({ assetClass, targetBps })),
 )

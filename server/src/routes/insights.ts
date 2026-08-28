@@ -30,8 +30,8 @@ const idParam = z.object({ id: z.coerce.number().int().positive() })
  * Falling back to "today" would show an empty dashboard to someone who just
  * imported historical statements.
  */
-function resolveRange(query: z.infer<typeof rangeQuery>): analytics.Range {
-  const bounds = ledgerBounds()
+async function resolveRange(query: z.infer<typeof rangeQuery>): Promise<analytics.Range> {
+  const bounds = await ledgerBounds()
   const anchor = query.to ?? bounds.max ?? todayIso()
   const to = query.to ?? periodBounds(anchor.slice(0, 7)).end
   const from = query.from ?? periodBounds(addMonths(anchor.slice(0, 7), -5)).start
@@ -40,12 +40,12 @@ function resolveRange(query: z.infer<typeof rangeQuery>): analytics.Range {
 
 export async function insightsRoutes(app: FastifyInstance) {
   app.get('/meta', async () => {
-    const bounds = ledgerBounds()
+    const bounds = await ledgerBounds()
     return {
       ledger: bounds,
       today: todayIso(),
-      defaultRange: resolveRange({}),
-      accounts: analytics.accountBalances(),
+      defaultRange: await resolveRange({}),
+      accounts: await analytics.accountBalances(),
       hasData: bounds.count > 0,
     }
   })
@@ -54,7 +54,7 @@ export async function insightsRoutes(app: FastifyInstance) {
    * Income vs expense dashboard
    * ---------------------------------------------------------------- */
   app.get('/dashboard', async (req) => {
-    const range = resolveRange(rangeQuery.parse(req.query))
+    const range = await resolveRange(rangeQuery.parse(req.query))
     return analytics.dashboard(range)
   })
 
@@ -65,13 +65,13 @@ export async function insightsRoutes(app: FastifyInstance) {
    */
   app.get('/analytics/flows', async (req) => {
     const query = rangeQuery.parse(req.query)
-    const range = resolveRange(query)
+    const range = await resolveRange(query)
     return accountFlows({ from: range.from, to: range.to })
   })
 
   app.get('/analytics/monthly', async (req) => {
-    const range = resolveRange(rangeQuery.parse(req.query))
-    return { range, series: analytics.monthlySeries(range) }
+    const range = await resolveRange(rangeQuery.parse(req.query))
+    return { range, series: await analytics.monthlySeries(range) }
   })
 
   /**
@@ -82,7 +82,7 @@ export async function insightsRoutes(app: FastifyInstance) {
    * ledger like every other range-scoped endpoint here.
    */
   app.get('/analytics/dre', async (req) => {
-    const range = resolveRange(rangeQuery.parse(req.query))
+    const range = await resolveRange(rangeQuery.parse(req.query))
     return dreService.dreReport(range)
   })
 
@@ -93,10 +93,10 @@ export async function insightsRoutes(app: FastifyInstance) {
         level: z.enum(['parent', 'leaf']).default('parent'),
       })
       .parse(req.query)
-    const range = resolveRange(query)
+    const range = await resolveRange(query)
     return {
       range,
-      slices: analytics.categoryBreakdown(range, { flow: query.flow, level: query.level }),
+      slices: await analytics.categoryBreakdown(range, { flow: query.flow, level: query.level }),
     }
   })
 
@@ -111,11 +111,11 @@ export async function insightsRoutes(app: FastifyInstance) {
           to: periodBounds(query.period).end,
           accountId: query.accountId ?? null,
         }
-      : resolveRange(query)
+      : await resolveRange(query)
 
-    const days = analytics.dailySeries(range)
+    const days = await analytics.dailySeries(range)
     const period = range.from.slice(0, 7)
-    const progress = goalsService.getPeriodProgress(period, range.accountId)
+    const progress = await goalsService.getPeriodProgress(period, range.accountId)
 
     const spentSoFar = days
       .filter((d) => d.day <= todayIso())
@@ -144,7 +144,7 @@ export async function insightsRoutes(app: FastifyInstance) {
             ? Math.max(0, Math.round((cap - spentSoFar) / (progress.daysTotal - progress.daysElapsed)))
             : null,
       },
-      receivableCents: analytics.receivable(range),
+      receivableCents: await analytics.receivable(range),
     }
   })
 
@@ -167,7 +167,7 @@ export async function insightsRoutes(app: FastifyInstance) {
         note: z.string().nullable().optional(),
       })
       .parse(req.body)
-    goalsService.upsertGoal(period, body)
+    await goalsService.upsertGoal(period, body)
     return goalsService.getPeriodProgress(period)
   })
 
@@ -179,7 +179,7 @@ export async function insightsRoutes(app: FastifyInstance) {
       })
       .parse(req.params)
     const body = z.object({ capCents: z.number().int().nonnegative() }).parse(req.body)
-    goalsService.upsertCap(params.period, params.categoryId, body.capCents)
+    await goalsService.upsertCap(params.period, params.categoryId, body.capCents)
     return goalsService.getPeriodProgress(params.period)
   })
 
@@ -190,7 +190,7 @@ export async function insightsRoutes(app: FastifyInstance) {
         categoryId: z.coerce.number().int().positive(),
       })
       .parse(req.params)
-    goalsService.deleteCap(params.period, params.categoryId)
+    await goalsService.deleteCap(params.period, params.categoryId)
     return goalsService.getPeriodProgress(params.period)
   })
 
@@ -201,13 +201,13 @@ export async function insightsRoutes(app: FastifyInstance) {
         source: z.string().regex(/^\d{4}-\d{2}$/),
       })
       .parse(req.params)
-    goalsService.copyGoals(params.source, params.period)
+    await goalsService.copyGoals(params.source, params.period)
     return goalsService.getPeriodProgress(params.period)
   })
 
   app.get('/goals/:period/suggestions', async (req) => {
     const { period } = periodParam.parse(req.params)
-    return { suggestions: goalsService.suggestCaps(period) }
+    return { suggestions: await goalsService.suggestCaps(period) }
   })
 
   /**
@@ -231,10 +231,8 @@ export async function insightsRoutes(app: FastifyInstance) {
    * ---------------------------------------------------------------- */
   app.get('/debts', async (req) => {
     const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.query)
-    return {
-      ...debtService.debtOverview(query),
-      trend: debtService.debtTrend(),
-    }
+    const [overview, trend] = await Promise.all([debtService.debtOverview(query), debtService.debtTrend()])
+    return { ...overview, trend }
   })
 
   app.post('/debts', async (req) => {
@@ -252,8 +250,8 @@ export async function insightsRoutes(app: FastifyInstance) {
         accountId: z.number().int().positive().nullable().optional(),
       })
       .parse(req.body)
-    const debt = debtService.createDebt(body)
-    debtService.materializeDebtInstallments(debt.id)
+    const debt = await debtService.createDebt(body)
+    await debtService.materializeDebtInstallments(debt.id)
     return debt
   })
 
@@ -274,8 +272,8 @@ export async function insightsRoutes(app: FastifyInstance) {
         active: z.boolean().optional(),
       })
       .parse(req.body)
-    const debt = debtService.updateDebt(id, body)
-    if (debt) debtService.materializeDebtInstallments(id)
+    const debt = await debtService.updateDebt(id, body)
+    if (debt) await debtService.materializeDebtInstallments(id)
     return debt
   })
 
@@ -298,7 +296,7 @@ export async function insightsRoutes(app: FastifyInstance) {
   /** The payment ledger — "parcelas pagas / novo uso", mirroring investments' trade log. */
   app.get('/debts/payments', async (req) => {
     const query = z.object({ debtId: z.coerce.number().int().positive().optional() }).parse(req.query)
-    return { payments: debtService.listPayments(query.debtId) }
+    return { payments: await debtService.listPayments(query.debtId) }
   })
 
   app.post('/debts/payments', async (req) => {
@@ -332,7 +330,7 @@ export async function insightsRoutes(app: FastifyInstance) {
   /* ---------------------------------------------------------------- *
    * Credit cards
    * ---------------------------------------------------------------- */
-  app.get('/credit-cards', async () => ({ cards: creditCardsService.listCards() }))
+  app.get('/credit-cards', async () => ({ cards: await creditCardsService.listCards() }))
 
   app.post('/credit-cards', async (req) => {
     const body = z
@@ -394,8 +392,10 @@ export async function insightsRoutes(app: FastifyInstance) {
    * ---------------------------------------------------------------- */
 
   /** The month being measured, defaulting to the ledger's most recent one for the same reason `resolveRange` does. */
-  function resolvePeriod(period?: string): string {
-    return period ?? ledgerBounds().max?.slice(0, 7) ?? todayIso().slice(0, 7)
+  async function resolvePeriod(period?: string): Promise<string> {
+    if (period) return period
+    const bounds = await ledgerBounds()
+    return bounds.max?.slice(0, 7) ?? todayIso().slice(0, 7)
   }
 
   const healthQuery = z.object({
@@ -405,7 +405,7 @@ export async function insightsRoutes(app: FastifyInstance) {
 
   app.get('/financial-health/score', async (req) => {
     const query = healthQuery.parse(req.query)
-    return healthService.healthScore(resolvePeriod(query.period), query.accountId ?? null)
+    return healthService.healthScore(await resolvePeriod(query.period), query.accountId ?? null)
   })
 
   app.get('/financial-health/runway', async (req) => {
@@ -426,7 +426,7 @@ export async function insightsRoutes(app: FastifyInstance) {
    */
   app.get('/financial-health/net-worth', async (req) => {
     const query = z.object({ scope: z.enum(['pf', 'pj', 'consolidado']).optional() }).parse(req.query)
-    const result = healthService.netWorth()
+    const result = await healthService.netWorth()
     return {
       ...result,
       scope: 'consolidado' as const,
@@ -436,7 +436,7 @@ export async function insightsRoutes(app: FastifyInstance) {
 
   app.get('/financial-health/risk-radar', async (req) => {
     const query = healthQuery.parse(req.query)
-    return healthService.riskRadar(resolvePeriod(query.period), query.accountId ?? null)
+    return healthService.riskRadar(await resolvePeriod(query.period), query.accountId ?? null)
   })
 
   /**
@@ -446,7 +446,7 @@ export async function insightsRoutes(app: FastifyInstance) {
    * out. Defaults come back until the user saves something else.
    */
   app.get('/financial-health/settings', async () => ({
-    settings: healthService.getSettings(),
+    settings: await healthService.getSettings(),
     defaults: healthService.DEFAULT_HEALTH_SETTINGS,
   }))
 
@@ -469,7 +469,7 @@ export async function insightsRoutes(app: FastifyInstance) {
         riskPositiveMarginBps: bps.optional(),
       })
       .parse(req.body)
-    return { settings: healthService.setSettings(body), defaults: healthService.DEFAULT_HEALTH_SETTINGS }
+    return { settings: await healthService.setSettings(body), defaults: healthService.DEFAULT_HEALTH_SETTINGS }
   })
 
   /* ---------------------------------------------------------------- *
@@ -481,7 +481,7 @@ export async function insightsRoutes(app: FastifyInstance) {
    * ---------------------------------------------------------------- */
   app.get('/financial-engine/available', async (req) => {
     const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.query)
-    return engineService.availableForAllocation(resolvePeriod(query.period))
+    return engineService.availableForAllocation(await resolvePeriod(query.period))
   })
 
   app.get('/financial-engine/break-even', async (req) => {
@@ -496,7 +496,7 @@ export async function insightsRoutes(app: FastifyInstance) {
         marginCents: z.coerce.number().int().nonnegative().optional(),
       })
       .parse(req.query)
-    const period = resolvePeriod(query.period)
+    const period = await resolvePeriod(query.period)
     const overrides = {
       pjAccountId: query.pjAccountId ?? null,
       pfAccountId: query.pfAccountId ?? null,
@@ -511,8 +511,10 @@ export async function insightsRoutes(app: FastifyInstance) {
      * mantém o nome e o valor de sempre (com metas), para não quebrar quem
      * já consome esta rota; `minimoCents` é o campo novo, sem as metas.
      */
-    const comMetas = engineService.breakEven(period, overrides)
-    const minimo = engineService.breakEven(period, overrides, { includeGoals: false })
+    const [comMetas, minimo] = await Promise.all([
+      engineService.breakEven(period, overrides),
+      engineService.breakEven(period, overrides, { includeGoals: false }),
+    ])
 
     return {
       ...comMetas,
@@ -538,7 +540,7 @@ export async function insightsRoutes(app: FastifyInstance) {
    * choices, not derived data. Anything derivable stays out of here.
    */
   app.get('/financial-engine/settings', async () => ({
-    settings: engineService.getSettings(),
+    settings: await engineService.getSettings(),
     defaults: engineService.DEFAULT_BREAK_EVEN_PARAMS,
   }))
 
@@ -554,7 +556,7 @@ export async function insightsRoutes(app: FastifyInstance) {
       })
       .parse(req.body)
     return {
-      settings: engineService.setSettings(body),
+      settings: await engineService.setSettings(body),
       defaults: engineService.DEFAULT_BREAK_EVEN_PARAMS,
     }
   })
@@ -564,11 +566,17 @@ export async function insightsRoutes(app: FastifyInstance) {
    * ---------------------------------------------------------------- */
   app.get('/investments', async (req) => {
     const query = z.object({ goalId: z.coerce.number().int().positive().optional() }).parse(req.query)
+    const [summary, allocation, performance, goals] = await Promise.all([
+      investments.portfolioSummary(),
+      investments.allocation(query.goalId ?? null),
+      investments.performanceSeries(),
+      investments.listGoals(),
+    ])
     return {
-      ...investments.portfolioSummary(),
-      allocation: investments.allocation(query.goalId ?? null),
-      performance: investments.performanceSeries(),
-      goals: investments.listGoals(),
+      ...summary,
+      allocation,
+      performance,
+      goals,
       assetClasses: investments.ASSET_CLASSES.map((value) => ({
         value,
         label: investments.ASSET_CLASS_LABELS[value] ?? value,
@@ -582,7 +590,7 @@ export async function insightsRoutes(app: FastifyInstance) {
 
   app.get('/investments/trades', async (req) => {
     const query = z.object({ assetId: z.coerce.number().int().positive().optional() }).parse(req.query)
-    return { trades: investments.listTrades(query.assetId) }
+    return { trades: await investments.listTrades(query.assetId) }
   })
 
   /** Powers the summary dashboard's KPI row — one window, optionally one class. */
@@ -605,7 +613,7 @@ export async function insightsRoutes(app: FastifyInstance) {
         assetClass: z.enum(investments.ASSET_CLASSES).optional(),
       })
       .parse(req.query)
-    return { performance: investments.performanceSeries(query.months, query.assetClass ?? null) }
+    return { performance: await investments.performanceSeries(query.months, query.assetClass ?? null) }
   })
 
   app.post('/investments/assets', async (req) => {
@@ -696,7 +704,7 @@ export async function insightsRoutes(app: FastifyInstance) {
    * loop, never a batch call.
    */
   app.post('/investments/quotes/refresh-all', async () => {
-    return quotesService.refreshAllQuotes(investments.positions())
+    return quotesService.refreshAllQuotes(await investments.positions())
   })
 
   app.post('/investments/goals', async (req) => {
@@ -736,7 +744,7 @@ export async function insightsRoutes(app: FastifyInstance) {
 
   app.get('/investments/goals/:id/projection', async (req, reply) => {
     const { id } = idParam.parse(req.params)
-    const projection = investments.goalProjection(id)
+    const projection = await investments.goalProjection(id)
     if (!projection) return reply.code(404).send({ error: 'meta não encontrada' })
     return projection
   })
@@ -748,10 +756,15 @@ export async function insightsRoutes(app: FastifyInstance) {
    */
   app.get('/investments/profitability', async (req) => {
     const query = z.object({ assetClass: z.enum(investments.ASSET_CLASSES).optional() }).parse(req.query)
+    const [portfolio, benchmarks, table] = await Promise.all([
+      investments.portfolioMonthlyReturns(query.assetClass ?? null),
+      benchmarksService.listBenchmarkSeries(benchmarksService.ALL_BENCHMARK_CODES),
+      investments.profitabilityTable(query.assetClass ?? null),
+    ])
     return {
-      portfolio: investments.portfolioMonthlyReturns(query.assetClass ?? null),
-      benchmarks: benchmarksService.listBenchmarkSeries(benchmarksService.ALL_BENCHMARK_CODES),
-      table: investments.profitabilityTable(query.assetClass ?? null),
+      portfolio,
+      benchmarks,
+      table,
       benchmarkLabels: benchmarksService.BENCHMARK_LABELS,
     }
   })
@@ -783,7 +796,7 @@ export async function insightsRoutes(app: FastifyInstance) {
         ),
       })
       .parse(req.body)
-    return { allocation: investments.setTargetAllocation(body.goalId, body.entries) }
+    return { allocation: await investments.setTargetAllocation(body.goalId, body.entries) }
   })
 
   /* ---------------------------------------------------------------- *
@@ -794,7 +807,7 @@ export async function insightsRoutes(app: FastifyInstance) {
    * ---------------------------------------------------------------- */
   app.get('/criteria', async (req) => {
     const query = z.object({ assetClass: z.enum(investments.ASSET_CLASSES).optional() }).parse(req.query)
-    return { criteria: criteriaService.listCriteria(query.assetClass) }
+    return { criteria: await criteriaService.listCriteria(query.assetClass) }
   })
 
   app.post('/criteria', async (req) => {
@@ -827,7 +840,7 @@ export async function insightsRoutes(app: FastifyInstance) {
 
   app.get('/investments/assets/:id/note', async (req, reply) => {
     const { id } = idParam.parse(req.params)
-    const note = criteriaService.getAssetNote(id)
+    const note = await criteriaService.getAssetNote(id)
     if (!note) return reply.code(404).send({ error: 'ativo não encontrado' })
     return note
   })
@@ -837,7 +850,7 @@ export async function insightsRoutes(app: FastifyInstance) {
       .object({ assetId: z.coerce.number().int().positive(), criteriaId: z.coerce.number().int().positive() })
       .parse(req.params)
     const body = z.object({ checked: z.boolean() }).parse(req.body)
-    criteriaService.setAnswer(params.assetId, params.criteriaId, body.checked)
+    await criteriaService.setAnswer(params.assetId, params.criteriaId, body.checked)
     return criteriaService.getAssetNote(params.assetId)
   })
 
@@ -845,7 +858,7 @@ export async function insightsRoutes(app: FastifyInstance) {
     const params = z
       .object({ assetId: z.coerce.number().int().positive(), criteriaId: z.coerce.number().int().positive() })
       .parse(req.params)
-    criteriaService.clearAnswer(params.assetId, params.criteriaId)
+    await criteriaService.clearAnswer(params.assetId, params.criteriaId)
     return criteriaService.getAssetNote(params.assetId)
   })
 
@@ -894,7 +907,7 @@ export async function insightsRoutes(app: FastifyInstance) {
         kind: z.enum(['buy', 'sell']).default('buy'),
       })
       .parse(req.body)
-    investments.contributeToReserve(body)
+    await investments.contributeToReserve(body)
     return investments.reserveStatus()
   })
 
@@ -904,8 +917,8 @@ export async function insightsRoutes(app: FastifyInstance) {
    * the normal ledger rather than a side preview.
    * ---------------------------------------------------------------- */
   app.get('/cash-flow/forecasts', async () => {
-    cashFlowService.materializeAll()
-    return { forecasts: cashFlowService.listForecasts() }
+    await cashFlowService.materializeAll()
+    return { forecasts: await cashFlowService.listForecasts() }
   })
 
   app.post('/cash-flow/forecasts', async (req) => {
@@ -969,10 +982,9 @@ export async function insightsRoutes(app: FastifyInstance) {
     // "pendentes" widget re-checks it. Debt installments materialize the
     // same way (debt.ts's own MATERIALIZE_HORIZON_MONTHS) so "Despesas
     // pendentes" also reflects upcoming parcelas without a separate UI.
-    cashFlowService.materializeAll()
-    debtService.materializeAllDebts()
+    await Promise.all([cashFlowService.materializeAll(), debtService.materializeAllDebts()])
     const range = query.from && query.to ? { from: query.from, to: query.to } : undefined
-    return { pending: cashFlowService.listPending(query.flow, range) }
+    return { pending: await cashFlowService.listPending(query.flow, range) }
   })
 
   app.delete('/cash-flow/pending/:id', async (req) => {
@@ -983,7 +995,7 @@ export async function insightsRoutes(app: FastifyInstance) {
 
   /** Suggested pairs (pending <-> a real posted transaction) — never auto-applied. */
   app.get('/cash-flow/reconciliation-candidates', async () => ({
-    candidates: cashFlowService.reconciliationCandidates(),
+    candidates: await cashFlowService.reconciliationCandidates(),
   }))
 
   app.post('/cash-flow/pending/:id/confirm-match', async (req) => {

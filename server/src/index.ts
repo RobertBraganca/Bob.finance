@@ -1,8 +1,6 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import { ZodError } from 'zod'
-import { DB_PATH } from './db/client'
-import { runMigrations } from './db/migrate'
 import { seed } from './db/seed'
 import { ledgerRoutes } from './routes/ledger'
 import { insightsRoutes } from './routes/insights'
@@ -53,13 +51,13 @@ await app.register(backupRoutes, { prefix: '/api' })
 await app.register(pricingRoutes, { prefix: '/api' })
 await app.register(simulateRoutes, { prefix: '/api' })
 
-app.get('/api/health', async () => ({ ok: true, db: DB_PATH }))
+app.get('/api/health', async () => ({ ok: true, db: 'supabase' }))
 
-// Migrate and seed on boot: `npm run dev` is the only setup step there is.
-runMigrations()
-const seeded = seed()
+// Seed on boot: `npm run dev` is the only setup step there is. Schema
+// migrations run separately via `supabase db push` (decisions/0026).
+const seeded = await seed()
 
 await app.listen({ port: PORT, host: HOST })
 app.log.info(
-  `banco ${DB_PATH} — ${seeded.categories} categorias, ${seeded.profiles} perfis, ${seeded.rules} regras`,
+  `Supabase (BOB.FINANÇA) — ${seeded.categories} categorias, ${seeded.profiles} perfis, ${seeded.rules} regras`,
 )

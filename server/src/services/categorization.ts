@@ -4,8 +4,8 @@ import { categories, categoryMemory, categoryRules, transactions } from '../db/s
 import { AUTO_PROMOTE_AT, Categorizer, type MemoryRow, type RuleRow } from '../categorize/engine'
 import { merchantSignature, normalizeDescription } from '../core/normalize'
 
-export function loadCategorizer(): Categorizer {
-  const rules = db
+export async function loadCategorizer(): Promise<Categorizer> {
+  const rules: RuleRow[] = await db
     .select({
       id: categoryRules.id,
       categoryId: categoryRules.categoryId,
@@ -20,9 +20,8 @@ export function loadCategorizer(): Categorizer {
       active: categoryRules.active,
     })
     .from(categoryRules)
-    .all() as RuleRow[]
 
-  const memory = db
+  const memory: MemoryRow[] = await db
     .select({
       signature: categoryMemory.signature,
       categoryId: categoryMemory.categoryId,
@@ -30,13 +29,8 @@ export function loadCategorizer(): Categorizer {
       lastSeenAt: categoryMemory.lastSeenAt,
     })
     .from(categoryMemory)
-    .all() as MemoryRow[]
 
-  const cats = db
-    .select({ id: categories.id, name: categories.name })
-    .from(categories)
-    .where(eq(categories.archived, false))
-    .all()
+  const cats = await db.select({ id: categories.id, name: categories.name }).from(categories).where(eq(categories.archived, false))
 
   return new Categorizer(rules, memory, cats)
 }
@@ -53,15 +47,16 @@ export type LearnResult = {
  * real rule happens once the same correction has been confirmed
  * AUTO_PROMOTE_AT times, so one-off overrides never harden into rules.
  */
-export function learnCorrection(description: string, categoryId: number): LearnResult | null {
+export async function learnCorrection(description: string, categoryId: number): Promise<LearnResult | null> {
   const signature = merchantSignature(description)
   if (!signature) return null
 
-  const existing = db
-    .select()
-    .from(categoryMemory)
-    .where(and(eq(categoryMemory.signature, signature), eq(categoryMemory.categoryId, categoryId)))
-    .get()
+  const existing = (
+    await db
+      .select()
+      .from(categoryMemory)
+      .where(and(eq(categoryMemory.signature, signature), eq(categoryMemory.categoryId, categoryId)))
+  )[0]
 
   let hits: number
   let promotedRuleId: number | null
@@ -69,33 +64,33 @@ export function learnCorrection(description: string, categoryId: number): LearnR
   if (existing) {
     hits = existing.hits + 1
     promotedRuleId = existing.promotedRuleId
-    db.update(categoryMemory)
-      .set({ hits, lastSeenAt: sql`(strftime('%Y-%m-%dT%H:%M:%SZ','now'))` })
+    await db
+      .update(categoryMemory)
+      .set({ hits, lastSeenAt: sql`now_iso()` })
       .where(eq(categoryMemory.id, existing.id))
-      .run()
   } else {
     hits = 1
     promotedRuleId = null
-    db.insert(categoryMemory).values({ signature, categoryId, hits }).run()
+    await db.insert(categoryMemory).values({ signature, categoryId, hits })
   }
 
   // A correction that contradicts a previous one for the same merchant loses
   // weight, so the memory converges on the user's latest intent.
-  db.update(categoryMemory)
-    .set({ hits: sql`max(1, ${categoryMemory.hits} - 1)` })
+  await db
+    .update(categoryMemory)
+    .set({ hits: sql`greatest(1, ${categoryMemory.hits} - 1)` })
     .where(and(eq(categoryMemory.signature, signature), sql`${categoryMemory.categoryId} <> ${categoryId}`))
-    .run()
 
   let promoted = false
   if (hits >= AUTO_PROMOTE_AT && promotedRuleId === null) {
-    const rule = promoteToRule(signature, categoryId)
+    const rule = await promoteToRule(signature, categoryId)
     if (rule) {
       promotedRuleId = rule
       promoted = true
-      db.update(categoryMemory)
+      await db
+        .update(categoryMemory)
         .set({ promotedRuleId: rule })
         .where(and(eq(categoryMemory.signature, signature), eq(categoryMemory.categoryId, categoryId)))
-        .run()
     }
   }
 
@@ -118,43 +113,45 @@ export function learnCorrection(description: string, categoryId: number): LearnR
  */
 export const LEARNED_RULE_PRIORITY = 50
 export const EXPLICIT_RULE_PRIORITY = 20
-export function promoteToRule(signature: string, categoryId: number): number | null {
+export async function promoteToRule(signature: string, categoryId: number): Promise<number | null> {
   const pattern = normalizeDescription(signature)
   if (!pattern) return null
 
-  const existing = db
-    .select()
-    .from(categoryRules)
-    .where(
-      and(
-        eq(categoryRules.field, 'description'),
-        eq(categoryRules.matchType, 'contains'),
-        eq(categoryRules.pattern, pattern),
-        eq(categoryRules.direction, 'any'),
-      ),
-    )
-    .get()
+  const existing = (
+    await db
+      .select()
+      .from(categoryRules)
+      .where(
+        and(
+          eq(categoryRules.field, 'description'),
+          eq(categoryRules.matchType, 'contains'),
+          eq(categoryRules.pattern, pattern),
+          eq(categoryRules.direction, 'any'),
+        ),
+      )
+  )[0]
 
   if (existing) {
     if (existing.categoryId !== categoryId) {
-      db.update(categoryRules).set({ categoryId }).where(eq(categoryRules.id, existing.id)).run()
+      await db.update(categoryRules).set({ categoryId }).where(eq(categoryRules.id, existing.id))
     }
     return existing.id
   }
 
-  const inserted = db
-    .insert(categoryRules)
-    .values({
-      categoryId,
-      field: 'description',
-      matchType: 'contains',
-      pattern,
-      direction: 'any',
-      priority: LEARNED_RULE_PRIORITY,
-      origin: 'learned',
-    })
-    .returning({ id: categoryRules.id })
-    .get()
+  const inserted = (
+    await db
+      .insert(categoryRules)
+      .values({
+        categoryId,
+        field: 'description',
+        matchType: 'contains',
+        pattern,
+        direction: 'any',
+        priority: LEARNED_RULE_PRIORITY,
+        origin: 'learned',
+      })
+      .returning({ id: categoryRules.id })
+  )[0]!
 
   return inserted.id
 }
@@ -170,8 +167,8 @@ export type RecategorizeScope = {
  * Re-runs the engine over existing transactions. Manual assignments are
  * never overwritten unless the caller explicitly targets them by id.
  */
-export function recategorize(scope: RecategorizeScope = {}): { scanned: number; updated: number } {
-  const categorizer = loadCategorizer()
+export async function recategorize(scope: RecategorizeScope = {}): Promise<{ scanned: number; updated: number }> {
+  const categorizer = await loadCategorizer()
   const onlyUncategorized = scope.onlyUncategorized ?? true
 
   const conditions = []
@@ -179,7 +176,7 @@ export function recategorize(scope: RecategorizeScope = {}): { scanned: number; 
   if (onlyUncategorized) conditions.push(isNull(transactions.categoryId))
   else conditions.push(sql`${transactions.categorizedBy} <> 'manual'`)
 
-  const rows = db
+  const rows = await db
     .select({
       id: transactions.id,
       accountId: transactions.accountId,
@@ -191,12 +188,11 @@ export function recategorize(scope: RecategorizeScope = {}): { scanned: number; 
     })
     .from(transactions)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .all()
 
   let updated = 0
   const bumpRule = new Map<number, number>()
 
-  db.transaction((tx) => {
+  await db.transaction(async (tx) => {
     for (const row of rows) {
       const suggestion = categorizer.suggest({
         descriptionNorm: row.descriptionNorm,
@@ -208,15 +204,15 @@ export function recategorize(scope: RecategorizeScope = {}): { scanned: number; 
 
       if (suggestion.categoryId === null || suggestion.categoryId === row.categoryId) continue
 
-      tx.update(transactions)
+      await tx
+        .update(transactions)
         .set({
           categoryId: suggestion.categoryId,
           categorizedBy: suggestion.source,
           ruleId: suggestion.ruleId,
-          updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%SZ','now'))`,
+          updatedAt: sql`now_iso()`,
         })
         .where(eq(transactions.id, row.id))
-        .run()
 
       if (suggestion.ruleId !== null) {
         bumpRule.set(suggestion.ruleId, (bumpRule.get(suggestion.ruleId) ?? 0) + 1)
@@ -225,10 +221,10 @@ export function recategorize(scope: RecategorizeScope = {}): { scanned: number; 
     }
 
     for (const [ruleId, hits] of bumpRule) {
-      tx.update(categoryRules)
+      await tx
+        .update(categoryRules)
         .set({ hitCount: sql`${categoryRules.hitCount} + ${hits}` })
         .where(eq(categoryRules.id, ruleId))
-        .run()
     }
   })
 
