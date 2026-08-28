@@ -24,5 +24,6 @@
       "@server/*": ["./server/src/*"]
     }
   },
-  "include": ["src", "server/src", "shared", "scripts", "vite.config.ts", "drizzle.config.ts"]
+  "include": ["src", "server/src", "shared", "scripts", "vite.config.ts", "drizzle.config.ts"],
+  "exclude": ["scripts/verify.ts", "scripts/verify-backup.ts"]
 }
