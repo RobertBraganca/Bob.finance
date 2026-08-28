@@ -21,6 +21,7 @@ import {
   Segmented,
   Select,
   Slab,
+  SkeletonLines,
   TextInput,
   useToast,
   type AssumptionBag,
@@ -826,7 +827,7 @@ function ParamsTab() {
     <div className="bento">
       <Card span={5} title="Sua capacidade no mês" subtitle="A base que transforma custo mensal em valor-hora">
         {!current ? (
-          <EmptyState title="Carregando…" />
+          <SkeletonLines lines={5} />
         ) : (
           <div className="stack">
             <div className="field">

@@ -14,6 +14,7 @@ import { CategorySelect } from './CategorySelect'
 import { FilterSelect } from './FilterSelect'
 import { Assumptions } from './Assumptions'
 import { DropdownSelect } from './Dropdown'
+import { Skeleton } from './skeleton'
 
 export { Icon, CategorySelect, FilterSelect, Assumptions }
 export type { IconName }
@@ -590,10 +591,70 @@ export function RankedList({
   )
 }
 
-export function Spinner({ label }: { label?: string }) {
+/* ------------------------------------------------------------------ *
+ * Skeletons — carregamento espelhando o layout real (linhas de texto,
+ * blocos pra gráfico/diagrama, pares label+valor pras estatísticas),
+ * nunca um retângulo genérico solto na tela.
+ * ------------------------------------------------------------------ */
+type CardSpan = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
+
+export function SkeletonLines({ lines = 3, lastWidth = '55%' }: { lines?: number; lastWidth?: string }) {
   return (
-    <div className="empty" aria-busy="true">
-      <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>{label ?? 'Carregando…'}</span>
+    <div className="stack stack--tight" aria-busy="true">
+      {Array.from({ length: lines }).map((_, i) => (
+        <Skeleton key={i} className="h-4 w-full" style={i === lines - 1 ? { width: lastWidth } : undefined} />
+      ))}
+    </div>
+  )
+}
+
+export function SkeletonBlock({ height = 220 }: { height?: number }) {
+  return <Skeleton className="w-full" style={{ height }} aria-busy="true" />
+}
+
+export function SkeletonStats({ items = 3 }: { items?: number }) {
+  return (
+    <div className="row row--wrap" style={{ gap: 'var(--sp-5)' }} aria-busy="true">
+      {Array.from({ length: items }).map((_, i) => (
+        <div key={i} className="stack stack--tight" style={{ minWidth: 88 }}>
+          <Skeleton className="h-3 w-14" />
+          <Skeleton className="h-6 w-20" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function CardSkeleton({
+  span,
+  variant = 'lines',
+  lines = 3,
+  height = 220,
+}: {
+  span?: CardSpan
+  variant?: 'lines' | 'stats' | 'block'
+  lines?: number
+  height?: number
+}) {
+  return (
+    <Card span={span}>
+      {variant === 'block' && <SkeletonBlock height={height} />}
+      {variant === 'stats' && <SkeletonStats />}
+      {variant === 'lines' && <SkeletonLines lines={lines} />}
+    </Card>
+  )
+}
+
+export function PageSkeleton({
+  cards,
+}: {
+  cards: Array<{ span?: CardSpan; variant?: 'lines' | 'stats' | 'block'; lines?: number; height?: number }>
+}) {
+  return (
+    <div className="bento">
+      {cards.map((c, i) => (
+        <CardSkeleton key={i} {...c} />
+      ))}
     </div>
   )
 }

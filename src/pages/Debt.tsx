@@ -25,6 +25,7 @@ import {
   Icon,
   Modal,
   Select,
+  SkeletonLines,
   Slab,
   StatTile,
   TextInput,
@@ -172,7 +173,7 @@ export function DebtPage() {
       <div className="page">
         {!data ? (
           <Card>
-            <EmptyState title="Carregando…" />
+            <SkeletonLines lines={3} />
           </Card>
         ) : data.debts.length === 0 ? (
           <div className="bento">

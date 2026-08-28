@@ -13,6 +13,7 @@ import {
   Meter,
   Modal,
   Select,
+  SkeletonLines,
   Slab,
   TextInput,
   useToast,
@@ -65,7 +66,7 @@ export function CreditCardsPage() {
       <div className="page">
         {!cards.data ? (
           <Card>
-            <EmptyState title="Carregando…" />
+            <SkeletonLines lines={3} />
           </Card>
         ) : data.length === 0 ? (
           <div className="bento">

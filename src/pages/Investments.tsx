@@ -30,6 +30,8 @@ import {
   Segmented,
   Select,
   Slab,
+  SkeletonBlock,
+  SkeletonLines,
   StatTile,
   StatusBadge,
   targetProgressState,
@@ -170,7 +172,7 @@ export function InvestmentsPage() {
 
         {!data ? (
           <Card>
-            <EmptyState title="Carregando carteira…" />
+            <SkeletonLines lines={4} />
           </Card>
         ) : data.assetCount === 0 ? (
           <div className="bento">
@@ -859,7 +861,7 @@ function ReserveCard() {
       }
     >
       {!data ? (
-        <EmptyState title="Carregando…" />
+        <SkeletonLines lines={4} />
       ) : (
         <div className="stack">
           <div className="row row--between row--wrap">
@@ -1661,7 +1663,7 @@ function ProfitabilityTab() {
   })
 
   const data = query.data
-  if (!data) return <Card><EmptyState title="Carregando rentabilidade…" /></Card>
+  if (!data) return <Card><SkeletonLines lines={4} /></Card>
 
   const benchmarkOptions = Object.keys(data.benchmarkLabels).map((code) => ({
     value: code,
@@ -1842,7 +1844,7 @@ function GoalsEnvironment({
 
         {!data || !goal ? (
           <Card span={12}>
-            <EmptyState title="Carregando projeção…" />
+            <SkeletonBlock height={260} />
           </Card>
         ) : (
           <>
@@ -2684,7 +2686,7 @@ function CriteriaModal({
       }
     >
       {!data ? (
-        <EmptyState title="Carregando…" />
+        <SkeletonLines lines={4} />
       ) : data.total === 0 ? (
         <EmptyState
           icon="tags"

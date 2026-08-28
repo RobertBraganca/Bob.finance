@@ -12,6 +12,7 @@ import {
   Icon,
   Modal,
   Select,
+  SkeletonLines,
   StatTile,
   useToast,
 } from '../components/ui'
@@ -522,7 +523,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
       }
     >
       {!batch.data ? (
-        <EmptyState title="Carregando lote…" />
+        <SkeletonLines lines={5} />
       ) : (
         <>
           <div className="bento" style={{ gap: 'var(--sp-3)' }}>

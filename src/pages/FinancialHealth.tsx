@@ -14,6 +14,7 @@ import {
   Modal,
   scoreIndicatorState,
   Slab,
+  SkeletonLines,
   StatTile,
   TextInput,
   useToast,
@@ -199,7 +200,7 @@ export function FinancialHealthPage() {
           </Card>
         ) : !data ? (
           <Card>
-            <EmptyState title="Carregando indicadores…" />
+            <SkeletonLines lines={4} />
           </Card>
         ) : (
           <div className="bento">
@@ -529,7 +530,7 @@ function SettingsEditor({ onClose }: { onClose: () => void }) {
       }
     >
       {!current ? (
-        <EmptyState title="Carregando…" />
+        <SkeletonLines lines={5} />
       ) : (
         <div className="stack stack--loose">
           <div className="stack stack--tight">

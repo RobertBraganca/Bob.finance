@@ -20,6 +20,7 @@ import {
   Modal,
   Select,
   Slab,
+  SkeletonLines,
   StatTile,
   TextInput,
   useToast,
@@ -432,7 +433,7 @@ function ParamsEditor({ onClose }: { onClose: () => void }) {
       }
     >
       {!current ? (
-        <EmptyState title="Carregando…" />
+        <SkeletonLines lines={5} />
       ) : (
         <div className="stack stack--loose">
           <div className="stack stack--tight">

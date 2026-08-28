@@ -23,6 +23,7 @@ import {
   Meter,
   Modal,
   Select,
+  SkeletonLines,
   Slab,
   StatTile,
   StatusBadge,
@@ -154,7 +155,7 @@ export function GoalsPage() {
       <div className="page">
         {!data ? (
           <Card>
-            <EmptyState title="Carregando metas…" />
+            <SkeletonLines lines={3} />
           </Card>
         ) : !hasAnyTarget ? (
           <div className="bento">

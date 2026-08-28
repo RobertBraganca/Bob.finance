@@ -1,6 +1,6 @@
 # 0031. Migração da camada de UI para shadcn/ui + Tailwind CSS + Tabler Icons
 
-Status: aceita (em andamento — Fases 0-1 concluídas, Fase 2 concluída)
+Status: aceita (em andamento — Fases 0-3 concluídas)
 
 ## Contexto
 Usuário pediu, explicitamente (28/08/2026): revisar todas as páginas e
@@ -130,6 +130,30 @@ abertura do menu em telas pequenas.
 reescrita, mas a remoção fica para a Fase 6 (limpeza final), como já
 prevista no plano — reduz o tamanho do diff desta fase e mantém
 reversibilidade caso a Sidebar nova precise de ajuste.
+
+### Fase 3: Skeleton
+O componente `Spinner` (texto "Carregando…" sozinho, sem forma) foi
+removido; no lugar, quatro blocos reaproveitáveis em `components/ui`
+sobre o `Skeleton` do shadcn: `SkeletonLines` (linhas de texto),
+`SkeletonBlock` (um retângulo, pra área de gráfico/diagrama),
+`SkeletonStats` (pares label+valor, pro formato de KPI) e `CardSkeleton`/
+`PageSkeleton` (compõem os três anteriores dentro do `Card`/`.bento` já
+existentes). Cada ponto de carregamento passou a usar o formato mais
+parecido com o que aparece ali quando os dados chegam — texto pros
+cards de lista, um bloco só pra diagramas (fluxo entre contas,
+projeção de patrimônio), pares label+valor pros KPIs — em vez de um
+retângulo genérico.
+
+O Painel (maior superfície, 14 cards) ganhou um esqueleto que espelha
+`DEFAULT_BENTO_LAYOUT` — mesma ordem e mesmos spans dos cards reais,
+lidos diretamente da constante (sem duplicar a lista à mão), cada um
+com o formato (`lines`/`stats`/`block`) que mais parece com o card
+que ele antecede. As outras 9 páginas com um carregamento de página
+inteira (Dre, CreditCards, Debt, Goals, FinancialHealth,
+FinancialEngine, Import, Pricing, Investments — esta com 5 pontos
+distintos, uma por aba) trocaram `EmptyState`/`Spinner` por
+`SkeletonLines`/`SkeletonBlock` no mesmo lugar em que já estavam,
+mantendo o `Card`/`Modal` que já os envolvia.
 
 ## Alternativas consideradas
 - **Radix UI puro, sem Tailwind**: descartada pelo usuário — perderia

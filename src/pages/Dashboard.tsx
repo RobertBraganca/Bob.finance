@@ -17,6 +17,7 @@ import {
 import {
   BENTO_CARD_LABELS,
   BENTO_SPAN_OPTIONS,
+  DEFAULT_BENTO_LAYOUT,
   useBentoLayout,
   type BentoCardId,
   type BentoSpan,
@@ -33,10 +34,11 @@ import {
   Modal,
   PendingEditScopeModal,
   PendingScopeModal,
+  PageSkeleton,
   Segmented,
   Select,
   Slab,
-  Spinner,
+  SkeletonBlock,
   StatTile,
   TextInput,
   useToast,
@@ -135,6 +137,21 @@ type CardRow = {
   nextDueOn: string
 }
 
+/** Formato de cada card no skeleton do primeiro carregamento — espelha
+ * o que `DEFAULT_BENTO_LAYOUT` normalmente desenha ali (linhas de texto
+ * pros cards de lista, pares label+valor pras estatísticas, um bloco
+ * só pros gráficos), não uma grade de retângulos iguais. */
+const DASHBOARD_SKELETON_VARIANT: Partial<Record<BentoCardId, 'lines' | 'stats' | 'block'>> = {
+  'month-mode': 'stats',
+  hero: 'stats',
+  'income-expense-kpi': 'stats',
+  'income-expense-chart': 'block',
+  'income-by-category': 'block',
+  'expense-by-category': 'block',
+  'net-flow': 'block',
+  'account-flow': 'block',
+}
+
 export function Dashboard() {
   const range = useRange()
   const navigate = useNavigate()
@@ -179,7 +196,21 @@ export function Dashboard() {
   })
 
   if (meta.isSuccess && !meta.data.hasData) return <FirstRun />
-  if (!dashboard.data) return <Spinner label="Carregando visão geral…" />
+  if (!dashboard.data) {
+    return (
+      <>
+        <PageHeader title="Visão geral" actions={<RangeFilter />} />
+        <div className="page">
+          <PageSkeleton
+            cards={DEFAULT_BENTO_LAYOUT.filter((c) => c.visible).map((c) => ({
+              span: c.span,
+              variant: DASHBOARD_SKELETON_VARIANT[c.id] ?? 'lines',
+            }))}
+          />
+        </div>
+      </>
+    )
+  }
 
   const {
     totals,
@@ -393,7 +424,7 @@ export function Dashboard() {
             height={320}
           />
         ) : (
-          <EmptyState title="Carregando fluxo entre contas…" />
+          <SkeletonBlock height={320} />
         )}
       </Card>
     ),

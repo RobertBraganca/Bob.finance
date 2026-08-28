@@ -11,7 +11,7 @@ import {
   HeroFigure,
   Icon,
   Slab,
-  Spinner,
+  SkeletonLines,
   StatTile,
   useToast,
 } from '../components/ui'
@@ -118,7 +118,9 @@ export function DrePage() {
 
       <div className="page">
         {!meta.isSuccess ? (
-          <Spinner label="Carregando contas…" />
+          <Card>
+            <SkeletonLines lines={2} />
+          </Card>
         ) : meta.data && !meta.data.hasData ? (
           <Card>
             <EmptyState
@@ -412,7 +414,7 @@ function DreColumn({
   if (!dre.data) {
     return (
       <Card span={6}>
-        <Spinner label={`Carregando ${accountLabel}…`} />
+        <SkeletonLines lines={5} />
       </Card>
     )
   }
