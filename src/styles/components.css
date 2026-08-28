@@ -17,10 +17,6 @@
   flex-direction: column;
   gap: var(--sp-4);
   min-width: 0;
-  /* No-op unless a parent constrains height (e.g. a resizable bento
-     row) — percentage heights fall back to auto against an auto-height
-     parent, so this is safe everywhere else `.card` is used. */
-  height: 100%;
 }
 
 .card--flush {
@@ -43,7 +39,6 @@
   flex-direction: column;
   gap: var(--sp-4);
   min-width: 0;
-  height: 100%;
 }
 
 /* Exactly one card per view earns this — a step above the plain

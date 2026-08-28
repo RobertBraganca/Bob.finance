@@ -14,8 +14,14 @@ import {
   periodLong as fmtPeriodLong,
   date as fmtDate,
 } from '../lib/format'
-import { BENTO_CARD_LABELS, useBentoLayout, type BentoCardId } from '../lib/bentoLayout'
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../components/ui/resizable'
+import {
+  BENTO_CARD_LABELS,
+  BENTO_SPAN_OPTIONS,
+  DEFAULT_BENTO_LAYOUT,
+  useBentoLayout,
+  type BentoCardId,
+  type BentoSpan,
+} from '../lib/bentoLayout'
 import {
   Button,
   Card,
@@ -131,30 +137,20 @@ type CardRow = {
   nextDueOn: string
 }
 
-/** Formato de cada card no skeleton do primeiro carregamento — espelha o
- * arranjo padrão do bento (linhas de texto pros cards de lista, pares
- * label+valor pras estatísticas, um bloco só pros gráficos), não uma
- * grade de retângulos iguais. Puramente visual: independe da largura
- * redimensionável de verdade, que só existe depois que os dados chegam. */
-const DASHBOARD_SKELETON_CARDS: Array<{
-  span: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
-  variant: 'lines' | 'stats' | 'block'
-}> = [
-  { span: 12, variant: 'stats' }, // month-mode
-  { span: 4, variant: 'stats' }, // hero
-  { span: 4, variant: 'stats' }, // income-expense-kpi
-  { span: 4, variant: 'lines' }, // accounts
-  { span: 8, variant: 'lines' }, // credit-cards
-  { span: 12, variant: 'lines' }, // reconciliation
-  { span: 6, variant: 'lines' }, // pending-income
-  { span: 6, variant: 'lines' }, // pending-expense
-  { span: 12, variant: 'block' }, // income-expense-chart
-  { span: 6, variant: 'block' }, // income-by-category
-  { span: 6, variant: 'block' }, // expense-by-category
-  { span: 7, variant: 'block' }, // net-flow
-  { span: 5, variant: 'lines' }, // top-merchants
-  { span: 12, variant: 'block' }, // account-flow
-]
+/** Formato de cada card no skeleton do primeiro carregamento — espelha
+ * o que `DEFAULT_BENTO_LAYOUT` normalmente desenha ali (linhas de texto
+ * pros cards de lista, pares label+valor pras estatísticas, um bloco
+ * só pros gráficos), não uma grade de retângulos iguais. */
+const DASHBOARD_SKELETON_VARIANT: Partial<Record<BentoCardId, 'lines' | 'stats' | 'block'>> = {
+  'month-mode': 'stats',
+  hero: 'stats',
+  'income-expense-kpi': 'stats',
+  'income-expense-chart': 'block',
+  'income-by-category': 'block',
+  'expense-by-category': 'block',
+  'net-flow': 'block',
+  'account-flow': 'block',
+}
 
 export function Dashboard() {
   const range = useRange()
@@ -205,7 +201,12 @@ export function Dashboard() {
       <>
         <PageHeader title="Visão geral" actions={<RangeFilter />} />
         <div className="page">
-          <PageSkeleton cards={DASHBOARD_SKELETON_CARDS} />
+          <PageSkeleton
+            cards={DEFAULT_BENTO_LAYOUT.filter((c) => c.visible).map((c) => ({
+              span: c.span,
+              variant: DASHBOARD_SKELETON_VARIANT[c.id] ?? 'lines',
+            }))}
+          />
         </div>
       </>
     )
@@ -233,14 +234,17 @@ export function Dashboard() {
   const useDailyBars = daily.length > 0
   const flowSeries = useDailyBars ? daily : monthly
 
+  const spanOf = (id: BentoCardId): BentoSpan => bento.layout.find((c) => c.id === id)?.span ?? 4
+  const isVisible = (id: BentoCardId): boolean => bento.layout.find((c) => c.id === id)?.visible ?? true
+
   // Every card as a React element, keyed by id — built once per render, then
-  // laid out (order, size, visibility) purely from `bento.rows` below.
+  // laid out (order, span, visibility) purely from `bento.layout` below.
   // Hidden cards still get built (cheap: just an element, not a mount) so
   // toggling visibility never has to re-derive anything.
   const cardsById: Record<BentoCardId, ReactNode> = {
     hero: (
       // The one hero figure on this view. Exactly one per page.
-      <Slab accent>
+      <Slab span={spanOf('hero')} accent>
         <HeroFigure
           label="Resultado do período"
           value={moneyCompact(totals.netCents)}
@@ -260,7 +264,7 @@ export function Dashboard() {
       </Slab>
     ),
     'income-expense-kpi': (
-      <Card>
+      <Card span={spanOf('income-expense-kpi')}>
         <StatTile
           label="Entradas"
           value={moneyCompact(totals.incomeCents)}
@@ -288,6 +292,7 @@ export function Dashboard() {
     ),
     accounts: (
       <Card
+        span={spanOf('accounts')}
         title="Contas"
         subtitle="Saldo derivado dos lançamentos, nunca armazenado"
         actions={
@@ -334,13 +339,14 @@ export function Dashboard() {
         </div>
       </Card>
     ),
-    'month-mode': <MonthModeCard rangeTo={range.to} rangeAnchor={range.anchor} />,
-    'credit-cards': <CreditCardsSlab cards={cards.data?.cards ?? []} />,
-    reconciliation: <ReconciliationCard />,
-    'pending-income': <PendingCard flow="income" title="Receitas pendentes" />,
-    'pending-expense': <PendingCard flow="expense" title="Despesas pendentes" />,
+    'month-mode': <MonthModeCard span={spanOf('month-mode')} rangeTo={range.to} rangeAnchor={range.anchor} />,
+    'credit-cards': <CreditCardsSlab cards={cards.data?.cards ?? []} span={spanOf('credit-cards')} />,
+    reconciliation: <ReconciliationCard span={spanOf('reconciliation')} />,
+    'pending-income': <PendingCard flow="income" title="Receitas pendentes" span={spanOf('pending-income')} />,
+    'pending-expense': <PendingCard flow="expense" title="Despesas pendentes" span={spanOf('pending-expense')} />,
     'income-expense-chart': (
       <Card
+        span={spanOf('income-expense-chart')}
         title="Entradas e saídas"
         subtitle={useDailyBars ? 'Comparação dia a dia no período selecionado' : 'Comparação mês a mês no período selecionado'}
       >
@@ -353,7 +359,7 @@ export function Dashboard() {
       </Card>
     ),
     'income-by-category': (
-      <Card title="Entradas por categoria" subtitle="Agrupado por categoria-mãe">
+      <Card span={spanOf('income-by-category')} title="Entradas por categoria" subtitle="Agrupado por categoria-mãe">
         <CategoryRing
           slices={incomeByCategory}
           childSlices={incomeByCategoryLeaf}
@@ -367,7 +373,7 @@ export function Dashboard() {
       </Card>
     ),
     'expense-by-category': (
-      <Card title="Gastos por categoria" subtitle="Agrupado por categoria-mãe">
+      <Card span={spanOf('expense-by-category')} title="Gastos por categoria" subtitle="Agrupado por categoria-mãe">
         <CategoryRing
           slices={byCategory}
           childSlices={byCategoryLeaf}
@@ -381,12 +387,12 @@ export function Dashboard() {
       </Card>
     ),
     'net-flow': (
-      <Card title="Resultado acumulado" subtitle="Quanto sobrou, somado mês a mês">
+      <Card span={spanOf('net-flow')} title="Resultado acumulado" subtitle="Quanto sobrou, somado mês a mês">
         <NetFlowChart data={netFlow} surface="paper" height={200} />
       </Card>
     ),
     'top-merchants': (
-      <Card title="Onde o dinheiro mais foi" subtitle="Maiores saídas do período">
+      <Card span={spanOf('top-merchants')} title="Onde o dinheiro mais foi" subtitle="Maiores saídas do período">
         {topMerchants.length === 0 ? (
           <EmptyState icon="search" title="Nada a listar" body="Sem saídas registradas no período." />
         ) : (
@@ -404,6 +410,7 @@ export function Dashboard() {
     ),
     'account-flow': (
       <Card
+        span={spanOf('account-flow')}
         title="Fluxo entre contas"
         subtitle="Transferências entre suas próprias contas: cada perna do banco é pareada com a outra ponta para não contar em dobro"
       >
@@ -422,7 +429,7 @@ export function Dashboard() {
       </Card>
     ),
     'uncategorized-banner': totals.uncategorizedCount > 0 ? (
-      <Card muted>
+      <Card span={spanOf('uncategorized-banner')} muted>
         <div className="row row--between row--wrap">
           <span className="row">
             <Icon name="alert" size={16} />
@@ -458,30 +465,10 @@ export function Dashboard() {
       />
 
       <div className="page" style={{ opacity: dashboard.isFetching ? 0.72 : 1, transition: 'opacity 120ms' }}>
-        <div className="stack" style={{ gap: 'var(--sp-4)' }}>
-          {bento.rows.map((row) => {
-            const visible = row.cards.filter((id) => bento.isVisible(id) && cardsById[id] != null)
-            if (visible.length === 0) return null
-            if (visible.length === 1) return <Fragment key={row.id}>{cardsById[visible[0]!]}</Fragment>
-            return (
-              <ResizablePanelGroup
-                key={row.id}
-                orientation="horizontal"
-                onLayoutChanged={(layout, meta) => {
-                  if (meta.isUserInteraction) bento.setRowSizes(layout)
-                }}
-              >
-                {visible.map((id, index) => (
-                  <Fragment key={id}>
-                    {index > 0 && <ResizableHandle withHandle />}
-                    <ResizablePanel id={id} defaultSize={`${bento.sizeFor(id, visible.length)}%`} minSize="15%">
-                      {cardsById[id]}
-                    </ResizablePanel>
-                  </Fragment>
-                ))}
-              </ResizablePanelGroup>
-            )
-          })}
+        <div className="bento">
+          {bento.layout
+            .filter((c) => isVisible(c.id))
+            .map((c) => <Fragment key={c.id}>{cardsById[c.id]}</Fragment>)}
         </div>
       </div>
 
@@ -502,14 +489,6 @@ export function Dashboard() {
  * only reorder gesture would otherwise regress the keyboard/screen-reader
  * access the old "posição" dropdown gave for free.
  */
-/**
- * Which cards show and in what order — largura de verdade agora se ajusta
- * arrastando a divisória entre os cards direto no Painel (`Resizable`), não
- * mais aqui. Reordenar dentro de uma linha e mover a linha inteira seguem
- * disponíveis; mover um card para outra linha não é suportado nesta fase
- * (ver decisions/0031) — as linhas já nascem agrupadas do jeito que fazem
- * sentido visualmente, só a ordem e o quanto cada uma aparece mudam.
- */
 function BentoSettingsModal({
   bento,
   onClose,
@@ -517,6 +496,18 @@ function BentoSettingsModal({
   bento: ReturnType<typeof useBentoLayout>
   onClose: () => void
 }) {
+  const [draggedId, setDraggedId] = useState<BentoCardId | null>(null)
+  const [dragOverId, setDragOverId] = useState<BentoCardId | null>(null)
+
+  const dropOn = (targetId: BentoCardId) => {
+    if (draggedId && draggedId !== targetId) {
+      const targetIndex = bento.layout.findIndex((c) => c.id === targetId)
+      bento.moveTo(draggedId, targetIndex)
+    }
+    setDraggedId(null)
+    setDragOverId(null)
+  }
+
   return (
     <Modal
       title="Personalizar a visão geral"
@@ -533,25 +524,60 @@ function BentoSettingsModal({
       }
     >
       <p className="chart__note" style={{ marginBottom: 'var(--sp-3)' }}>
-        Escolha quais cards aparecem e a ordem das linhas. A largura de cada card se ajusta
-        arrastando a divisória entre eles direto na visão geral. Vale só neste navegador.
+        Escolha quais cards aparecem, o quanto cada um ocupa da largura (de 3 a 12, numa grade de
+        12 colunas) e arraste pelo ícone <Icon name="grip" size={11} strokeWidth={3} /> para reordenar.
+        Vale só neste navegador.
       </p>
-      <div className="stack">
-        {bento.rows.map((row, rowIndex) => (
+      <div className="stack stack--tight">
+        {bento.layout.map((card, index) => (
           <div
-            key={row.id}
-            className="stack stack--tight"
-            style={{ padding: 'var(--sp-3)', borderRadius: 'var(--r-sm)', background: 'var(--surface-muted)' }}
+            key={card.id}
+            onDragOver={(e) => {
+              if (!draggedId) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              if (dragOverId !== card.id) setDragOverId(card.id)
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              dropOn(card.id)
+            }}
+            className="row row--between row--wrap"
+            style={{
+              gap: 'var(--sp-3)',
+              padding: 'var(--sp-3)',
+              borderRadius: 'var(--r-sm)',
+              background: 'var(--surface-muted)',
+              opacity: card.visible ? (draggedId === card.id ? 0.4 : 1) : draggedId === card.id ? 0.4 : 0.55,
+              boxShadow: dragOverId === card.id && draggedId !== card.id ? 'inset 0 2px 0 var(--brand)' : 'none',
+              transition: 'box-shadow 100ms',
+            }}
           >
-            {row.cards.length > 1 && (
-              <div className="row" style={{ gap: 1, justifyContent: 'flex-end' }}>
+            <div className="row" style={{ gap: 'var(--sp-2)', flex: 1, minWidth: 180 }}>
+              <span
+                draggable
+                onDragStart={(e) => {
+                  setDraggedId(card.id)
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                onDragEnd={() => {
+                  setDraggedId(null)
+                  setDragOverId(null)
+                }}
+                title="Arrastar para reordenar"
+                aria-hidden="true"
+                style={{ display: 'flex', cursor: 'grab', color: 'var(--ink-3)', touchAction: 'none' }}
+              >
+                <Icon name="grip" size={14} strokeWidth={2.6} />
+              </span>
+              <div className="row" style={{ gap: 1 }}>
                 <button
                   type="button"
                   className="btn btn--quiet btn--sm"
                   style={{ width: 22, minWidth: 22, padding: 0 }}
-                  disabled={rowIndex === 0}
-                  title="Mover linha para cima"
-                  onClick={() => bento.moveRow(row.id, -1)}
+                  disabled={index === 0}
+                  title="Mover para cima"
+                  onClick={() => bento.move(card.id, -1)}
                 >
                   <span style={{ display: 'inline-flex', transform: 'rotate(-90deg)' }}>
                     <Icon name="chevronRight" size={13} />
@@ -561,54 +587,33 @@ function BentoSettingsModal({
                   type="button"
                   className="btn btn--quiet btn--sm"
                   style={{ width: 22, minWidth: 22, padding: 0 }}
-                  disabled={rowIndex === bento.rows.length - 1}
-                  title="Mover linha para baixo"
-                  onClick={() => bento.moveRow(row.id, 1)}
+                  disabled={index === bento.layout.length - 1}
+                  title="Mover para baixo"
+                  onClick={() => bento.move(card.id, 1)}
                 >
                   <span style={{ display: 'inline-flex', transform: 'rotate(90deg)' }}>
                     <Icon name="chevronRight" size={13} />
                   </span>
                 </button>
               </div>
-            )}
-            {row.cards.map((cardId, cardIndex) => (
-              <div key={cardId} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
-                <label className="row" style={{ gap: 'var(--sp-2)', flex: 1, minWidth: 180 }}>
-                  <input
-                    type="checkbox"
-                    checked={bento.isVisible(cardId)}
-                    onChange={(e) => bento.setVisible(cardId, e.target.checked)}
-                  />
-                  <span className="truncate">{BENTO_CARD_LABELS[cardId]}</span>
-                </label>
-                {row.cards.length > 1 && (
-                  <div className="row" style={{ gap: 1 }}>
-                    <button
-                      type="button"
-                      className="btn btn--quiet btn--sm"
-                      style={{ width: 22, minWidth: 22, padding: 0 }}
-                      disabled={cardIndex === 0}
-                      title="Mover para a esquerda"
-                      onClick={() => bento.moveWithinRow(row.id, cardId, -1)}
-                    >
-                      <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}>
-                        <Icon name="chevronRight" size={13} />
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--quiet btn--sm"
-                      style={{ width: 22, minWidth: 22, padding: 0 }}
-                      disabled={cardIndex === row.cards.length - 1}
-                      title="Mover para a direita"
-                      onClick={() => bento.moveWithinRow(row.id, cardId, 1)}
-                    >
-                      <Icon name="chevronRight" size={13} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+              <label className="row" style={{ gap: 'var(--sp-2)' }}>
+                <input
+                  type="checkbox"
+                  checked={card.visible}
+                  onChange={(e) => bento.setVisible(card.id, e.target.checked)}
+                />
+                <span className="truncate">{BENTO_CARD_LABELS[card.id]}</span>
+              </label>
+            </div>
+
+            <div className="field" style={{ minWidth: 110 }}>
+              <label className="field__label">Largura</label>
+              <Select
+                value={card.span}
+                options={BENTO_SPAN_OPTIONS.map((span) => ({ value: span, label: `${span}/12` }))}
+                onChange={(span) => bento.setSpan(card.id, (span ?? card.span) as BentoSpan)}
+              />
+            </div>
           </div>
         ))}
       </div>
@@ -659,9 +664,11 @@ type MonthLine = {
 }
 
 function MonthModeCard({
+  span,
   rangeTo,
   rangeAnchor,
 }: {
+  span: BentoSpan
   rangeTo: string
   rangeAnchor: string
 }) {
@@ -703,7 +710,7 @@ function MonthModeCard({
 
   if (!goals.data || !available.data) {
     return (
-      <Card title="Modo mês">
+      <Card span={span} title="Modo mês">
         <EmptyState title="Compondo o mês…" />
       </Card>
     )
@@ -765,6 +772,7 @@ function MonthModeCard({
 
   return (
     <Card
+      span={span}
       title="Modo mês"
       subtitle={period ? `${fmtPeriodLong(period)}${isCurrentPeriod ? ' · em andamento' : ''}` : undefined}
       actions={
@@ -827,7 +835,7 @@ function MonthLineTile({ line }: { line: MonthLine }) {
   )
 }
 
-function CreditCardsSlab({ cards }: { cards: CardRow[] }) {
+function CreditCardsSlab({ cards, span }: { cards: CardRow[]; span: BentoSpan }) {
   const [page, setPage] = useState(0)
   const pageCount = cards.length + 1
   const current = page === 0 ? null : cards[page - 1]
@@ -843,6 +851,7 @@ function CreditCardsSlab({ cards }: { cards: CardRow[] }) {
 
   return (
     <Card
+      span={span}
       title="Cartões de crédito"
       subtitle="Limite total e disponível por cartão"
       actions={
@@ -927,7 +936,7 @@ function CreditCardsSlab({ cards }: { cards: CardRow[] }) {
  * excludes it by default, so it can never inflate a closed period's
  * real Entradas/Saídas until reconciled against the real posted row.
  * ------------------------------------------------------------------ */
-function PendingCard({ flow, title }: { flow: 'income' | 'expense'; title: string }) {
+function PendingCard({ flow, title, span }: { flow: 'income' | 'expense'; title: string; span: BentoSpan }) {
   const range = useRange()
   const [adding, setAdding] = useState(false)
   const [listing, setListing] = useState(false)
@@ -970,6 +979,7 @@ function PendingCard({ flow, title }: { flow: 'income' | 'expense'; title: strin
   return (
     <>
       <Card
+        span={span}
         title={title}
         subtitle={
           range.preset === 'custom'
@@ -1471,7 +1481,7 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
  * never proof, so the user confirms each one by hand before the
  * pending placeholder is dropped in favour of the real posted row.
  */
-function ReconciliationCard() {
+function ReconciliationCard({ span }: { span: BentoSpan }) {
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -1501,7 +1511,7 @@ function ReconciliationCard() {
   if (rows.length === 0) return null
 
   return (
-    <Card muted title="Possíveis conciliações" subtitle="Mesma conta, mesmo valor, data próxima: confirme se é o mesmo lançamento">
+    <Card span={span} muted title="Possíveis conciliações" subtitle="Mesma conta, mesmo valor, data próxima: confirme se é o mesmo lançamento">
       <div className="stack stack--tight">
         {rows.map(({ pending, match }) => (
           <div key={`${pending.id}-${match.id}`} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>

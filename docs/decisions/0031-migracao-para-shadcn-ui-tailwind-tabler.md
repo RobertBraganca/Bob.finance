@@ -1,6 +1,6 @@
 # 0031. Migração da camada de UI para shadcn/ui + Tailwind CSS + Tabler Icons
 
-Status: aceita (em andamento — Fases 0-4 concluídas)
+Status: aceita (em andamento — Fases 0-3 concluídas)
 
 ## Contexto
 Usuário pediu, explicitamente (28/08/2026): revisar todas as páginas e
@@ -155,60 +155,21 @@ distintos, uma por aba) trocaram `EmptyState`/`Spinner` por
 `SkeletonLines`/`SkeletonBlock` no mesmo lugar em que já estavam,
 mantendo o `Card`/`Modal` que já os envolvia.
 
-### Fase 4: Resizable no bento do Painel
-`bentoLayout.ts` trocou o span discreto de 12 colunas (o que uma grade
-CSS decidia, em saltos de 1/12) por uma fração contínua de verdade,
-arrastando a divisória entre os cards com o `Resizable` do shadcn
-(`react-resizable-panels`) — o item nomeado explicitamente no pedido
-original. Cada linha do bento (`BentoRow`) é um grupo de painéis
-redimensionáveis quando tem 2+ cards visíveis; uma linha com 1 card só
-renderiza o card, sem grupo nenhum.
-
-**Linhas são um conjunto fixo de cards, não um destino de drag-and-drop.**
-A grade CSS de 12 colunas resolvia sozinha em que linha um card caía
-(a soma de spans que ultrapassava 12 "quebrava" pra próxima linha); um
-resize contínuo não tem esse mecanismo — mover um card pra outra linha
-mudaria o total de 100% que sobra pros vizinhos dela de um jeito que
-não dá pra derivar automaticamente. Escolha: as linhas nascem
-agrupadas exatamente como a grade antiga já desenhava por padrão
-(`DEFAULT_BENTO_ROWS`, uma lista fixa `BentoCardId[][]`), e reordenar
-continua completo DENTRO da linha (arrastar a largura, e mover um card
-pra esquerda/direita nela) e ENTRE linhas inteiras (mover a linha toda
-pra cima/baixo) — só não dá pra tirar um card de uma linha e enfiar
-noutra. Documentado como corte de escopo deliberado, não uma limitação
-esquecida.
-
-**Migração automática de quem já tinha customizado**: a chave salva
-(`bento-layout:dashboard:v1`) é a mesma, mas o formato mudou — de uma
-lista plana `{id, span, visible}[]` pra `{rows, sizes, visible}`. Ao
-carregar, se o valor salvo for um array (formato antigo), passa por
-`migrateFromV1`: reagrupa em linhas com a MESMA regra de quebra que a
-grade CSS usava (acumula spans, quebra ao passar de 12), preservando a
-ordem/visibilidade que a pessoa já tinha escolhido, e cada largura vira
-`span/total_da_linha * 100`. Ninguém perde a personalização por causa
-da troca de mecanismo.
-
-**`defaultSize`/`minSize` como número é pixel, não porcentagem** —
-pegadinha da própria biblioteca (`react-resizable-panels` v4):
-`defaultSize={58}` é 58px, `defaultSize="58%"` é 58% da linha. Passar
-o número puro (erro cometido e corrigido ainda nesta fase, antes do
-commit) faz a lib cair no rateio automático entre os painéis — o
-resize PARECE funcionar (as divisórias aparecem, dá pra arrastar) mas
-a largura salva nunca é respeitada no carregamento seguinte. Todo
-tamanho persistido é formatado como string com `%` ao virar prop.
-
-`.card`/`.slab` ganharam `height: 100%` (sem efeito fora de um
-container com altura definida — nulo em todo o resto do app) para que
-os cards dentro de uma mesma linha redimensionável fiquem com a MESMA
-altura (a mais alta do grupo), replicando o esticamento automático que
-a grade CSS já dava de graça.
-
-Verificado ao vivo: `tsc`/build limpos; grupos/painéis/separadores
-corretos por linha; redimensionar pelo teclado (acessibilidade nativa
-da lib) muda a largura E persiste no `localStorage`; ocultar um card
-faz a linha colapsar pro card restante sem grupo vazio sobrando;
-mover linha inteira e mover dentro da linha, e "Restaurar padrão",
-todos conferidos direto no navegador.
+### Fase 4: tentada e revertida
+Uma tentativa de Resizable no bento do Painel (linhas viravam grupos
+de painéis redimensionáveis via `react-resizable-panels`, largura
+contínua em vez de span discreto de 12 colunas) foi implementada,
+verificada ao vivo (resize por teclado funcionando, persistência em
+localStorage, migração automática de quem já tinha customizado) e
+commitada — mas o usuário reportou, já na sessão seguinte, que o
+resultado não correspondia ao que tinha em mente, e pediu a remoção.
+Revertida via `git revert` do commit da Fase 4 (código, CSS e a
+dependência `react-resizable-panels` voltam ao estado anterior); o
+Painel continua com o span discreto de 12 colunas de sempre. Fica
+registrado como uma direção já testada e descartada, não repetir sem
+antes alinhar com o usuário o formato exato esperado — a tela de
+Configurações do bento existente (largura por dropdown "N/12" + setas
+pra reordenar) segue sendo a interface real.
 
 ## Alternativas consideradas
 - **Radix UI puro, sem Tailwind**: descartada pelo usuário — perderia
