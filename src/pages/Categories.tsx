@@ -8,14 +8,14 @@ import {
   CategorySelect,
   EmptyState,
   Icon,
-  Modal,
-  Segmented,
   Select,
   Slab,
   StatTile,
-  TextInput,
   useToast,
 } from '../components/ui'
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
+import { Input } from '../components/ui/input'
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { PageHeader } from '../components/shell/Shell'
 
 /**
@@ -105,16 +105,13 @@ export function CategoriesPage() {
       />
 
       <div className="page">
-        <Segmented
-          ariaLabel="Seção"
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: 'tree', label: 'Árvore' },
-            { value: 'rules', label: `Regras (${rules.data?.rules.length ?? 0})` },
-            { value: 'memory', label: `Aprendizado (${rules.data?.memory.length ?? 0})` },
-          ]}
-        />
+        <Tabs value={tab} onValueChange={(value) => setTab(value as 'tree' | 'rules' | 'memory')}>
+          <TabsList aria-label="Seção">
+            <TabsTrigger value="tree">Árvore</TabsTrigger>
+            <TabsTrigger value="rules">{`Regras (${rules.data?.rules.length ?? 0})`}</TabsTrigger>
+            <TabsTrigger value="memory">{`Aprendizado (${rules.data?.memory.length ?? 0})`}</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {tab === 'tree' && <CategoryTree />}
         {tab === 'rules' && <RulesTable rules={rules.data?.rules ?? []} />}
@@ -260,28 +257,15 @@ function CategoryModal({
   })
 
   return (
-    <Modal
-      title={isEdit ? `Editar ${node!.name}` : parent ? `Nova subcategoria de ${parent.name}` : 'Nova categoria-mãe'}
-      onClose={onClose}
-      footer={
-        <>
-          {isEdit ? (
-            <Button variant="danger" icon="trash" onClick={() => remove.mutate()} disabled={remove.isPending}>
-              Excluir
-            </Button>
-          ) : (
-            <span />
-          )}
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={!name.trim() || save.isPending}>
-            Salvar
-          </Button>
-        </>
-      }
-    >
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[560px]">
+        <DialogTitle>
+          {isEdit ? `Editar ${node!.name}` : parent ? `Nova subcategoria de ${parent.name}` : 'Nova categoria-mãe'}
+        </DialogTitle>
       <div className="stack">
         <div className="field">
           <label className="field__label">Nome</label>
-          <TextInput value={name} onChange={setName} placeholder="ex. Assinaturas" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Assinaturas" />
         </div>
 
         {!isChild && (
@@ -333,7 +317,20 @@ function CategoryModal({
           </p>
         )}
       </div>
-    </Modal>
+        <DialogFooter>
+          {isEdit ? (
+            <Button variant="danger" icon="trash" onClick={() => remove.mutate()} disabled={remove.isPending}>
+              Excluir
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={!name.trim() || save.isPending}>
+            Salvar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -461,11 +458,31 @@ function RulesTable({ rules }: { rules: Rule[] }) {
       </div>
 
       {creating && (
-        <Modal
-          title="Nova regra"
-          onClose={() => setCreating(false)}
-          footer={
-            <>
+        <Dialog open onOpenChange={(open) => !open && setCreating(false)}>
+          <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[560px]">
+            <DialogTitle>Nova regra</DialogTitle>
+            <div className="stack">
+              <div className="field">
+                <label className="field__label">Condição na descrição</label>
+                <Select
+                  value={matchType}
+                  options={Object.entries(MATCH_LABEL).map(([value, label]) => ({ value, label }))}
+                  onChange={(value) => setMatchType(value ?? 'contains')}
+                />
+              </div>
+              <div className="field">
+                <label className="field__label">Padrão</label>
+                <Input value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder="ex. uber" />
+                <span className="field__hint">
+                  A comparação ignora acentos e maiúsculas: “Padaria” casa com “PADARIA”.
+                </span>
+              </div>
+              <div className="field">
+                <label className="field__label">Categoria</label>
+                <CategorySelect value={categoryId} placeholder="Escolha" onChange={setCategoryId} />
+              </div>
+            </div>
+            <DialogFooter>
               <Button variant="quiet" onClick={() => setCreating(false)}>
                 Cancelar
               </Button>
@@ -477,31 +494,9 @@ function RulesTable({ rules }: { rules: Rule[] }) {
               >
                 Criar
               </Button>
-            </>
-          }
-        >
-          <div className="stack">
-            <div className="field">
-              <label className="field__label">Condição na descrição</label>
-              <Select
-                value={matchType}
-                options={Object.entries(MATCH_LABEL).map(([value, label]) => ({ value, label }))}
-                onChange={(value) => setMatchType(value ?? 'contains')}
-              />
-            </div>
-            <div className="field">
-              <label className="field__label">Padrão</label>
-              <TextInput value={pattern} onChange={setPattern} placeholder="ex. uber" />
-              <span className="field__hint">
-                A comparação ignora acentos e maiúsculas: “Padaria” casa com “PADARIA”.
-              </span>
-            </div>
-            <div className="field">
-              <label className="field__label">Categoria</label>
-              <CategorySelect value={categoryId} placeholder="Escolha" onChange={setCategoryId} />
-            </div>
-          </div>
-        </Modal>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </>
   )
