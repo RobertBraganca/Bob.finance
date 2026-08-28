@@ -865,6 +865,12 @@
    A calendar grid: 7 weekday columns, one row per week. Cell colour is
    set inline per day (JS chart theme, `heatmapStep`) — this stylesheet
    only owns layout and the shared legend swatch. */
+.heatmap__detail {
+  min-height: 1.4em;
+  margin-bottom: var(--sp-2);
+  font-size: var(--text-sm);
+}
+
 .heatmap__grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);

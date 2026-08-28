@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { money, date as fmtDate, weekdayLabel, weekdayOf } from '../../lib/format'
 import { heatmapScale, heatmapStep, themeFor, type Surface } from '../../lib/chartTheme'
 import { useEffectiveSurface } from '../../lib/theme'
@@ -32,6 +33,9 @@ export function SpendHeatmap({
   onSelectDay?: (day: string) => void
 }) {
   const theme = themeFor(useEffectiveSurface(surface))
+  // Hover shows it live; click/focus PINS it, so a tap on touch (no hover
+  // at all) or a keyboard tab-through both land on the same readout.
+  const [active, setActive] = useState<DayPoint | null>(null)
 
   const max = Math.max(0, ...days.map((d) => d.expenseCents))
   const hasData = days.length > 0
@@ -59,6 +63,17 @@ export function SpendHeatmap({
         ],
       }}
     >
+      <div className="heatmap__detail">
+        {active ? (
+          <>
+            <strong>{fmtDate(active.day)}</strong> — {money(active.expenseCents)}
+            <span className="muted"> · {active.transactionCount} lançamento(s)</span>
+          </>
+        ) : (
+          <span className="muted">Passe o mouse ou toque em um dia para ver o valor gasto</span>
+        )}
+      </div>
+
       <div className="heatmap__grid">
         {Array.from({ length: 7 }, (_, i) => (
           <span key={i} className="heatmap__weekday">
@@ -78,9 +93,15 @@ export function SpendHeatmap({
                 cursor: onSelectDay ? 'pointer' : 'default',
                 boxShadow: isToday ? `inset 0 0 0 2px ${theme.primary}` : undefined,
               }}
-              title={`${fmtDate(cell.day)}: ${money(cell.expenseCents)}, ${cell.transactionCount} lançamento(s)`}
               aria-label={`${fmtDate(cell.day)}: ${money(cell.expenseCents)}, ${cell.transactionCount} lançamento(s)`}
-              onClick={onSelectDay ? () => onSelectDay(cell.day) : undefined}
+              onMouseEnter={() => setActive(cell)}
+              onMouseLeave={() => setActive(null)}
+              onFocus={() => setActive(cell)}
+              onBlur={() => setActive(null)}
+              onClick={() => {
+                setActive(cell)
+                onSelectDay?.(cell.day)
+              }}
             />
           )
         })}
