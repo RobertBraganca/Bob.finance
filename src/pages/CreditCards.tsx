@@ -11,13 +11,13 @@ import {
   EmptyState,
   HeroFigure,
   Meter,
-  Modal,
   Select,
   SkeletonLines,
   Slab,
-  TextInput,
   useToast,
 } from '../components/ui'
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
+import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
 
 export type CardRow = {
@@ -243,11 +243,62 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
   })
 
   return (
-    <Modal
-      title={card ? `Editar ${card.name}` : 'Novo cartão'}
-      onClose={onClose}
-      footer={
-        <>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[560px]">
+        <DialogTitle>{card ? `Editar ${card.name}` : 'Novo cartão'}</DialogTitle>
+        <div className="stack">
+          <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+            <div className="field" style={{ flex: 1, minWidth: 200 }}>
+              <label className="field__label">Nome do cartão</label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Nubank Ultravioleta" />
+            </div>
+            <div className="field" style={{ minWidth: 190 }}>
+              <label className="field__label">Conta vinculada</label>
+              <Select
+                value={accountId}
+                placeholder="Nenhuma"
+                options={(accounts.data?.accounts ?? []).map((a) => ({ value: a.id, label: a.name }))}
+                onChange={setAccountId}
+              />
+            </div>
+          </div>
+
+          <div className="field">
+            <label className="field__label">Instituição</label>
+            <Input value={institution} onChange={(e) => setInstitution(e.target.value)} placeholder="opcional" />
+          </div>
+
+          <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Limite total (R$)</label>
+              <Input
+                value={creditLimit}
+                onChange={(e) => setCreditLimit(e.target.value)}
+                placeholder="0,00"
+                className="text-right tabular-nums"
+              />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 120 }}>
+              <label className="field__label">Dia de fechamento</label>
+              <Input
+                value={closingDay}
+                onChange={(e) => setClosingDay(e.target.value)}
+                placeholder="ex. 25"
+                className="text-right tabular-nums"
+              />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 120 }}>
+              <label className="field__label">Dia de vencimento</label>
+              <Input
+                value={dueDay}
+                onChange={(e) => setDueDay(e.target.value)}
+                placeholder="ex. 5"
+                className="text-right tabular-nums"
+              />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
           {card ? (
             <Button variant="danger" icon="trash" onClick={() => remove.mutate()}>
               Remover
@@ -263,47 +314,9 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
           >
             Salvar
           </Button>
-        </>
-      }
-    >
-      <div className="stack">
-        <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
-          <div className="field" style={{ flex: 1, minWidth: 200 }}>
-            <label className="field__label">Nome do cartão</label>
-            <TextInput value={name} onChange={setName} placeholder="ex. Nubank Ultravioleta" />
-          </div>
-          <div className="field" style={{ minWidth: 190 }}>
-            <label className="field__label">Conta vinculada</label>
-            <Select
-              value={accountId}
-              placeholder="Nenhuma"
-              options={(accounts.data?.accounts ?? []).map((a) => ({ value: a.id, label: a.name }))}
-              onChange={setAccountId}
-            />
-          </div>
-        </div>
-
-        <div className="field">
-          <label className="field__label">Instituição</label>
-          <TextInput value={institution} onChange={setInstitution} placeholder="opcional" />
-        </div>
-
-        <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
-          <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Limite total (R$)</label>
-            <TextInput value={creditLimit} onChange={setCreditLimit} placeholder="0,00" numeral />
-          </div>
-          <div className="field" style={{ flex: 1, minWidth: 120 }}>
-            <label className="field__label">Dia de fechamento</label>
-            <TextInput value={closingDay} onChange={setClosingDay} placeholder="ex. 25" numeral />
-          </div>
-          <div className="field" style={{ flex: 1, minWidth: 120 }}>
-            <label className="field__label">Dia de vencimento</label>
-            <TextInput value={dueDay} onChange={setDueDay} placeholder="ex. 5" numeral />
-          </div>
-        </div>
-      </div>
-    </Modal>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -335,34 +348,37 @@ function SnapshotModal({ card, onClose }: { card: CardRow; onClose: () => void }
     card.creditLimitCents > 0 ? Math.round((usedPreview / card.creditLimitCents) * 10_000) : 0
 
   return (
-    <Modal
-      title={`Limite disponível de ${card.name}`}
-      onClose={onClose}
-      footer={
-        <>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[560px]">
+        <DialogTitle>{`Limite disponível de ${card.name}`}</DialogTitle>
+        <div className="stack">
+          <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Data</label>
+              <Input value={asOf} onChange={(e) => setAsOf(e.target.value)} type="date" />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Limite disponível (R$)</label>
+              <Input
+                value={available}
+                onChange={(e) => setAvailable(e.target.value)}
+                placeholder="0,00"
+                className="text-right tabular-nums"
+              />
+              <span className="field__hint">De um limite total de {money(card.creditLimitCents)}.</span>
+            </div>
+          </div>
+          <Meter usedBps={usedBpsPreview} state={capUsageState(usedBpsPreview)} />
+        </div>
+        <DialogFooter>
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
           <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
             Registrar
           </Button>
-        </>
-      }
-    >
-      <div className="stack">
-        <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
-          <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Data</label>
-            <TextInput value={asOf} onChange={setAsOf} type="date" />
-          </div>
-          <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Limite disponível (R$)</label>
-            <TextInput value={available} onChange={setAvailable} placeholder="0,00" numeral />
-            <span className="field__hint">De um limite total de {money(card.creditLimitCents)}.</span>
-          </div>
-        </div>
-        <Meter usedBps={usedBpsPreview} state={capUsageState(usedBpsPreview)} />
-      </div>
-    </Modal>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
