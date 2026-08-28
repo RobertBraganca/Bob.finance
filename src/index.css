@@ -1,0 +1,128 @@
+/**
+ * Tailwind v4 + shadcn/ui foundation (shadcn migration, Fase 0).
+ *
+ * Layer order pinned explicitly, before any import: `base` sits below
+ * `utilities` regardless of where each rule is physically declared later
+ * in this file — the default Tailwind order, made explicit here because
+ * Preflight (which normally establishes it) is deliberately NOT imported
+ * yet (see note below).
+ */
+@layer theme, base, components, utilities;
+
+/**
+ * `theme` + `utilities` only — Preflight (Tailwind's CSS reset) is
+ * deliberately OMITTED for now: turning it on globally while most pages
+ * still depend on `base.css`'s own reset would change margin/box-sizing
+ * defaults everywhere at once, before those pages have been migrated to
+ * verify against it. Re-add `@import "tailwindcss/preflight" layer(base);`
+ * once every page has been moved to shadcn components (last migration
+ * phase), not before.
+ */
+@import 'tailwindcss/theme' layer(theme);
+@import 'tailwindcss/utilities' layer(utilities);
+
+/* shadcn's own utility layer: no-scrollbar, scroll-fade-*, shimmer, and
+   the data-open/data-closed/data-checked/... custom variants the "base"
+   (Base UI) component flavour needs to style state via Tailwind classes. */
+@import 'shadcn/tailwind.css';
+/* Enter/exit animation utilities (animate-in/fade-in/zoom-in/...) that
+   shadcn's Dialog/Popover/Sheet/Accordion use for open/close transitions —
+   directly relevant to auditing pages with transitions, per the migration. */
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/**
+ * shadcn's generated components hard-code these exact variable names
+ * (bg-background, text-muted-foreground, bg-primary, etc.). The names
+ * stay as shadcn expects (future `shadcn add` runs assume this exact
+ * two-step shape); only the VALUES below point at this app's own tokens
+ * from `tokens.css` instead of shadcn's default oklch greys.
+ */
+@theme inline {
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+}
+
+/**
+ * Every value below is a live `var()` reference into `tokens.css` — no
+ * literal colour lives here. Dark mode needs no separate `.dark { }`
+ * block (unlike shadcn's own generated default): `tokens.css` already
+ * flips `--paper`/`--ink-*`/`--surface-*` under `:root[data-theme='dark']`,
+ * so every reference below inherits that switch automatically. `.dark`
+ * class toggling (added to ThemeProvider) still exists for any future
+ * shadcn component that reaches for a `dark:` Tailwind variant directly.
+ */
+:root {
+  --background: var(--paper);
+  --foreground: var(--ink-1);
+  --card: var(--surface);
+  --card-foreground: var(--ink-1);
+  --popover: var(--paper);
+  --popover-foreground: var(--ink-1);
+  --primary: var(--brand);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface-muted);
+  --secondary-foreground: var(--ink-1);
+  --muted: var(--surface-muted);
+  --muted-foreground: var(--ink-3);
+  --accent: var(--surface-hover);
+  --accent-foreground: var(--ink-1);
+  --destructive: var(--status-critical);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--focus);
+  --chart-1: var(--series-1);
+  --chart-2: var(--series-2);
+  --chart-3: var(--series-3);
+  --chart-4: var(--series-4);
+  --chart-5: var(--neutral-mark);
+  --radius: var(--r-md);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--ink-1);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--surface-hover);
+  --sidebar-accent-foreground: var(--ink-1);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--focus);
+}
+
+/* Deliberately no `@layer base { * { @apply border-border ... } }` block
+   here (shadcn's own default) — `base.css` already owns the reset for
+   every not-yet-migrated page; re-introduce it in the final cleanup
+   phase alongside Preflight. */

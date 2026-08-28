@@ -10,6 +10,7 @@ import './styles/fonts.css'
 import './styles/tokens.css'
 import './styles/base.css'
 import './styles/components.css'
+import './index.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {

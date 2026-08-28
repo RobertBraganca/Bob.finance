@@ -22,6 +22,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
+    // `tokens.css` keys off `data-theme` above; the `dark` class is only
+    // for shadcn/Tailwind components that reach for a `dark:` variant
+    // directly instead of one of this app's own colour tokens.
+    document.documentElement.classList.toggle('dark', theme === 'dark')
     localStorage.setItem(STORAGE_KEY, theme)
   }, [theme])
 
