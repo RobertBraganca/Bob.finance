@@ -265,6 +265,116 @@ ainda funciona sem alteração — só não apaga mais nada que o app leia.
 Depende da Fase 4. Só depois de backup/verify redesenhados é que faz
 sentido declarar o SQLite oficialmente fora do caminho de produção.
 
+## Adendo (28/08/2026) — camada de serving vira Supabase Edge Functions
+Depois da Fase 3, o app foi publicado no Vercel (`npm run build` do
+frontend Vite, corrigido antes disso excluindo `scripts/verify.ts`/
+`verify-backup.ts` do typecheck de build — os dois ficaram cheios de
+erro de API síncrona obsoleta desde que a Fase 4 pausou, e o Vercel
+nunca roda esses scripts mesmo). O deploy subiu, mas a tela travava em
+"Carregando visão geral..." — causa raiz: **o backend Fastify nunca
+tinha onde rodar em produção**. `src/lib/api.ts` chama `/api${path}`
+relativo, que só funciona via o proxy do Vite (`vite.config.ts`,
+dev-only) — não existe equivalente no build estático servido pelo
+Vercel.
+
+Isto é uma decisão nova, não prevista nas 5 fases originais (que
+tratavam só da camada de dado, não de onde o servidor roda). Opções
+levantadas: (a) manter Fastify e hospedar num serviço próprio (Railway/
+Render/Fly), (b) reescrever como Next.js API routes no próprio Vercel,
+(c) usar Supabase Edge Functions já que o banco já é Supabase. Usuário
+escolheu explicitamente **(c)**: "Vamos utilizar o supabase para servir
+como backend do projeto."
+
+Isso implica reescrever a casca HTTP (Fastify → Deno/Edge Functions,
+runtime diferente, sem Node) mantendo a lógica de negócio
+(`services/*.ts`) intacta. Antes de comprometer as 5 rotas restantes,
+foi feita investigação de viabilidade (pedida explicitamente pelo
+usuário: "Faça a investigação de viabilidade primeiro") com uma função
+descartável (`test-drizzle`, criada, testada, apagada) confirmando ao
+vivo que `drizzle-orm/postgres-js` e `zod` funcionam sob Deno sem
+alteração de código. Achados:
+- Supavisor **modo transação** (porta 6543, `prepare: false`) é o
+  indicado para Edge Functions — modo sessão (porta 5432, usado pelo
+  Fastify) é para servidor persistente, não para muitas invocações
+  curtas e concorrentes.
+- Limites confirmados via doc oficial: 256MB memória, 2s CPU por
+  requisição, 150s (free)/400s (pago) de duração de worker.
+- `bigint`/`numeric` como `string` (mesmo bug da Fase 3) reproduz
+  idêntico sob Deno — mesmo fix de `types` parser no client.
+
+Com a viabilidade confirmada, o usuário aprovou começar por uma rota
+como prova de conceito: **"Sim, começa pela pricing.ts"**.
+
+### `pricing.ts` portado (28/08/2026) — prova de conceito concluída
+`server/src/routes/pricing.ts` (Fastify, 15 rotas) portado para
+`supabase/functions/pricing/index.ts` usando Hono. Toda a lógica de
+negócio (`services/pricing.ts` e seu fechamento transitivo de 13
+services) foi copiada verbatim para `supabase/functions/_shared/`, sem
+mudança de conteúdo — só extensão `.ts` explícita em todo import
+relativo (Deno exige, ao contrário da resolução em modo bundler do
+Node/tsx/Vite). `_shared/db/client.ts` é uma versão nova do client
+Postgres, específica para Deno: pooler de transação (porta 6543),
+`Deno.env.get` em vez de `.env` (Deno não carrega arquivo `.env`
+sozinho), variáveis de ambiente próprias (`APPDB_HOST/USER/PASSWORD/
+NAME`, ver adiante o porquê do nome).
+
+**Vantagem estrutural do Hono sobre o Fastify aqui**: `app.onError`
+captura qualquer erro/rejeição lançado por qualquer rota — elimina de
+raiz a classe inteira de bug "Promise sem `await` dentro de
+try/catch" (ver Fase 3) que ainda apareceu 4 vezes a mais nesta mesma
+`pricing.ts` e em `simulate.ts` durante o trabalho desta rodada (
+`simulate`, `saveQuote`, `approveQuote` em pricing.ts;
+`simulateDebtPayoff` em simulate.ts — corrigido, commit `effa9f9`). Sem
+try/catch por rota, esse bug não tem mais onde se esconder daqui pra
+frente.
+
+**Bugs reais encontrados só ao vivo, não pelo deploy nem typecheck**:
+- Import relativo sem extensão (`from '../db/client'`) não resolve no
+  Deno — corrigido com regex de projeto inteiro adicionando `.ts` em
+  todos os 17 arquivos de `_shared/`.
+- `@supabase/functions-js/edge-runtime.d.ts` (import ambiente,
+  necessário pro tipo de `Deno.serve`) falhava no bundler do deploy por
+  não estar no import map — corrigido adicionando ao `deno.json`.
+- **Secrets com prefixo `SUPABASE_` são silenciosamente cortados pela
+  plataforma** (`SUPABASE_DB_HOST` vira `HOST` em `secrets list`) —
+  reservado para os secrets injetados pela própria plataforma.
+  Corrigido renomeando para nomes sem esse prefixo.
+- **`--env-file` corrompe valor com caractere especial**: a senha do
+  banco (com `$&#%@^*`) setada via `supabase secrets set --env-file`
+  causava "password authentication failed" persistente — sobreviveu a
+  duas rodadas de troca de nome de variável (afastando a hipótese de
+  colisão de nome). Isolado por comparação com o único teste que já
+  tinha funcionado (`test-drizzle`, senha setada como argumento direto
+  de linha de comando, não por arquivo). Corrigido re-setando só a
+  senha via `supabase secrets set APPDB_PASSWORD="valor"` diretamente —
+  nomes sem caractere especial (`HOST`/`USER`/`NAME`) continuam seguros
+  via `--env-file`.
+- Um campo de debug temporário (`cause` do erro, ecoado na resposta
+  500) foi adicionado só para contornar a falta de acesso a log nesta
+  versão do CLI (`functions logs` não existe; `functions serve` precisa
+  de Docker, ausente neste ambiente) — removido depois que a causa raiz
+  foi isolada, antes de considerar o trabalho concluído (não é
+  aceitável expor detalhe interno de erro em produção).
+
+**Verificação ao vivo, todas as 15 rotas, contra o projeto Supabase
+real** (não só "o deploy não deu erro"): `GET /settings`, `PUT
+/settings`, `GET /multipliers`, `POST /multipliers` (criado, editado,
+apagado — sem deixar resíduo), `POST /simulate`, `GET /quotes`, `POST
+/quotes` (criado, status alterado, apagado — sem deixar resíduo), `GET
+/quotes/:id`, `GET /quotes/999999` (404 correto), todas devolvendo dado
+real e correto. `approveQuote` (que gera uma transação real) não foi
+exercitado ao vivo deliberadamente — testá-lo criaria um lançamento
+financeiro real; a lógica é idêntica à já verificada na Fase 3 contra
+o Fastify.
+
+**Ainda em aberto**: as outras 4 rotas (`insights.ts`, `ledger.ts`,
+`backups.ts`, `simulate.ts`) não foram portadas — só começam com
+aprovação explícita do usuário, uma de cada vez, como aconteceu aqui.
+Frontend (`src/lib/api.ts`, `vite.config.ts`) ainda aponta pro proxy
+dev-only — não atualizado até mais rotas estarem portadas. Postura de
+autenticação da function (hoje `--no-verify-jwt`) ainda não decidida
+para o caso de uso real com chave anon/publishable.
+
 ## Consequências
 - Este ADR não implementa nada sozinho — é o registro da decisão e do
   plano faseado. Cada fase acima vira trabalho próprio, com sua própria
