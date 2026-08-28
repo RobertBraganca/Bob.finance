@@ -359,15 +359,26 @@ export async function netFlowSeries(range: Range) {
  * vencimento dentro do período — o lado complementar de `totals()`, que
  * sempre exclui `pending`. Mesma classificação de fluxo (kind da categoria,
  * caindo para o sinal quando sem categoria) e mesmo filtro de conta.
+ *
+ * `includeFuture` (decisions/0030): "Período máximo" no seletor principal
+ * é deliberadamente olhando só pra trás (`range.to` nunca passa de hoje —
+ * ver o comentário do próprio `anchor` em `store.tsx`), então mesmo com o
+ * horizonte de materialização de decisions/0028 em 24 meses, nenhum
+ * preset normal via jeito de somar uma pendência com vencimento no
+ * futuro. Só quando o próprio "Máximo" pede explicitamente é que o limite
+ * superior de data cai — "máximo" deveria significar tudo o que ainda
+ * falta receber, não só o que já venceu.
  */
-export async function receivable(range: Range): Promise<number> {
+export async function receivable(range: Range, opts: { includeFuture?: boolean } = {}): Promise<number> {
+  const upperBound = opts.includeFuture ? sql`` : sql`and t.posted_on <= ${range.to}`
   const rows = await db.execute<{ amount: number }>(sql`
     select coalesce(sum(case when flow = 'income' and amount_cents > 0 then amount_cents else 0 end), 0) as amount
     from (
       select t.amount_cents, ${FLOW_KIND} as flow
       from transactions t
       left join categories c on c.id = t.category_id
-      where t.posted_on between ${range.from} and ${range.to}
+      where t.posted_on >= ${range.from}
+        ${upperBound}
         and t.pending = true
         ${accountFilter(range.accountId)}
     ) x
@@ -378,7 +389,7 @@ export async function receivable(range: Range): Promise<number> {
 /* ------------------------------------------------------------------ *
  * Everything the dashboard needs, in one round trip.
  * ------------------------------------------------------------------ */
-export async function dashboard(range: Range) {
+export async function dashboard(range: Range, opts: { includeFutureReceivables?: boolean } = {}) {
   const current = await totals(range)
 
   // The comparable previous window: same number of months, immediately before.
@@ -391,7 +402,10 @@ export async function dashboard(range: Range) {
   const [previous, currentReceivableCents, previousReceivableCents, monthly, byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf, netFlow, topMerchantsList] =
     await Promise.all([
       totals(previousRange),
-      receivable(range),
+      receivable(range, { includeFuture: opts.includeFutureReceivables }),
+      // O período anterior nunca olha pra frente, mesmo com includeFuture —
+      // é só a base de comparação, e "quanto tinha a receber no futuro no
+      // período anterior" não tem leitura útil nenhuma.
       receivable(previousRange),
       monthlySeries(range),
       categoryBreakdown(range, { flow: 'expense', level: 'parent' }),
@@ -415,7 +429,11 @@ export async function dashboard(range: Range) {
       incomeBps: deltaBps(current.incomeCents, previous.incomeCents),
       expenseBps: deltaBps(current.expenseCents, previous.expenseCents),
       netBps: deltaBps(current.netCents, previous.netCents),
-      receivableBps: deltaBps(currentReceivableCents, previousReceivableCents),
+      // Comparar "tudo que ainda falta receber, sem limite de data" contra
+      // o período anterior (que nunca olha pra frente) não tem leitura
+      // útil — a diferença seria só o efeito de somar mais meses futuros,
+      // não uma mudança real de comportamento.
+      receivableBps: opts.includeFutureReceivables ? null : deltaBps(currentReceivableCents, previousReceivableCents),
     },
     monthly,
     daily,

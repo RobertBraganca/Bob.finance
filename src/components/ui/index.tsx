@@ -638,3 +638,45 @@ export function PendingScopeModal({
     </Modal>
   )
 }
+
+/**
+ * decisions/0029 — mesma pergunta de escopo de `PendingScopeModal`, agora
+ * para EDITAR (não excluir) uma ocorrência vinculada a um template
+ * (previsão recorrente ou dívida). "Esta e as futuras"/"Todas" também
+ * atualizam o próprio template — um reajuste de salário só vale de fato se
+ * os meses que ainda vão ser lançados também herdarem o valor novo.
+ */
+export function PendingEditScopeModal({
+  onCancel,
+  onConfirm,
+  pending,
+}: {
+  onCancel: () => void
+  onConfirm: (scope: PendingDeleteScope) => void
+  pending?: boolean
+}) {
+  return (
+    <Modal title="Editar pendência recorrente" onClose={onCancel}>
+      <div className="stack">
+        <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
+          Esta pendência faz parte de um template que se repete. O que você quer alterar?
+        </p>
+        <div className="stack stack--tight">
+          <Button variant="ghost" onClick={() => onConfirm('only')} disabled={pending}>
+            Apenas esta ocorrência
+          </Button>
+          <Button variant="ghost" onClick={() => onConfirm('this_and_future')} disabled={pending}>
+            Esta e as futuras
+          </Button>
+          <Button variant="primary" onClick={() => onConfirm('all')} disabled={pending}>
+            Todas as ocorrências já lançadas
+          </Button>
+        </div>
+        <p className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+          "Esta e as futuras" e "Todas" também atualizam o modelo — os próximos meses ainda não
+          lançados vão usar o novo valor quando forem gerados.
+        </p>
+      </div>
+    </Modal>
+  )
+}

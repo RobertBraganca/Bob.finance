@@ -80,8 +80,9 @@ app.get('/meta', async (c) => {
  * Income vs expense dashboard
  * ---------------------------------------------------------------- */
 app.get('/dashboard', async (c) => {
-  const range = await resolveRange(rangeQuery.parse(c.req.query()))
-  return c.json(await analytics.dashboard(range))
+  const query = rangeQuery.extend({ futureReceivables: z.coerce.boolean().optional() }).parse(c.req.query())
+  const range = await resolveRange(query)
+  return c.json(await analytics.dashboard(range, { includeFutureReceivables: query.futureReceivables }))
 })
 
 app.get('/analytics/flows', async (c) => {

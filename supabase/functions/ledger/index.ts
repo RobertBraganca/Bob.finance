@@ -372,9 +372,11 @@ app.patch('/transactions/:id', async (c) => {
       amountCents: z.number().int().optional(),
       accountId: z.number().int().positive().optional(),
       notes: z.string().nullable().optional(),
+      scope: z.enum(['only', 'this_and_future', 'all']).optional(),
     })
     .parse(await c.req.json())
-  return c.json(await txnService.updateTransaction(id, body))
+  const { scope, ...patch } = body
+  return c.json(await txnService.updateTransaction(id, patch, scope))
 })
 
 app.post('/transactions/categorize', async (c) => {

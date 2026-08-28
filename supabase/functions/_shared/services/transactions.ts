@@ -1,6 +1,6 @@
-import { and, desc, eq, gte, inArray, isNull, like, lte, or, sql, type SQL } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNull, like, lte, ne, or, sql, type SQL } from 'drizzle-orm'
 import { db } from '../db/client.ts'
-import { accounts, categories, categoryRules, transactions } from '../db/schema.ts'
+import { accounts, categories, categoryRules, cashFlowForecasts, debts, transactions } from '../db/schema.ts'
 import { dedupeHash, directionOf, merchantSignature, normalizeDescription } from '../core/normalize.ts'
 import { EXPLICIT_RULE_PRIORITY, learnCorrection } from './categorization.ts'
 import { deletePending, type PendingDeleteScope } from './cashFlow.ts'
@@ -300,6 +300,15 @@ export async function createTransaction(entry: ManualEntry) {
   return inserted
 }
 
+/**
+ * `scope` (decisions/0029, mesmos três valores de `PendingDeleteScope`):
+ * "esta e as futuras" / "todas" propagam descrição/valor/conta ao MODELO
+ * (a previsão ou a dívida) e às demais ocorrências ainda pendentes — nunca
+ * a data (cada ocorrência tem o próprio dia) nem as notas (só desta). Sem
+ * isso, um reajuste de salário só corrigiria este mês: o modelo continuaria
+ * com o valor antigo e voltaria a produzir lançamentos errados quando o
+ * horizonte de materialização avançasse (decisions/0028).
+ */
 export async function updateTransaction(
   id: number,
   patch: {
@@ -309,6 +318,7 @@ export async function updateTransaction(
     accountId?: number
     notes?: string | null
   },
+  scope: PendingDeleteScope = 'only',
 ) {
   const current = (await db.select().from(transactions).where(eq(transactions.id, id)))[0]
   if (!current) return null
@@ -328,7 +338,7 @@ export async function updateTransaction(
     current.manuallyEdited ||
     (editsMaterializedFields && current.pending && (current.forecastId !== null || current.debtId !== null))
 
-  return (
+  const updated = (
     await db
       .update(transactions)
       .set({
@@ -346,6 +356,76 @@ export async function updateTransaction(
       .where(eq(transactions.id, id))
       .returning()
   )[0]!
+
+  const cascadable: { description?: string; amountCents?: number; accountId?: number } = {}
+  if (patch.description !== undefined) cascadable.description = description
+  if (patch.amountCents !== undefined) cascadable.amountCents = amountCents
+  if (patch.accountId !== undefined) cascadable.accountId = accountId
+
+  if (scope !== 'only' && Object.keys(cascadable).length > 0 && (current.forecastId !== null || current.debtId !== null)) {
+    await cascadeToTemplate(current, cascadable, scope)
+  }
+
+  return updated
+}
+
+async function cascadeToTemplate(
+  current: typeof transactions.$inferSelect,
+  cascadable: { description?: string; amountCents?: number; accountId?: number },
+  scope: PendingDeleteScope,
+) {
+  if (current.forecastId !== null) {
+    await db.update(cashFlowForecasts).set(cascadable).where(eq(cashFlowForecasts.id, current.forecastId))
+  } else if (current.debtId !== null) {
+    await db
+      .update(debts)
+      .set({
+        ...(cascadable.description !== undefined ? { name: cascadable.description } : {}),
+        ...(cascadable.amountCents !== undefined ? { scheduledPaymentCents: Math.abs(cascadable.amountCents) } : {}),
+        ...(cascadable.accountId !== undefined ? { accountId: cascadable.accountId } : {}),
+      })
+      .where(eq(debts.id, current.debtId))
+  }
+
+  const period = current.occurrencePeriod ?? current.postedOn.slice(0, 7)
+  const siblings = await db
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        current.forecastId !== null
+          ? eq(transactions.forecastId, current.forecastId)
+          : eq(transactions.debtId, current.debtId!),
+        eq(transactions.pending, true),
+        ne(transactions.id, current.id),
+      ),
+    )
+
+  for (const s of siblings) {
+    const sPeriod = s.occurrencePeriod ?? s.postedOn.slice(0, 7)
+    if (scope === 'this_and_future' && sPeriod < period) continue
+    const sDescription = cascadable.description ?? s.description
+    const sAmountCents = cascadable.amountCents ?? s.amountCents
+    const sAccountId = cascadable.accountId ?? s.accountId
+    const sDescriptionNorm = normalizeDescription(sDescription)
+    await db
+      .update(transactions)
+      .set({
+        description: sDescription,
+        descriptionNorm: sDescriptionNorm,
+        amountCents: sAmountCents,
+        accountId: sAccountId,
+        direction: directionOf(sAmountCents),
+        dedupeHash: dedupeHash({
+          accountId: sAccountId,
+          postedOn: s.postedOn,
+          amountCents: sAmountCents,
+          descriptionNorm: sDescriptionNorm,
+        }),
+        updatedAt: sql`now_iso()`,
+      })
+      .where(eq(transactions.id, s.id))
+  }
 }
 
 /**

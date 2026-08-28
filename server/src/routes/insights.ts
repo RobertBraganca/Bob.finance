@@ -54,8 +54,9 @@ export async function insightsRoutes(app: FastifyInstance) {
    * Income vs expense dashboard
    * ---------------------------------------------------------------- */
   app.get('/dashboard', async (req) => {
-    const range = await resolveRange(rangeQuery.parse(req.query))
-    return analytics.dashboard(range)
+    const query = rangeQuery.extend({ futureReceivables: z.coerce.boolean().optional() }).parse(req.query)
+    const range = await resolveRange(query)
+    return analytics.dashboard(range, { includeFutureReceivables: query.futureReceivables })
   })
 
   /**

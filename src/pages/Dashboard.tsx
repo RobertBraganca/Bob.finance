@@ -31,6 +31,7 @@ import {
   Icon,
   Meter,
   Modal,
+  PendingEditScopeModal,
   PendingScopeModal,
   Segmented,
   Select,
@@ -145,12 +146,16 @@ export function Dashboard() {
   const [balanceCheckAccount, setBalanceCheckAccount] = useState<Account | null>(null)
 
   const dashboard = useQuery({
-    queryKey: ['dashboard', range.from, range.to, range.accountId],
+    queryKey: ['dashboard', range.from, range.to, range.accountId, range.preset],
     queryFn: () =>
       api.get<DashboardResponse>('/dashboard', {
         from: range.from,
         to: range.to,
         accountId: range.accountId,
+        // decisions/0030: "Período máximo" é a única leitura de "A receber"
+        // que deveria olhar pra frente, sem limite — os outros presets
+        // continuam restritos ao próprio período, como sempre.
+        futureReceivables: range.preset === 'max' ? 1 : undefined,
       }),
     enabled: range.ready,
     // Hold the previous render while refetching — no skeleton flash.
@@ -1192,6 +1197,9 @@ function EditPendingModal({
 }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  // decisions/0029: só pergunta escopo quando a edição de fato muda um
+  // campo que o template governa (descrição/valor/conta).
+  const [scopePrompt, setScopePrompt] = useState(false)
 
   const [value, setValue] = useState<TransactionFormValue>({
     description: row.description,
@@ -1204,7 +1212,7 @@ function EditPendingModal({
   })
 
   const save = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (scope?: PendingDeleteScope) => {
       const rawCents = parseMoneyInput(value.amount)
       if (rawCents === null || rawCents === 0) throw new Error('informe o valor')
       const amountCents = flow === 'income' ? Math.abs(rawCents) : -Math.abs(rawCents)
@@ -1215,6 +1223,7 @@ function EditPendingModal({
         description: value.description.trim(),
         amountCents,
         accountId: value.accountId,
+        ...(scope ? { scope } : {}),
       })
       if (value.categoryId !== row.categoryId) {
         await api.post('/transactions/categorize', { ids: [row.id], categoryId: value.categoryId, saveAsRule: false })
@@ -1239,28 +1248,46 @@ function EditPendingModal({
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
   })
 
+  const requestSave = () => {
+    const rawCents = parseMoneyInput(value.amount)
+    const amountCents = flow === 'income' ? Math.abs(rawCents ?? 0) : -Math.abs(rawCents ?? 0)
+    const changesTemplateField =
+      value.description.trim() !== row.description || amountCents !== row.amountCents || value.accountId !== row.accountId
+    if (row.forecastId !== null && changesTemplateField) setScopePrompt(true)
+    else save.mutate(undefined)
+  }
+
   return (
-    <Modal
-      title="Editar pendência"
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="quiet" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
-            Salvar
-          </Button>
-        </>
-      }
-    >
-      <TransactionForm
-        value={value}
-        onChange={(patch) => setValue((current) => ({ ...current, ...patch }))}
-        showDirection={false}
-        showPending
-      />
-    </Modal>
+    <>
+      <Modal
+        title="Editar pendência"
+        onClose={onClose}
+        footer={
+          <>
+            <Button variant="quiet" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button variant="primary" icon="check" onClick={requestSave} disabled={save.isPending}>
+              Salvar
+            </Button>
+          </>
+        }
+      >
+        <TransactionForm
+          value={value}
+          onChange={(patch) => setValue((current) => ({ ...current, ...patch }))}
+          showDirection={false}
+          showPending
+        />
+      </Modal>
+      {scopePrompt && (
+        <PendingEditScopeModal
+          pending={save.isPending}
+          onCancel={() => setScopePrompt(false)}
+          onConfirm={(scope) => save.mutate(scope)}
+        />
+      )}
+    </>
   )
 }
 

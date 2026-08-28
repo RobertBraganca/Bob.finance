@@ -12,6 +12,7 @@ import {
   EmptyState,
   Icon,
   Modal,
+  PendingEditScopeModal,
   PendingScopeModal,
   Segmented,
   Slab,
@@ -466,6 +467,10 @@ export function TransactionsPage() {
 function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  // decisions/0029: só pergunta escopo quando a edição de fato muda um
+  // campo que o template governa (descrição/valor/conta) — mudar só a
+  // data ou a categoria não tem o que propagar, segue direto.
+  const [scopePrompt, setScopePrompt] = useState(false)
 
   const [value, setValue] = useState<TransactionFormValue>({
     description: row.description,
@@ -477,7 +482,7 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
   })
 
   const save = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (scope?: PendingDeleteScope) => {
       const rawCents = parseMoneyInput(value.amount)
       if (rawCents === null || rawCents === 0) throw new Error('informe o valor')
       const amountCents = value.direction === 'in' ? Math.abs(rawCents) : -Math.abs(rawCents)
@@ -488,6 +493,7 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
         description: value.description.trim(),
         amountCents,
         accountId: value.accountId,
+        ...(scope ? { scope } : {}),
       })
       if (value.categoryId !== row.categoryId) {
         await api.post('/transactions/categorize', {
@@ -506,23 +512,44 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
   })
 
+  const requestSave = () => {
+    const amountCents =
+      value.direction === 'in'
+        ? Math.abs(parseMoneyInput(value.amount) ?? 0)
+        : -Math.abs(parseMoneyInput(value.amount) ?? 0)
+    const changesTemplateField =
+      value.description.trim() !== row.description || amountCents !== row.amountCents || value.accountId !== row.accountId
+    const qualifiesForScope = row.pending && (row.forecastId !== null || row.debtId !== null)
+    if (qualifiesForScope && changesTemplateField) setScopePrompt(true)
+    else save.mutate(undefined)
+  }
+
   return (
-    <Modal
-      title="Editar lançamento"
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="quiet" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
-            Salvar
-          </Button>
-        </>
-      }
-    >
-      <TransactionForm value={value} onChange={(patch) => setValue((current) => ({ ...current, ...patch }))} />
-    </Modal>
+    <>
+      <Modal
+        title="Editar lançamento"
+        onClose={onClose}
+        footer={
+          <>
+            <Button variant="quiet" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button variant="primary" icon="check" onClick={requestSave} disabled={save.isPending}>
+              Salvar
+            </Button>
+          </>
+        }
+      >
+        <TransactionForm value={value} onChange={(patch) => setValue((current) => ({ ...current, ...patch }))} />
+      </Modal>
+      {scopePrompt && (
+        <PendingEditScopeModal
+          pending={save.isPending}
+          onCancel={() => setScopePrompt(false)}
+          onConfirm={(scope) => save.mutate(scope)}
+        />
+      )}
+    </>
   )
 }
 
