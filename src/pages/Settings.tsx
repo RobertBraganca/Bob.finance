@@ -158,7 +158,13 @@ export function SettingsPage() {
             title="Perfis de leitura de CSV"
             subtitle="Cada banco é uma linha de configuração: adicionar um banco novo não exige mexer no código"
           >
-            {(profiles.data?.profiles ?? []).length === 0 ? (
+            {profiles.isError ? (
+              <EmptyState
+                icon="alert"
+                title="Falha ao carregar perfis"
+                body="Não foi possível carregar os perfis de banco agora. Tente novamente em instantes."
+              />
+            ) : (profiles.data?.profiles ?? []).length === 0 ? (
               <EmptyState icon="bank" title="Nenhum perfil" body="Cadastre o formato de CSV do seu banco." />
             ) : (
               <div className="table-wrap">
@@ -216,8 +222,6 @@ export function SettingsPage() {
               </div>
             )}
           </Card>
-
-          <BackupsCard />
         </div>
       </div>
 
@@ -237,190 +241,6 @@ export function SettingsPage() {
         />
       )}
     </>
-  )
-}
-
-/* ================================================================== *
- * Backups
- *
- * Restore is the only destructive operation in the whole product, so it is
- * the only one behind a confirmation modal that spells out what happens
- * (see `specs/backup-and-recovery`). A single click never restores.
- * ================================================================== */
-type BackupEntry = {
-  version: number
-  timestampIso: string
-  label: string
-  trigger: 'migration' | 'manual' | 'pre-restore'
-  filePath: string
-  sizeBytes: number
-}
-
-const TRIGGER_LABEL: Record<BackupEntry['trigger'], string> = {
-  migration: 'Antes de migração',
-  manual: 'Manual',
-  'pre-restore': 'Antes de restaurar',
-}
-
-const backupSize = (bytes: number) => `${(bytes / 1_048_576).toFixed(1)} MB`
-
-const backupWhen = (iso: string) => {
-  const [date, time] = iso.replace('Z', '').split('T')
-  const [y, m, d] = (date ?? '').split('-')
-  return `${d}/${m}/${y} ${(time ?? '').slice(0, 5)}`
-}
-
-function BackupsCard() {
-  const toast = useToast()
-  const queryClient = useQueryClient()
-  const [restoring, setRestoring] = useState<BackupEntry | null>(null)
-
-  const backups = useQuery({
-    queryKey: ['backups'],
-    queryFn: () => api.get<{ backups: BackupEntry[]; directory: string }>('/backups'),
-  })
-
-  const create = useMutation({
-    mutationFn: () => api.post('/backups', {}),
-    onSuccess: () => {
-      toast('Backup criado')
-      queryClient.invalidateQueries({ queryKey: ['backups'] })
-    },
-    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao criar backup', 'error'),
-  })
-
-  const rows = backups.data?.backups ?? []
-
-  return (
-    <>
-      <Card
-        span={12}
-        flush
-        title="Backups"
-        subtitle="Uma cópia do banco é guardada automaticamente antes de cada migração de schema, e sob demanda a qualquer momento"
-        actions={
-          <Button size="sm" icon="download" onClick={() => create.mutate()} disabled={create.isPending}>
-            Fazer backup agora
-          </Button>
-        }
-      >
-        {rows.length === 0 ? (
-          <EmptyState
-            icon="file"
-            title="Nenhum backup ainda"
-            body="O primeiro roda automaticamente na próxima migração de schema, ou pode ser pedido agora pelo botão acima."
-          />
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Versão</th>
-                  <th>Quando</th>
-                  <th>Origem</th>
-                  <th>Rótulo</th>
-                  <th className="table__num">Tamanho</th>
-                  <th style={{ width: 110 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((entry) => (
-                  <tr key={entry.version}>
-                    <td>
-                      <strong>v{entry.version}</strong>
-                    </td>
-                    <td className="muted">{backupWhen(entry.timestampIso)}</td>
-                    <td className="muted">{TRIGGER_LABEL[entry.trigger] ?? entry.trigger}</td>
-                    <td>{entry.label}</td>
-                    <td className="table__num">{backupSize(entry.sizeBytes)}</td>
-                    <td>
-                      <Button size="sm" icon="refresh" onClick={() => setRestoring(entry)}>
-                        Restaurar
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      {restoring && <RestoreModal entry={restoring} onClose={() => setRestoring(null)} />}
-    </>
-  )
-}
-
-function RestoreModal({ entry, onClose }: { entry: BackupEntry; onClose: () => void }) {
-  const toast = useToast()
-  const [done, setDone] = useState(false)
-
-  const restore = useMutation({
-    // `confirm` travels in the BODY, never a query string: a stray click on
-    // a link must not be able to trigger a restore.
-    mutationFn: () => api.post<{ preRestore: BackupEntry }>(`/backups/${entry.version}/restore`, { confirm: true }),
-    onSuccess: () => {
-      setDone(true)
-      toast('Banco restaurado, reinicie o servidor')
-    },
-    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao restaurar', 'error'),
-  })
-
-  return (
-    <Modal
-      title={`Restaurar o backup v${entry.version}`}
-      onClose={onClose}
-      footer={
-        done ? (
-          <Button variant="primary" icon="check" onClick={onClose}>
-            Entendi
-          </Button>
-        ) : (
-          <>
-            <Button onClick={onClose}>Cancelar</Button>
-            <Button variant="danger" icon="refresh" onClick={() => restore.mutate()} disabled={restore.isPending}>
-              Confirmar restauração
-            </Button>
-          </>
-        )
-      }
-    >
-      {done ? (
-        <div className="stack">
-          <p>
-            O banco foi restaurado a partir do backup v{entry.version}. O estado que existia até agora
-            foi salvo como um backup novo, marcado "Antes de restaurar", e continua disponível nesta
-            mesma lista.
-          </p>
-          <p className="chart__note">
-            O servidor ainda está com o arquivo antigo aberto. Reinicie o <code>npm run dev</code> para
-            passar a usar o banco restaurado.
-          </p>
-        </div>
-      ) : (
-        <div className="stack">
-          <div className="kv">
-            <span className="kv__k">Versão</span>
-            <span className="kv__v">v{entry.version}</span>
-            <span className="kv__k">Quando</span>
-            <span className="kv__v">{backupWhen(entry.timestampIso)}</span>
-            <span className="kv__k">Origem</span>
-            <span className="kv__v">{TRIGGER_LABEL[entry.trigger] ?? entry.trigger}</span>
-            <span className="kv__k">Tamanho</span>
-            <span className="kv__v">{backupSize(entry.sizeBytes)}</span>
-          </div>
-          <p>
-            O conteúdo atual de <code>data/finance.db</code> será substituído pelo conteúdo deste
-            backup.
-          </p>
-          <p className="chart__note">
-            Antes de qualquer sobrescrita, o estado atual é salvo automaticamente como um backup novo,
-            então nada do que existe hoje se perde, mesmo que esta restauração seja um engano.
-            Depois de restaurar é necessário reiniciar o servidor.
-          </p>
-        </div>
-      )}
-    </Modal>
   )
 }
 

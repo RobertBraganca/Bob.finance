@@ -1,6 +1,10 @@
 # Spec: Backup e recuperação
 
-Status: implementado
+Status: em pausa — ver `decisions/0032`. Removido da UI em 28/08/2026:
+o backend nunca foi portado da migração SQLite→Postgres (`decisions/0026`,
+Fase 4 pendente) e a tela chegou a mascarar a falha em produção como "nenhum
+backup ainda". O desenho abaixo continua sendo o alvo para quando a Fase 4
+for retomada — não descreve o estado atual do produto.
 
 ## Objetivo
 Garantir que o dado atual nunca se perde numa migração ou num ajuste
