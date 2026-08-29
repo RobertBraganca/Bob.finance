@@ -93,7 +93,14 @@ mercado real para ações e FIIs via BRAPI.
   Só vira `unallocatedCents` de verdade a fração que nenhuma classe
   elegível genuinamente consegue absorver mais (ex. nenhum ativo pontuado
   em nenhuma classe com gap, ou nenhuma comprando uma cota inteira) —
-  nunca por falta de destino configurado.
+  nunca por falta de destino configurado. **A redistribuição em rodadas do
+  parágrafo acima só existia de fato no ramo "aporte não fecha todo gap"
+  até 29/08/2026** — o ramo do peso-alvo (`decisions/0019`, quando o
+  aporte fecha todo gap e sobra) fazia uma única passada, sem repassar a
+  sobra de uma classe incapaz para outra classe-alvo ainda com espaço;
+  corrigido com o mesmo algoritmo de rodadas, mesmo achado da revisão
+  desta data (relatado por teste manual: R$38 mil de aporte com ~R$8 mil
+  parado).
   Dentro de cada classe, os ativos elegíveis seguem em rodízio **por
   setor** (não só por nota) — sem isso, o ativo de maior nota absorvia
   sozinho todo o aporte da classe antes de um segundo setor ser
@@ -290,6 +297,42 @@ uma segunda leitura visual do mesmo número, não um cálculo novo).
 
 ### Casos de borda
 - Nenhum `assetTrade` ainda: estado vazio explícito, não aba ausente.
+
+## Impacto do aporte na meta, na aba "Aportar" (Status: implementado, 29/08/2026)
+
+### Histórias de usuário
+- Como usuário, ao informar quanto quero aportar agora, eu quero ver — para
+  cada meta ativa — em quanto esse aporte adianta a data prevista de
+  conclusão, e quanto do que falta hoje ele cobre, sem precisar ir até a
+  aba Metas e simular manualmente.
+
+### Modelo de dados
+Nenhuma tabela nova. Reusa `goalProjection` (a mesma função da aba Metas),
+que ganhou um parâmetro opcional `extraContributionCents` — somado uma
+única vez ao valor de partida da projeção (`projected`), nunca ao
+`baseline` (que responde uma pergunta diferente: "se o aporte mensal
+parasse"). Nenhuma segunda fórmula.
+
+### Contrato de API
+| Rota | Método | Observação |
+|---|---|---|
+| `/investments/goals/:id/projection` | GET | Ganha `extraContributionCents` opcional (query, default 0) e o campo de resposta `contributionShareOfGapBps` |
+
+### Regras de negócio
+- **`contributionShareOfGapBps`** = quanto do gap de HOJE (valor atual da
+  carteira até `targetValueCents`, sem compor) o aporte cobre — não do gap
+  na data-alvo, que já muda com o próprio aporte. `null` sem aporte
+  informado, ou quando a meta já foi batida (gap ≤ 0).
+- A tela busca a projeção duas vezes por meta (com e sem
+  `extraContributionCents`) para poder mostrar "alcança em X, em vez de Y"
+  — o `reachedPeriod` sem aporte não é reaproveitado da aba Metas (cache
+  separado), para o card funcionar mesmo que o usuário nunca tenha aberto
+  aquela aba.
+
+### UI
+Em `ContributionPlanner` (`Investments.tsx`, aba "Aportar"): um card por
+meta ativa, logo abaixo do campo de valor do aporte, antes da sugestão de
+alocação por classe.
 
 ## Propósito da meta (Status: implementado)
 

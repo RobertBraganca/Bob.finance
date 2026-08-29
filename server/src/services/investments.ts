@@ -874,30 +874,70 @@ export async function suggestContribution(amountCents: number, goalId?: number |
   const targetWeightedClasses = allClasses.filter((c) => c.targetBps > 0)
   const totalTargetBpsEligible = targetWeightedClasses.reduce((sum, c) => sum + c.targetBps, 0)
 
+  // Same round-based redistribution as the !closesEveryGap branch above
+  // (decisions/0022), applied here too: a single pass that dropped a
+  // class's undelivered share on the floor (whole-share rounding, or too
+  // few scored assets to absorb its proportional cut) used to leave real
+  // money in `unallocatedCents` even though other target-weighted classes
+  // still had room — achado da revisão de 29/08/2026, mesmo defeito, agora
+  // corrigido do mesmo jeito.
+  const candidatesForTarget = (c: (typeof targetWeightedClasses)[number]) =>
+    c.detail.assets
+      .filter((a) => a.note !== null && a.answered > 0 && (a.rebalanceCents ?? 0) > 0)
+      .map((a) => ({ a, delta: a.rebalanceCents! }))
+
   let overflowRemaining = overflowAfterGapsCents
   if (overflowAfterGapsCents > 0 && totalTargetBpsEligible > 0) {
-    for (const c of targetWeightedClasses) {
-      if (overflowRemaining <= 0) break
-      const shareCents = Math.round((c.targetBps / totalTargetBpsEligible) * overflowAfterGapsCents)
-      if (shareCents <= 0) continue
+    const entries = targetWeightedClasses.map((c) => ({
+      c,
+      // Sonda com o teto do overflow inteiro (não a fatia proporcional) —
+      // mesma lógica de "achar a capacidade real primeiro" do outro ramo.
+      ceilingCents: allocateAcrossSectors(candidatesForTarget(c), overflowAfterGapsCents).reduce(
+        (sum, s) => sum + s.suggestedCents,
+        0,
+      ),
+      allocCents: 0,
+    }))
 
-      const candidates = c.detail.assets
-        .filter((a) => a.note !== null && a.answered > 0 && (a.rebalanceCents ?? 0) > 0)
-        .map((a) => ({ a, delta: a.rebalanceCents! }))
-      const assetSuggestions = allocateAcrossSectors(candidates, shareCents)
+    let pool = overflowAfterGapsCents
+    let active = entries.filter((e) => e.ceilingCents > 0)
+    for (let round = 0; round < entries.length + 1 && pool > 0 && active.length > 0; round++) {
+      const poolAtRoundStart = pool
+      const totalActiveTargetBps = active.reduce((sum, e) => sum + e.c.targetBps, 0)
+      if (totalActiveTargetBps <= 0) break
+
+      let anyCapped = false
+      for (const e of active) {
+        const offer = Math.min(
+          Math.round((e.c.targetBps / totalActiveTargetBps) * poolAtRoundStart),
+          pool,
+        )
+        const room = e.ceilingCents - e.allocCents
+        const grant = Math.min(offer, room)
+        e.allocCents += grant
+        pool -= grant
+        if (grant >= room) anyCapped = true
+      }
+      active = active.filter((e) => e.allocCents < e.ceilingCents)
+      if (!anyCapped) break
+    }
+    overflowRemaining = pool
+
+    for (const e of entries) {
+      if (e.allocCents <= 0) continue
+      const assetSuggestions = allocateAcrossSectors(candidatesForTarget(e.c), e.allocCents)
       const allocatedCents = assetSuggestions.reduce((sum, s) => sum + s.suggestedCents, 0)
       if (allocatedCents <= 0) continue
 
-      overflowRemaining -= allocatedCents
-      const existing = classes.find((entry) => entry.assetClass === c.assetClass)
+      const existing = classes.find((entry) => entry.assetClass === e.c.assetClass)
       if (existing) {
         existing.allocatedCents += allocatedCents
         existing.assets = mergeAssetSuggestions(existing.assets, assetSuggestions)
       } else {
         classes.push({
-          assetClass: c.assetClass,
-          label: c.label,
-          deltaCents: c.deltaCents,
+          assetClass: e.c.assetClass,
+          label: e.c.label,
+          deltaCents: e.c.deltaCents,
           allocatedCents,
           assets: assetSuggestions,
         })
@@ -1163,7 +1203,12 @@ export type GoalProjectionPoint = {
   contributedCents: number
 }
 
-export async function goalProjection(goalId: number, horizonMonths = 120) {
+export async function goalProjection(
+  goalId: number,
+  horizonMonths = 120,
+  /** a hypothetical one-time top-up TODAY, on top of the plan's own monthly contribution — Aportar tab asks "what if I put X in right now", never a second contribution schedule */
+  extraContributionCents = 0,
+) {
   const goal = (await db.select().from(investmentGoals).where(eq(investmentGoals.id, goalId)))[0]
   if (!goal) return null
 
@@ -1172,7 +1217,10 @@ export async function goalProjection(goalId: number, horizonMonths = 120) {
   const startPeriod = todayIso().slice(0, 7)
 
   const series: GoalProjectionPoint[] = []
-  let projected = summary.marketValueCents
+  // Only `projected` gets the one-time top-up — `baseline` answers a
+  // different question ("if the monthly plan stopped"), orthogonal to a
+  // hypothetical extra contribution on top of the existing plan.
+  let projected = summary.marketValueCents + extraContributionCents
   let baseline = summary.marketValueCents
   let contributed = summary.contributedCents
   let reachedMonth: number | null = null
@@ -1232,6 +1280,15 @@ export async function goalProjection(goalId: number, horizonMonths = 120) {
           )
         : null,
     projectedAtTargetCents: valueAtTarget?.projectedCents ?? null,
+    /**
+     * Quanto do que falta HOJE (valor atual, sem compor) este aporte
+     * hipotético cobre — não quanto falta na data-alvo, que já muda com o
+     * próprio aporte. `null` sem aporte ou sem gap real (meta já batida).
+     */
+    contributionShareOfGapBps:
+      extraContributionCents > 0 && goal.targetValueCents > summary.marketValueCents
+        ? Math.round((extraContributionCents / (goal.targetValueCents - summary.marketValueCents)) * 10_000)
+        : null,
   }
 }
 

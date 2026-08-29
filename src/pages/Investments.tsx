@@ -113,6 +113,7 @@ type Projection = {
   onTrack: boolean | null
   requiredMonthlyCents: number | null
   projectedAtTargetCents: number | null
+  contributionShareOfGapBps: number | null
 }
 
 export function InvestmentsPage() {
@@ -208,7 +209,7 @@ export function InvestmentsPage() {
             onViewTrades={(label, assetIds) => setTradeHistory({ label, assetIds })}
           />
         ) : tab === 'contribute' ? (
-          <ContributionPlanner />
+          <ContributionPlanner goals={data.goals} />
         ) : tab === 'ledger' ? (
           <LedgerTab positions={data.positions} allocation={data.allocation} />
         ) : tab === 'profitability' ? (
@@ -2799,7 +2800,7 @@ type ContributionPlanResponse = {
   unallocatedCents: number
 }
 
-function ContributionPlanner() {
+function ContributionPlanner({ goals }: { goals: Goal[] }) {
   const toast = useToast()
   const queryClient = useQueryClient()
   const [amount, setAmount] = useState('')
@@ -2854,6 +2855,14 @@ function ContributionPlanner() {
           )}
         </div>
       </Card>
+
+      {!!parsedCents && parsedCents > 0 && goals.length > 0 && (
+        <>
+          {goals.map((goal) => (
+            <GoalContributionImpact key={goal.id} goal={goal} extraContributionCents={parsedCents} />
+          ))}
+        </>
+      )}
 
       {!parsedCents || parsedCents <= 0 ? (
         <Card span={12}>
@@ -2970,5 +2979,61 @@ function ContributionPlanner() {
         <ReserveContributeModal initialAmountCents={contributingReserve} onClose={() => setContributingReserve(null)} />
       )}
     </div>
+  )
+}
+
+/**
+ * "Se eu aportar esse valor agora, quando bato a meta, e quanto do que
+ * falta esse aporte cobre?" — reusa a MESMA projeção de `goalProjection`
+ * (nunca uma segunda fórmula), só com `extraContributionCents` somado ao
+ * valor de partida. Duas chamadas (com e sem o aporte) para poder mostrar
+ * "era X, passa a ser Y", cacheadas por valor então trocar o aporte não
+ * refaz a chamada-base repetidamente.
+ */
+function GoalContributionImpact({ goal, extraContributionCents }: { goal: Goal; extraContributionCents: number }) {
+  const baseline = useQuery({
+    queryKey: ['investment-goal-projection', goal.id, 0],
+    queryFn: () => api.get<Projection>(`/investments/goals/${goal.id}/projection`, { extraContributionCents: 0 }),
+  })
+  const withContribution = useQuery({
+    queryKey: ['investment-goal-projection', goal.id, extraContributionCents],
+    queryFn: () =>
+      api.get<Projection>(`/investments/goals/${goal.id}/projection`, { extraContributionCents }),
+  })
+
+  if (baseline.isError || withContribution.isError) return null
+  if (!baseline.data || !withContribution.data) {
+    return (
+      <Card span={12}>
+        <SkeletonLines lines={2} />
+      </Card>
+    )
+  }
+
+  const before = baseline.data
+  const after = withContribution.data
+  const changesEta = before.reachedPeriod !== after.reachedPeriod
+
+  return (
+    <Slab span={12}>
+      <div className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
+        <div className="stack stack--tight">
+          <span className="stat__label">{goal.name} — com este aporte</span>
+          <span style={{ fontSize: 'var(--text-base)' }}>
+            {after.reachedPeriod === null
+              ? 'a meta continua além do horizonte projetado, mesmo com este aporte'
+              : changesEta && before.reachedPeriod
+                ? `alcança a meta em ${fmtPeriod(after.reachedPeriod)}, em vez de ${fmtPeriod(before.reachedPeriod)}`
+                : `alcança a meta em ${fmtPeriod(after.reachedPeriod)} — este aporte não muda a data prevista`}
+          </span>
+        </div>
+        {after.contributionShareOfGapBps !== null && (
+          <StatTile
+            label="Cobre do que falta hoje"
+            value={bps(Math.min(after.contributionShareOfGapBps, 10_000), 0)}
+          />
+        )}
+      </div>
+    </Slab>
   )
 }

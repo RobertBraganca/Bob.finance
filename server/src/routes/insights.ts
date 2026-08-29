@@ -745,7 +745,8 @@ export async function insightsRoutes(app: FastifyInstance) {
 
   app.get('/investments/goals/:id/projection', async (req, reply) => {
     const { id } = idParam.parse(req.params)
-    const projection = await investments.goalProjection(id)
+    const query = z.object({ extraContributionCents: z.coerce.number().int().nonnegative().default(0) }).parse(req.query)
+    const projection = await investments.goalProjection(id, undefined, query.extraContributionCents)
     if (!projection) return reply.code(404).send({ error: 'meta não encontrada' })
     return projection
   })
