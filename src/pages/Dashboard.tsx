@@ -42,9 +42,11 @@ import {
   StatTile,
   TextInput,
   useToast,
+  type IconName,
   type MeterState,
   type PendingDeleteScope,
 } from '../components/ui'
+import { Alert, AlertAction, AlertDescription } from '../components/ui/alert'
 import { PageHeader, RangeFilter } from '../components/shell/Shell'
 import { IncomeExpenseChart } from '../components/charts/IncomeExpenseChart'
 import { TransactionForm, type TransactionFormValue } from '../components/forms/TransactionForm'
@@ -474,6 +476,7 @@ export function Dashboard() {
       />
 
       <div className="page" style={{ opacity: dashboard.isFetching ? 0.72 : 1, transition: 'opacity 120ms' }}>
+        <HomeBanners />
         <div className="bento">
           {bento.layout
             .filter((c) => isVisible(c.id))
@@ -637,6 +640,102 @@ function BentoSettingsModal({
  * then one page per card — because "limite total" and "limite disponível"
  * don't mean anything summed across cards with different due dates.
  */
+/* ================================================================== *
+ * Termômetro mensal — avisos temporários e dispensáveis
+ *
+ * Diferente de "Modo mês" logo abaixo (card fixo, sempre visível): estes
+ * só aparecem quando o servidor (`homeBanners()`, goals.ts) tem algo
+ * ESPECÍFICO a dizer sobre o mês corrente — estourou/está no ritmo de
+ * estourar um teto, uma categoria concentra boa parte do gasto, ou a
+ * projeção do mês foge do mês passado. Sempre um dado ("no ritmo
+ * atual..."), nunca um veredito ("você falhou"). Dispensar é só de HOJE
+ * (localStorage por data) — se o motivo continuar amanhã, o aviso volta;
+ * não é "nunca mais mostrar isso".
+ * ================================================================== */
+type HomeBannerSeverity = 'good' | 'warning' | 'critical'
+
+type HomeBanner = { id: string; severity: HomeBannerSeverity } & (
+  | { kind: 'spend_cap_exceeded'; spentCents: number; capCents: number }
+  | { kind: 'spend_cap_at_risk'; projectedCents: number; capCents: number }
+  | { kind: 'category_cap_exceeded'; categoryName: string; spentCents: number; capCents: number }
+  | { kind: 'category_cap_at_risk'; categoryName: string; spentCents: number; capCents: number }
+  | { kind: 'category_concentration'; categoryName: string; shareBps: number }
+  | { kind: 'trend_up'; deltaBps: number }
+  | { kind: 'trend_down'; deltaBps: number }
+)
+
+/** Frase pronta a partir do dado bruto do servidor — moeda/percentual sempre formatados aqui, nunca no backend. */
+function bannerMessage(b: HomeBanner): string {
+  switch (b.kind) {
+    case 'spend_cap_exceeded':
+      return `Você já passou do teto de gasto do mês: ${money(b.spentCents)} de um teto de ${money(b.capCents)}.`
+    case 'spend_cap_at_risk':
+      return `No ritmo atual, você deve fechar o mês em ${money(b.projectedCents)}, acima do teto de ${money(b.capCents)}.`
+    case 'category_cap_exceeded':
+      return `Categoria ${b.categoryName} já passou do teto do mês: ${money(b.spentCents)} de ${money(b.capCents)}.`
+    case 'category_cap_at_risk':
+      return `Categoria ${b.categoryName} está no ritmo de passar do teto do mês (${money(b.spentCents)} de ${money(b.capCents)} já usados).`
+    case 'category_concentration':
+      return `Categoria ${b.categoryName} representa ${bps(b.shareBps, 0)} dos seus gastos este mês.`
+    case 'trend_up':
+      return `Seus gastos estão subindo: no ritmo atual, a projeção deste mês é ${bps(b.deltaBps, 0)} maior que o mês passado.`
+    case 'trend_down':
+      return `Seus gastos estão ${bps(Math.abs(b.deltaBps), 0)} menores que no mês passado, no ritmo atual.`
+  }
+}
+
+const BANNER_ICON: Record<HomeBannerSeverity, IconName> = { good: 'check', warning: 'alert', critical: 'alert' }
+
+function dismissedBannersKey() {
+  // Por data (não um "nunca mais") — mesmo padrão de chave usada em
+  // outros lugares deste arquivo para "hoje" (new Date().toISOString()).
+  return `bob-finance:dismissed-banners:${new Date().toISOString().slice(0, 10)}`
+}
+
+function HomeBanners() {
+  const query = useQuery({
+    queryKey: ['home-banners'],
+    queryFn: () => api.get<{ banners: HomeBanner[] }>('/home/banners'),
+  })
+  const [dismissed, setDismissed] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(dismissedBannersKey())
+      return raw ? new Set(JSON.parse(raw)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
+
+  const dismiss = (id: string) => {
+    setDismissed((prev) => {
+      const next = new Set(prev).add(id)
+      try {
+        localStorage.setItem(dismissedBannersKey(), JSON.stringify([...next]))
+      } catch {
+        // localStorage indisponível (modo privado, etc.) — a dispensa só dura a sessão.
+      }
+      return next
+    })
+  }
+
+  const banners = (query.data?.banners ?? []).filter((b) => !dismissed.has(b.id))
+  if (banners.length === 0) return null
+
+  return (
+    <div className="stack stack--tight" style={{ marginBottom: 'var(--sp-4)' }}>
+      {banners.map((b) => (
+        <Alert key={b.id} variant={b.severity}>
+          <Icon name={BANNER_ICON[b.severity]} size={16} />
+          <AlertDescription style={{ color: 'inherit' }}>{bannerMessage(b)}</AlertDescription>
+          <AlertAction>
+            <Button variant="ghost" size="sm" icon="x" title="Dispensar por hoje" onClick={() => dismiss(b.id)} />
+          </AlertAction>
+        </Alert>
+      ))}
+    </div>
+  )
+}
+
 /* ================================================================== *
  * "Modo mês"
  *
