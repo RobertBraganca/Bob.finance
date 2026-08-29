@@ -207,24 +207,35 @@ export function TransactionsPage() {
   const rows = query.data?.rows ?? []
 
   // Exporta TODO o filtro atual, não só a página de 100 visível na tela —
-  // uma segunda chamada com limit = total, não uma segunda fonte de dado.
+  // chamadas com o mesmo filtro, não uma segunda fonte de dado. Em páginas
+  // de EXPORT_PAGE_SIZE (o teto que a própria API aceita por chamada, ver
+  // `limit: z.coerce.number()...max(2000)` em ledger/index.ts): pedir
+  // `limit: total` de uma vez só falhava a validação (400) sempre que o
+  // filtro tinha mais de 2000 lançamentos — daí o export "retornando erro"
+  // em qualquer recorte maior que isso.
+  const EXPORT_PAGE_SIZE = 2000
   const exportCsv = useMutation({
     mutationFn: async () => {
       const total = query.data?.total ?? 0
       if (total === 0) throw new Error('nada para exportar com este filtro')
-      const all = await api.get<ListResponse>('/transactions', {
-        from: range.from,
-        to,
-        accountId: range.accountId,
-        search: search || undefined,
-        uncategorized: onlyUncategorized ? true : undefined,
-        direction: direction === 'transfer' ? undefined : direction,
-        categoryKind: direction === 'transfer' ? 'transfer' : undefined,
-        parentCategoryId: parentCategoryId ?? undefined,
-        limit: total,
-        offset: 0,
-      })
-      return all.rows
+      const rows: Row[] = []
+      for (let offset = 0; offset < total; offset += EXPORT_PAGE_SIZE) {
+        const page = await api.get<ListResponse>('/transactions', {
+          from: range.from,
+          to,
+          accountId: range.accountId,
+          search: search || undefined,
+          uncategorized: onlyUncategorized ? true : undefined,
+          direction: direction === 'transfer' ? undefined : direction,
+          categoryKind: direction === 'transfer' ? 'transfer' : undefined,
+          parentCategoryId: parentCategoryId ?? undefined,
+          limit: EXPORT_PAGE_SIZE,
+          offset,
+        })
+        rows.push(...page.rows)
+        if (page.rows.length === 0) break
+      }
+      return rows
     },
     onSuccess: (allRows) => {
       downloadCsv(`lancamentos-${range.from}-a-${to}.csv`, transactionsToCsv(allRows))
