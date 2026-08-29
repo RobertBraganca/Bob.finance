@@ -465,3 +465,28 @@ código em `investments.ts`.
   também chama `positions()` internamente e é usada standalone em 6+
   lugares (rotas, `financialHealth.ts`, `financialEngine.ts`) — juntar
   isso é um refactor à parte, maior que o N+1 pontual pedido aqui.
+
+## Termômetro mensal (29/08/2026) — avisos dispensáveis na Visão geral
+
+Usuário pediu avisos temporários tipo "você está gastando mais que o
+previsto", cor verde/amarelo/vermelho, usando o componente `Alert` do
+shadcn/ui (não `AlertDialog` — é modal, cansaria num app pra abrir todo
+dia). Achado ao investigar: a lógica pesada (estado on_track/at_risk/
+exceeded, `paceCents`, tetos por categoria) **já existia inteira** em
+`goals.ts` desde `specs/monthly-goals` — não foi feature do zero, foi
+vitrine de dado já calculado. Ver `specs/monthly-goals` ("Termômetro
+mensal") para o detalhe completo: novo endpoint `/home/banners`, novo
+componente `src/components/ui/alert.tsx` (3 variantes extras — good/
+warning/critical — coloridas via `color-mix()` contra os tokens
+`--status-*`, adaptando sozinho a claro/escuro), dispensa por
+localStorage (só do dia, não "para sempre"). Distinto do "Modo mês"
+existente (`specs/dashboard`) — aquele é um card fixo sempre visível,
+isto são avisos específicos e temporários.
+
+**Divergência deliberada Node vs. Deno**: `homeBanners()` roda
+`Promise.all` no server (`server/src/services/goals.ts`), mas
+sequencial no Deno (`supabase/functions/_shared/services/goals.ts`) —
+mesmo achado já documentado acima ("Promise.all sob o pooler de
+transação da Edge Function pode travar sem erro"), aplicado
+preventivamente aqui porque esta rota roda a cada carregamento do
+Painel (mais frequente que `goals-history`, que já tinha essa correção).
