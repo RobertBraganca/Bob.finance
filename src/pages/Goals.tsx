@@ -259,7 +259,13 @@ export function GoalsPage() {
                 </Button>
               }
             >
-              {data.caps.length === 0 ? (
+              {progress.isError ? (
+                <EmptyState
+                  icon="alert"
+                  title="Falha ao carregar tetos"
+                  body="Não foi possível carregar os tetos por categoria agora. Tente novamente em instantes."
+                />
+              ) : data.caps.length === 0 ? (
                 <EmptyState
                   icon="target"
                   title="Nenhum teto por categoria"

@@ -365,7 +365,13 @@ export function ImportPage() {
           </Card>
 
           <Card span={12} title="Importações anteriores" flush>
-            {(batches.data?.batches ?? []).length === 0 ? (
+            {batches.isError ? (
+              <EmptyState
+                icon="alert"
+                title="Falha ao carregar importações"
+                body="Não foi possível carregar o histórico agora. Tente novamente em instantes."
+              />
+            ) : (batches.data?.batches ?? []).length === 0 ? (
               <EmptyState icon="clock" title="Nenhuma importação ainda" body="O histórico aparece aqui." />
             ) : (
               <div className="table-wrap">

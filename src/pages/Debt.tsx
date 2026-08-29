@@ -296,7 +296,13 @@ export function DebtPage() {
             </Card>
 
             <Card span={4} title="O que muda com o aporte">
-              {projection.data ? (
+              {projection.isError ? (
+                <EmptyState
+                  icon="alert"
+                  title="Falha ao carregar"
+                  body="Não foi possível calcular a projeção agora. Tente novamente em instantes."
+                />
+              ) : projection.data ? (
                 <>
                   <PayoffSummary
                     months={
@@ -762,7 +768,13 @@ function DebtPaymentHistoryModal({ debt, onClose }: { debt: DebtRow; onClose: ()
         </Button>
       }
     >
-      {rows.length === 0 ? (
+      {payments.isError ? (
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar"
+          body="Não foi possível carregar os pagamentos agora. Tente novamente em instantes."
+        />
+      ) : rows.length === 0 ? (
         <EmptyState
           icon="list"
           title="Nenhum pagamento registrado"

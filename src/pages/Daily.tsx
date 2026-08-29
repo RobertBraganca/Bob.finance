@@ -317,7 +317,13 @@ function RecentDaily({ period }: { period: string }) {
 
   return (
     <Card span={12} flush title="Lançamentos do diário neste mês">
-      {rows.length === 0 ? (
+      {query.isError ? (
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar lançamentos"
+          body="Não foi possível carregar os lançamentos do diário agora. Tente novamente em instantes."
+        />
+      ) : rows.length === 0 ? (
         <EmptyState
           icon="calendar"
           title="Nenhum lançamento rápido neste mês"

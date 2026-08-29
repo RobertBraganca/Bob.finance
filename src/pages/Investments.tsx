@@ -764,7 +764,13 @@ function AllocationDeviationCard() {
       title="Desvio de alocação"
       subtitle="Sua carteira hoje comparada com a política de alocação que você configurou"
     >
-      {classes.length === 0 ? (
+      {deviation.isError ? (
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar"
+          body="Não foi possível carregar o desvio de alocação agora. Tente novamente em instantes."
+        />
+      ) : classes.length === 0 ? (
         <EmptyState
           icon="scale"
           title="Nenhuma classe com meta configurada"
@@ -1321,7 +1327,13 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
           </div>
         }
       >
-        {rows.length === 0 ? (
+        {trades.isError ? (
+          <EmptyState
+            icon="alert"
+            title="Falha ao carregar"
+            body="Não foi possível carregar os lançamentos agora. Tente novamente em instantes."
+          />
+        ) : rows.length === 0 ? (
           <EmptyState
             icon="list"
             title="Nenhum lançamento"
@@ -1423,7 +1435,13 @@ function TradeHistoryModal({
         </Button>
       }
     >
-      {rows.length === 0 ? (
+      {trades.isError ? (
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar"
+          body="Não foi possível carregar os lançamentos desta classe agora. Tente novamente em instantes."
+        />
+      ) : rows.length === 0 ? (
         <EmptyState
           icon="list"
           title="Nenhum lançamento"
@@ -2843,6 +2861,14 @@ function ContributionPlanner() {
             icon="target"
             title="Informe um valor para ver a sugestão"
             body="O aporte é distribuído em cascata: primeiro para a classe mais atrasada em relação à meta, depois para o ativo com a maior nota dentro dela que ainda não atingiu seu alvo."
+          />
+        </Card>
+      ) : plan.isError ? (
+        <Card span={12}>
+          <EmptyState
+            icon="alert"
+            title="Falha ao calcular"
+            body="Não foi possível calcular a sugestão de aporte agora. Tente novamente em instantes."
           />
         </Card>
       ) : !plan.data ? (

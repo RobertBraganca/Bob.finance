@@ -114,8 +114,8 @@ export function CategoriesPage() {
         </Tabs>
 
         {tab === 'tree' && <CategoryTree />}
-        {tab === 'rules' && <RulesTable rules={rules.data?.rules ?? []} />}
-        {tab === 'memory' && <MemoryTable memory={rules.data?.memory ?? []} />}
+        {tab === 'rules' && <RulesTable rules={rules.data?.rules ?? []} isError={rules.isError} />}
+        {tab === 'memory' && <MemoryTable memory={rules.data?.memory ?? []} isError={rules.isError} />}
       </div>
     </>
   )
@@ -344,7 +344,7 @@ const MATCH_LABEL: Record<string, string> = {
   regex: 'regex',
 }
 
-function RulesTable({ rules }: { rules: Rule[] }) {
+function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
   const toast = useToast()
   const queryClient = useQueryClient()
   const [creating, setCreating] = useState(false)
@@ -401,7 +401,13 @@ function RulesTable({ rules }: { rules: Rule[] }) {
             </Button>
           }
         >
-          {rules.length === 0 ? (
+          {isError ? (
+            <EmptyState
+              icon="alert"
+              title="Falha ao carregar regras"
+              body="Não foi possível carregar as regras agora. Tente novamente em instantes."
+            />
+          ) : rules.length === 0 ? (
             <EmptyState icon="tags" title="Nenhuma regra" body="Crie regras para categorizar automaticamente." />
           ) : (
             <div className="table-wrap">
@@ -505,7 +511,7 @@ function RulesTable({ rules }: { rules: Rule[] }) {
 /* ------------------------------------------------------------------ *
  * Learned memory — auditable on purpose.
  * ------------------------------------------------------------------ */
-function MemoryTable({ memory }: { memory: Memory[] }) {
+function MemoryTable({ memory, isError }: { memory: Memory[]; isError?: boolean }) {
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -524,7 +530,13 @@ function MemoryTable({ memory }: { memory: Memory[] }) {
       title="O que o app aprendeu"
       subtitle="Cada correção manual conta um ponto para o comerciante. Na terceira confirmação, vira regra."
     >
-      {memory.length === 0 ? (
+      {isError ? (
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar aprendizado"
+          body="Não foi possível carregar o que o app aprendeu agora. Tente novamente em instantes."
+        />
+      ) : memory.length === 0 ? (
         <EmptyState
           icon="sparkle"
           title="Nada aprendido ainda"

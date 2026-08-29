@@ -340,7 +340,9 @@ export function Dashboard() {
       </Card>
     ),
     'month-mode': <MonthModeCard span={spanOf('month-mode')} rangeTo={range.to} rangeAnchor={range.anchor} />,
-    'credit-cards': <CreditCardsSlab cards={cards.data?.cards ?? []} span={spanOf('credit-cards')} />,
+    'credit-cards': (
+      <CreditCardsSlab cards={cards.data?.cards ?? []} isError={cards.isError} span={spanOf('credit-cards')} />
+    ),
     reconciliation: <ReconciliationCard span={spanOf('reconciliation')} />,
     'pending-income': <PendingCard flow="income" title="Receitas pendentes" span={spanOf('pending-income')} />,
     'pending-expense': <PendingCard flow="expense" title="Despesas pendentes" span={spanOf('pending-expense')} />,
@@ -393,7 +395,13 @@ export function Dashboard() {
     ),
     'top-merchants': (
       <Card span={spanOf('top-merchants')} title="Onde o dinheiro mais foi" subtitle="Maiores saídas do período">
-        {topMerchants.length === 0 ? (
+        {dashboard.isError ? (
+          <EmptyState
+            icon="alert"
+            title="Falha ao carregar"
+            body="Não foi possível carregar as maiores saídas agora. Tente novamente em instantes."
+          />
+        ) : topMerchants.length === 0 ? (
           <EmptyState icon="search" title="Nada a listar" body="Sem saídas registradas no período." />
         ) : (
           <ul className="ranked">
@@ -708,6 +716,18 @@ function MonthModeCard({
     enabled: period !== null,
   })
 
+  if (goals.isError || available.isError) {
+    return (
+      <Card span={span} title="Modo mês">
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar"
+          body="Não foi possível carregar os dados do mês agora. Tente novamente em instantes."
+        />
+      </Card>
+    )
+  }
+
   if (!goals.data || !available.data) {
     return (
       <Card span={span} title="Modo mês">
@@ -835,7 +855,15 @@ function MonthLineTile({ line }: { line: MonthLine }) {
   )
 }
 
-function CreditCardsSlab({ cards, span }: { cards: CardRow[]; span: BentoSpan }) {
+function CreditCardsSlab({
+  cards,
+  isError,
+  span,
+}: {
+  cards: CardRow[]
+  isError: boolean
+  span: BentoSpan
+}) {
   const [page, setPage] = useState(0)
   const pageCount = cards.length + 1
   const current = page === 0 ? null : cards[page - 1]
@@ -860,7 +888,13 @@ function CreditCardsSlab({ cards, span }: { cards: CardRow[]; span: BentoSpan })
         </Link>
       }
     >
-      {cards.length === 0 ? (
+      {isError ? (
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar"
+          body="Não foi possível carregar os cartões agora. Tente novamente em instantes."
+        />
+      ) : cards.length === 0 ? (
         <EmptyState
           icon="wallet"
           title="Nenhum cartão cadastrado"

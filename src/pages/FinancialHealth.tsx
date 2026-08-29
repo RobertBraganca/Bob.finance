@@ -190,7 +190,15 @@ export function FinancialHealthPage() {
       />
 
       <div className="page">
-        {!hasLedger ? (
+        {meta.isError ? (
+          <Card>
+            <EmptyState
+              icon="alert"
+              title="Falha ao carregar"
+              body="Não foi possível carregar os dados da conta agora. Tente novamente em instantes."
+            />
+          </Card>
+        ) : !hasLedger ? (
           <Card>
             <EmptyState
               icon="sparkle"
@@ -240,7 +248,13 @@ export function FinancialHealthPage() {
               title="Patrimônio consolidado"
               subtitle="Quanto existe hoje contra quanto se deve, somando conta, carteira e dívida"
             >
-              {!netWorth.data ? (
+              {netWorth.isError ? (
+                <EmptyState
+                  icon="alert"
+                  title="Falha ao carregar"
+                  body="Não foi possível carregar o patrimônio consolidado agora. Tente novamente em instantes."
+                />
+              ) : !netWorth.data ? (
                 <EmptyState title="Calculando…" />
               ) : (
                 <>
@@ -273,7 +287,13 @@ export function FinancialHealthPage() {
               title="Runway"
               subtitle="Quantos meses os recursos atuais cobrem o custo mensal médio"
             >
-              {!runway.data ? (
+              {runway.isError ? (
+                <EmptyState
+                  icon="alert"
+                  title="Falha ao carregar"
+                  body="Não foi possível carregar o runway agora. Tente novamente em instantes."
+                />
+              ) : !runway.data ? (
                 <EmptyState title="Calculando…" />
               ) : (
                 <div className="stack stack--loose">
@@ -310,7 +330,13 @@ export function FinancialHealthPage() {
               title="Radar de risco"
               subtitle="Cada indicador comparado com o limite que você configurou"
             >
-              {!radar.data ? (
+              {radar.isError ? (
+                <EmptyState
+                  icon="alert"
+                  title="Falha ao carregar"
+                  body="Não foi possível carregar o radar de risco agora. Tente novamente em instantes."
+                />
+              ) : !radar.data ? (
                 <EmptyState title="Calculando…" />
               ) : radar.data.rules.length === 0 ? (
                 <EmptyState

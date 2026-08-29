@@ -151,12 +151,28 @@ export function FinancialEnginePage() {
       />
 
       <div className="page">
-        {!hasLedger ? (
+        {meta.isError ? (
+          <Card>
+            <EmptyState
+              icon="alert"
+              title="Falha ao carregar"
+              body="Não foi possível carregar os dados da conta agora. Tente novamente em instantes."
+            />
+          </Card>
+        ) : !hasLedger ? (
           <Card>
             <EmptyState
               icon="sparkle"
               title="Nenhum dado importado ainda"
               body="O motor cruza saldo, compromissos, limite de cartão, metas e dívida. Ele aparece assim que houver histórico para cruzar."
+            />
+          </Card>
+        ) : available.isError ? (
+          <Card>
+            <EmptyState
+              icon="alert"
+              title="Falha ao carregar"
+              body="Não foi possível carregar o disponível para alocação agora. Tente novamente em instantes."
             />
           </Card>
         ) : !available.data ? (
@@ -258,7 +274,13 @@ export function FinancialEnginePage() {
               title="Ponto de equilíbrio de faturamento"
               subtitle="O faturamento que cobriria tudo que já está configurado neste mês"
             >
-              {!breakEven.data ? (
+              {breakEven.isError ? (
+                <EmptyState
+                  icon="alert"
+                  title="Falha ao carregar"
+                  body="Não foi possível carregar o ponto de equilíbrio agora. Tente novamente em instantes."
+                />
+              ) : !breakEven.data ? (
                 <EmptyState title="Calculando…" />
               ) : breakEven.data.breakEvenCents === null ? (
                 <EmptyState
