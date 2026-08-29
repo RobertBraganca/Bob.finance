@@ -68,3 +68,22 @@ dados atuais (o ledger real de uma pessoa só) pertencem a ele.
   sem `Authorization`, e 401 com um token inválido — não foi possível
   testar o caminho de sucesso (login de verdade) nesta sessão por não ter
   a senha do usuário; o próprio usuário precisa confirmar esse caminho.
+
+## Adendo (29/08/2026) — cache curto para não pagar round-trip de Auth em toda chamada
+Usuário reportou 7-10s para a Visão geral carregar depois do login — o
+Painel dispara ~9 chamadas separadas para a function `insights`, e cada
+uma pagava seu próprio round-trip de rede até o servidor de Auth do
+Supabase (`getUser(token)`), medido ao vivo em ~0,5-1s por chamada mesmo
+com a instância já quente. `_shared/auth.ts` ganhou um cache em memória
+por instância (`Map<token, {userId, expiresAt}>`, TTL de 60s, teto de 20
+entradas — nunca deveria crescer de verdade num app de um usuário só) e o
+client do Supabase Auth passou a ser criado uma vez por instância, não a
+cada requisição. Ainda revalida com o servidor de Auth periodicamente
+(60s é bem menor que a validade de 1h do JWT) — não é "verificar uma vez e
+confiar para sempre". Reduz drasticamente o custo para chamadas
+concorrentes/repetidas dentro da mesma instância quente; não elimina o
+custo do primeiro round-trip de uma instância fria. Verificado ao vivo que
+o caminho de rejeição (sem token / token inválido) continua idêntico
+depois do redeploy — o caminho de sucesso (cache realmente reduzindo o
+tempo sentido) depende do usuário confirmar, mesma limitação de não ter
+credenciais nesta sessão.

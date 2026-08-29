@@ -10,6 +10,24 @@ import type { Context, Next } from 'hono'
  */
 export const ADMIN_USER_ID = '23d255ea-c812-4733-aaff-fdb3ef838117'
 
+// Criado uma vez por instância (não a cada requisição) — construção do
+// client é barata, mas não há razão para refazer em toda invocação de uma
+// instância já quente.
+const authClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!)
+
+/**
+ * Cache curto em memória: uma única tela (ex. o Painel) dispara várias
+ * chamadas separadas para esta mesma function, todas com o MESMO token —
+ * sem isto, cada uma pagava seu próprio round-trip de rede até o servidor
+ * de Auth (achado ao vivo em 29/08/2026: ~0,5-1s por chamada, sete a dez
+ * segundos sentidos na tela quando várias delas concorrem). TTL bem menor
+ * que a validade do JWT (1h) — ainda revalida com o servidor de Auth
+ * periodicamente, não é "verificar uma vez e confiar para sempre".
+ */
+const CACHE_TTL_MS = 60_000
+const MAX_CACHE_ENTRIES = 20
+const verified = new Map<string, { userId: string; expiresAt: number }>()
+
 /**
  * Até 29/08/2026 a anon key sozinha bastava para ler/escrever qualquer
  * dado financeiro desta API (achado da revisão de 28/08/2026: "sem
@@ -25,13 +43,27 @@ export async function requireAdmin(c: Context, next: Next) {
   const token = authHeader?.replace(/^Bearer\s+/i, '')
   if (!token) return c.json({ error: 'não autenticado' }, 401)
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
-  const client = createClient(supabaseUrl, anonKey)
-  const { data, error } = await client.auth.getUser(token)
+  const now = Date.now()
+  const cached = verified.get(token)
+  let userId: string
 
-  if (error || !data.user) return c.json({ error: 'sessão inválida ou expirada' }, 401)
-  if (data.user.id !== ADMIN_USER_ID) return c.json({ error: 'acesso negado' }, 403)
+  if (cached && cached.expiresAt > now) {
+    userId = cached.userId
+  } else {
+    const { data, error } = await authClient.auth.getUser(token)
+    if (error || !data.user) return c.json({ error: 'sessão inválida ou expirada' }, 401)
+    userId = data.user.id
+
+    if (verified.size >= MAX_CACHE_ENTRIES) {
+      // App de um usuário só: nunca deveria crescer de verdade, isto é só
+      // um teto de segurança contra o Map crescer sem limite.
+      const oldestKey = verified.keys().next().value
+      if (oldestKey !== undefined) verified.delete(oldestKey)
+    }
+    verified.set(token, { userId, expiresAt: now + CACHE_TTL_MS })
+  }
+
+  if (userId !== ADMIN_USER_ID) return c.json({ error: 'acesso negado' }, 403)
 
   await next()
 }
