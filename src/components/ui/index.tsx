@@ -15,6 +15,7 @@ import { FilterSelect } from './FilterSelect'
 import { Assumptions } from './Assumptions'
 import { DropdownSelect } from './Dropdown'
 import { Skeleton } from './skeleton'
+import { subscribeToast } from '../../lib/toastBus'
 
 export { Icon, CategorySelect, FilterSelect, Assumptions }
 export type { IconName }
@@ -549,6 +550,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(() => push, [push])
+
+  // Bridges `api.ts` (a plain module — can't call useToast()) so a failed
+  // GET surfaces a toast even on a page that never wired its own onError.
+  useEffect(() => subscribeToast(push), [push])
 
   return (
     <ToastContext.Provider value={value}>

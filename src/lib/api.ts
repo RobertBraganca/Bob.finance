@@ -17,6 +17,7 @@
  */
 
 import { telemetry } from './telemetry'
+import { emitToast } from './toastBus'
 
 export class ApiError extends Error {
   constructor(
@@ -65,6 +66,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // representa qualquer fricção real de UX (validação, rota ainda não
     // portada, falha do backend) sem precisar anotar cada callsite.
     telemetry.error(functionFor(path), `http_${response.status}`, { path, message })
+    // GET failures are queries — until now nothing noticed when one failed,
+    // every EmptyState rendered identically to "sem dado" (achado da
+    // revisão de 28/08/2026). Mutations (post/put/patch/del) already carry
+    // their own per-call onError toast at the call site; auto-toasting
+    // those here too would double up the same failure.
+    if (!init?.method) emitToast(`Falha ao carregar dado: ${message}`, 'error')
     throw new ApiError(message, response.status, payload?.issues)
   }
   return payload as T
