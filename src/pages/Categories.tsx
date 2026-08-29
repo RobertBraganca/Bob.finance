@@ -19,15 +19,22 @@ import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { PageHeader } from '../components/shell/Shell'
 
 /**
- * The brand's own 4 categorical hues — the full set BOB.OS provides
- * outside red/yellow, which are reserved for status. A parent picks one
- * of these.
+ * 6 hues categóricas para grupos — as 4 originais da identidade visual
+ * (azul/rosa/verde/roxo) mais 2 novas (anil/âmbar), acrescentadas em
+ * 29/08/2026 a pedido do usuário para reduzir quanto cai em "Outras" nos
+ * gráficos. Vermelho e amarelo continuam de fora (reservados para status).
+ * Ordem e hex validados com o script de acessibilidade do skill de dataviz
+ * (`validate_palette.js`) contra os dois surfaces do app (#ffffff/#080808):
+ * pares adjacentes seguros para daltonismo (CVD ΔE >= 8) e contraste >= 3:1
+ * em ambos os modos — ver `chartTheme.ts` para as variantes de dark mode.
  */
 const PALETTE = [
   { hex: '#007bff', name: 'azul' },
   { hex: '#ff2ea6', name: 'rosa' },
   { hex: '#1e8e3c', name: 'verde' },
   { hex: '#ba2be2', name: 'roxo' },
+  { hex: '#1c93b0', name: 'anil' },
+  { hex: '#a8721f', name: 'âmbar' },
 ]
 
 const KIND_LABEL: Record<string, string> = {
@@ -303,9 +310,9 @@ function CategoryModal({
                 ))}
               </div>
               <span className="field__hint">
-                São as 4 cores da identidade visual, validadas para daltonismo. Vermelho e amarelo
-                ficam de fora por já serem usados em alertas de status; grupos além dessas 4
-                viram “Outras” nos gráficos.
+                São as 6 cores disponíveis para grupo, validadas para daltonismo. Vermelho e
+                amarelo ficam de fora por já serem usados em alertas de status; grupos além dessas
+                6 viram “Outras” nos gráficos.
               </span>
             </div>
           </>

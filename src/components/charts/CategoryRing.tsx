@@ -18,12 +18,12 @@ export type Slice = {
 }
 
 /**
- * Part-to-whole at a glance only. Capped at 4 — the brand identity's own
- * categorical set (blue/pink/green/purple) only has 4 safe hues, so past
- * that the tail folds into "Outras" rather than reusing a colour within
- * the same ring.
+ * Part-to-whole at a glance only. Capped at 6 — matches the group colour
+ * picker's own palette (`Categories.tsx` PALETTE, expanded from 4 to 6 on
+ * 29/08/2026), so past that the tail folds into "Outras" rather than
+ * reusing a colour within the same ring.
  */
-const MAX_SEGMENTS = 4
+const MAX_SEGMENTS = 6
 
 const SliceTooltip = makeTooltip<Slice>((slice) => ({
   title: slice.name,
