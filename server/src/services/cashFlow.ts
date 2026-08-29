@@ -286,6 +286,8 @@ export type PendingRow = {
   categoryId: number | null
   categoryName: string | null
   forecastId: number | null
+  /** the debt this installment/revolving charge materializes from, if any — was missing here (only forecastId was), so editing a debt-linked pending row from the Painel never asked the this/future/all scope (decisions/0029) */
+  debtId: number | null
   installmentLabel: string | null
   /** still pending from BEFORE the window's start — surfaced instead of dropped, so nothing gets silently forgotten across a month boundary */
   isOverdue: boolean
@@ -315,6 +317,7 @@ export async function listPending(flow: 'income' | 'expense', range?: { from: st
     categoryId: number | null
     categoryName: string | null
     forecastId: number | null
+    debtId: number | null
     forecastKind: string | null
     startPeriod: string | null
     installmentCount: number | null
@@ -325,7 +328,7 @@ export async function listPending(flow: 'income' | 'expense', range?: { from: st
       t.id, t.account_id as "accountId", a.name as "accountName", t.posted_on as "postedOn",
       t.description, t.amount_cents as "amountCents", t.direction,
       t.category_id as "categoryId", c.name as "categoryName",
-      t.forecast_id as "forecastId", f.kind as "forecastKind", f.start_period as "startPeriod",
+      t.forecast_id as "forecastId", t.debt_id as "debtId", f.kind as "forecastKind", f.start_period as "startPeriod",
       f.installment_count as "installmentCount", f.installments_realized as "installmentsRealized",
       t.manually_edited as "manuallyEdited"
     from transactions t
@@ -355,6 +358,7 @@ export async function listPending(flow: 'income' | 'expense', range?: { from: st
       categoryId: r.categoryId,
       categoryName: r.categoryName,
       forecastId: r.forecastId,
+      debtId: r.debtId,
       installmentLabel,
       isOverdue: range !== undefined && r.postedOn < range.from,
       manuallyEdited: r.manuallyEdited,

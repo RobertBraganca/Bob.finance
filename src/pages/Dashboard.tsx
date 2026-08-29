@@ -102,6 +102,7 @@ type PendingRow = {
   categoryId: number | null
   categoryName: string | null
   forecastId: number | null
+  debtId: number | null
   installmentLabel: string | null
   isOverdue: boolean
   manuallyEdited: boolean
@@ -1184,7 +1185,9 @@ function PendingListModal({
                       variant="quiet"
                       size="sm"
                       icon="trash"
-                      onClick={() => (r.forecastId !== null ? setScopeTarget(r) : remove.mutate({ id: r.id }))}
+                      onClick={() =>
+                        r.forecastId !== null || r.debtId !== null ? setScopeTarget(r) : remove.mutate({ id: r.id })
+                      }
                       disabled={remove.isPending}
                       title="Remover pendência"
                     />
@@ -1322,7 +1325,7 @@ function EditPendingModal({
     const amountCents = flow === 'income' ? Math.abs(rawCents ?? 0) : -Math.abs(rawCents ?? 0)
     const changesTemplateField =
       value.description.trim() !== row.description || amountCents !== row.amountCents || value.accountId !== row.accountId
-    if (row.forecastId !== null && changesTemplateField) setScopePrompt(true)
+    if ((row.forecastId !== null || row.debtId !== null) && changesTemplateField) setScopePrompt(true)
     else save.mutate(undefined)
   }
 

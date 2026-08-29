@@ -114,7 +114,11 @@ export async function listDebts(): Promise<DebtRow[]> {
  * kind, just counting from the debt_payments ledger instead of a
  * `installmentsRealized` column.
  */
-const MATERIALIZE_HORIZON_MONTHS = 6
+// decisions/0028 raised this to 24 for cashFlow.ts's forecasts; this file
+// was left at the old value (achado da revisão de 29/08/2026) — a debt
+// installment/revolving charge should have the same rolling window as a
+// recurring forecast, not a shorter one just because nobody updated it here.
+const MATERIALIZE_HORIZON_MONTHS = 24
 
 export async function materializeDebtInstallments(debtId: number): Promise<{ created: number }> {
   const debt = (await db.select().from(debts).where(eq(debts.id, debtId)))[0]

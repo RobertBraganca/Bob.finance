@@ -61,10 +61,19 @@ decidir se vale antecipar pagamento.
   a escolha padrão, para não subestimar o comprometimento com uma renda
   parcial.
 - **Dívida com `accountId` materializa parcela pendente** igual a um
-  `cashFlowForecast` — a mesma horizonte rolante de 6 meses, o mesmo
-  mecanismo de "não recriar o que foi excluído" (ver
-  `specs/cash-flow-reconciliation`). Sem conta associada, a dívida existe só
-  para projeção/cálculo, sem aparecer em "Despesas pendentes".
+  `cashFlowForecast` — a mesma horizonte rolante de 24 meses (`decisions/0028`;
+  este arquivo tinha ficado em 6, defasado desde que o cash-flow foi para 24 —
+  corrigido na revisão de 29/08/2026), o mesmo mecanismo de "não recriar o que
+  foi excluído" (ver `specs/cash-flow-reconciliation`). Sem conta associada, a
+  dívida existe só para projeção/cálculo, sem aparecer em "Despesas
+  pendentes".
+- **Editar uma parcela de dívida pendente pelo widget do Painel (Visão
+  geral) já pergunta o escopo** (`only`/`this_and_future`/`all`) — até
+  29/08/2026, `listPending` não devolvia `debtId` e o modal do Painel só
+  checava `forecastId`, então essa pergunta nunca disparava para dívida
+  vinda daquela tela especificamente (a mesma edição em Lançamentos já
+  funcionava). Corrigido nos dois pontos (edição e exclusão) do widget do
+  Painel.
 
 ## UI
 `Debt.tsx`: cards por dívida com parcelas pagas/restantes, modal de
