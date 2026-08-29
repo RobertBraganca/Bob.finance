@@ -66,6 +66,54 @@ const PROVENANCE: Record<string, string> = {
   none: '-',
 }
 
+/**
+ * `;` como delimitador (não `,`) porque o Excel em pt-BR já espera vírgula
+ * como separador decimal — um CSV com `,` como delimitador e valor
+ * monetário formatado (`R$ 1.234,56`) quebraria em colunas erradas.
+ */
+function csvField(value: string): string {
+  // Uma descrição de lançamento vem de banco/CSV importado ou digitação
+  // manual — nunca confiável o bastante para começar com =/+/-/@ sem
+  // neutralizar. Excel/LibreOffice/Sheets tratam uma célula assim como
+  // fórmula ao abrir o arquivo (CSV/formula injection); um apóstrofo na
+  // frente força texto literal sem mudar o valor visível.
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
+  return /[";\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
+}
+
+function transactionsToCsv(rows: Row[]): string {
+  const header = ['Data', 'Descrição', 'Categoria', 'Conta', 'Direção', 'Valor', 'Origem', 'Pendente']
+  const lines = rows.map((row) =>
+    [
+      fmtDate(row.postedOn),
+      row.description,
+      row.categoryName ?? row.rawCategory ?? '',
+      row.accountName ?? '',
+      row.direction === 'in' ? 'Entrada' : row.direction === 'out' ? 'Saída' : 'Transferência',
+      money(row.amountCents),
+      PROVENANCE[row.categorizedBy] ?? row.categorizedBy,
+      row.pending ? 'Sim' : 'Não',
+    ]
+      .map(csvField)
+      .join(';'),
+  )
+  // BOM no início: sem ele o Excel abre acento/"R$" como texto corrompido
+  // ao detectar a codificação errada de um CSV puro UTF-8.
+  return '﻿' + [header.join(';'), ...lines].join('\r\n')
+}
+
+function downloadCsv(filename: string, content: string) {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 export function TransactionsPage() {
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -158,6 +206,33 @@ export function TransactionsPage() {
 
   const rows = query.data?.rows ?? []
 
+  // Exporta TODO o filtro atual, não só a página de 100 visível na tela —
+  // uma segunda chamada com limit = total, não uma segunda fonte de dado.
+  const exportCsv = useMutation({
+    mutationFn: async () => {
+      const total = query.data?.total ?? 0
+      if (total === 0) throw new Error('nada para exportar com este filtro')
+      const all = await api.get<ListResponse>('/transactions', {
+        from: range.from,
+        to,
+        accountId: range.accountId,
+        search: search || undefined,
+        uncategorized: onlyUncategorized ? true : undefined,
+        direction: direction === 'transfer' ? undefined : direction,
+        categoryKind: direction === 'transfer' ? 'transfer' : undefined,
+        parentCategoryId: parentCategoryId ?? undefined,
+        limit: total,
+        offset: 0,
+      })
+      return all.rows
+    },
+    onSuccess: (allRows) => {
+      downloadCsv(`lancamentos-${range.from}-a-${to}.csv`, transactionsToCsv(allRows))
+      toast(`${allRows.length} lançamento(s) exportado(s)`)
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao exportar', 'error'),
+  })
+
   const remove = useMutation({
     mutationFn: ({ ids, scope }: { ids: number[]; scope?: PendingDeleteScope }) =>
       api.post<{ removed: number }>('/transactions/delete', { ids, scope }),
@@ -211,6 +286,15 @@ export function TransactionsPage() {
         actions={
           <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
             <RangeFilter />
+            <Button
+              variant="quiet"
+              icon="download"
+              onClick={() => exportCsv.mutate()}
+              disabled={exportCsv.isPending || (query.data?.total ?? 0) === 0}
+              title="Exportar lançamentos do período e filtros atuais para CSV"
+            >
+              Exportar CSV
+            </Button>
             <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
               Novo lançamento
             </Button>
@@ -308,7 +392,13 @@ export function TransactionsPage() {
               </div>
             </div>
 
-            {rows.length === 0 ? (
+            {query.isError ? (
+              <EmptyState
+                icon="alert"
+                title="Falha ao carregar lançamentos"
+                body="Não foi possível carregar os lançamentos agora. Tente novamente em instantes."
+              />
+            ) : rows.length === 0 ? (
               <EmptyState
                 icon="search"
                 title="Nenhum lançamento encontrado"
