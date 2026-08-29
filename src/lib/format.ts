@@ -68,8 +68,6 @@ const MONTHS_LONG = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
   'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
 ]
-const WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
-
 /** "2026-06-14" -> "14/06/2026" */
 export function date(iso: string | null): string {
   if (!iso) return '-'
@@ -95,12 +93,6 @@ export function periodLong(value: string): string {
   const [y, m] = value.split('-') as [string, string]
   return `${MONTHS_LONG[Number(m) - 1]} de ${y}`
 }
-
-export function weekdayOf(iso: string): number {
-  return new Date(`${iso}T12:00:00Z`).getUTCDay()
-}
-
-export const weekdayLabel = (index: number) => WEEKDAYS[index] ?? ''
 
 export function monthsLabel(months: number | null): string {
   if (months === null) return 'nunca'

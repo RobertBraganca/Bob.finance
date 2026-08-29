@@ -113,29 +113,6 @@ function hash(value: string): number {
   return h
 }
 
-/** Bucket a value onto the sequential ramp. Zero always means "no data". */
-export function rampStep(theme: ChartTheme, value: number, max: number): string {
-  if (value <= 0 || max <= 0) return theme.sequential[0]!
-  const steps = theme.sequential.length - 1
-  const index = Math.max(1, Math.min(steps, Math.ceil((value / max) * steps)))
-  return theme.sequential[index]!
-}
-
-/**
- * Calendar-heatmap steps (e.g. spend per day): a day with no spend is
- * `theme.neutral`, flat and unambiguous — never the palest blue, which in a
- * grid this dense would read as "a little" instead of "none". Every day
- * that DID spend gets `rampStep`'s brand-blue ramp: this is a neutral
- * "more data" quantity (see `rampStep`'s own note), not a risk signal, so
- * it never borrows the status (green/yellow/red) tokens.
- */
-export function heatmapStep(theme: ChartTheme, value: number, max: number): string {
-  return value <= 0 || max <= 0 ? theme.neutral : rampStep(theme, value, max)
-}
-
-/** `heatmapStep`'s fixed legend, low -> high: neutral, then the same ramp steps `rampStep` can actually land on. */
-export const heatmapScale = (theme: ChartTheme): readonly string[] => [theme.neutral, ...theme.sequential.slice(1)]
-
 /* ---- Fixed mark specs, applied to every chart -------------------- */
 export const MARK = {
   /** bars never fill their band — the leftover is deliberate air */

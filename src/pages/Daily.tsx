@@ -27,7 +27,7 @@ import {
 } from '../components/ui'
 import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
-import { SpendHeatmap } from '../components/charts/SpendHeatmap'
+import { SpendAreaChart } from '../components/charts/SpendAreaChart'
 
 type DailyResponse = {
   range: { from: string; to: string }
@@ -143,8 +143,8 @@ export function DailyPage() {
             </HeroFigure>
           </Slab>
 
-          <Slab span={8} title="Intensidade por dia" subtitle="Cada quadrado é um dia; quanto mais escuro, mais foi gasto">
-            <SpendHeatmap days={daily.data?.days ?? []} surface="paper" today={today} />
+          <Slab span={8} title="Intensidade por dia" subtitle="Gasto de cada dia do mês selecionado">
+            <SpendAreaChart days={daily.data?.days ?? []} surface="paper" />
           </Slab>
 
           <Card span={3}>
