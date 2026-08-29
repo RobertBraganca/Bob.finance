@@ -598,6 +598,45 @@
   color: var(--on-slab-2);
 }
 
+/* ---- Alert (avisos do termômetro mensal, ver `alert.tsx`) --------
+   Ao contrário do `.badge` acima (pastel fixo, nunca ajustado pro
+   tema escuro), aqui usamos color-mix() contra --surface — que já é
+   theme-aware (tokens.css redefine em [data-theme='dark']) — então o
+   fundo/borda acompanham o tema sozinhos, sem duplicar um segundo jogo
+   de hex. Corpo do texto fica em --ink-1 (nunca a cor de status pura):
+   "status nunca carrega significado só pela cor" já é regra do resto do
+   app (tokens.css). */
+.alert--good,
+.alert--warning,
+.alert--critical {
+  border-left-width: 3px;
+  color: var(--ink-1);
+}
+.alert--good {
+  background: color-mix(in srgb, var(--status-good) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--status-good) 35%, var(--line));
+  border-left-color: var(--status-good);
+}
+.alert--warning {
+  background: color-mix(in srgb, var(--status-warning) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--status-warning) 35%, var(--line));
+  border-left-color: var(--status-warning);
+}
+.alert--critical {
+  background: color-mix(in srgb, var(--status-critical) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--status-critical) 35%, var(--line));
+  border-left-color: var(--status-critical);
+}
+.alert--good svg {
+  color: var(--status-good);
+}
+.alert--warning svg {
+  color: var(--status-warning);
+}
+.alert--critical svg {
+  color: var(--status-critical);
+}
+
 .dot {
   width: 8px;
   height: 8px;
