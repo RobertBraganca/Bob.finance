@@ -160,18 +160,23 @@ usado em `Categories.tsx` para regras.
 ### Modelo de dados
 `projectQuotes` ganha `status: text default('draft')`, um dos
 `'draft' | 'sent' | 'in_review' | 'needs_changes' | 'rejected' | 'approved'`.
-Nenhuma tabela nova.
+`actualPriceCents` (nullable, adicionado 29/08/2026) guarda o valor de fato
+negociado com o cliente na aprovação, quando diferente do recomendado — sem
+ele, aprovar usa o recomendado, exatamente como antes. Nunca um valor solto:
+é sempre o mesmo que virou o lançamento real (bloqueado de editar depois,
+mesma regra que já trava horas/multiplicadores pós-aprovação).
 
 ### Contrato de API
 | Rota | Método | Observação |
 |---|---|---|
 | `/pricing/quotes/:id/status` | PATCH | `{status}` — muda o status |
-| `/pricing/quotes/:id/approve` | POST | `{accountId, paidOn}` → cria a `transaction` de receita e move `status` para `'approved'` na mesma chamada |
+| `/pricing/quotes/:id/approve` | POST | `{accountId, paidOn, actualPriceCents?}` → cria a `transaction` de receita (no valor de `actualPriceCents` se informado, senão `recommendedPriceCents`) e move `status` para `'approved'` na mesma chamada |
 
 ### Regras de negócio
 - **Aprovar cria um lançamento único de verdade** (`POST /transactions`
-  internamente, `amountCents = recommendedPriceCents`, direção entrada,
-  `source: 'manual'`), não um template recorrente — é a conversão simples
+  internamente, `amountCents = actualPriceCents ?? recommendedPriceCents`,
+  direção entrada, `source: 'manual'`), não um template recorrente — é a
+  conversão simples
   que não depende de `specs/client-projects` existir. A transação gravada
   carrega `sourceQuoteId` apontando de volta para esta cotação (coluna
   nullable em `transactions`, `on delete set null`) — sem isso, editar ou

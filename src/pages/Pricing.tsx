@@ -97,6 +97,7 @@ type Quote = {
   minimumPriceCents: number
   recommendedPriceCents: number
   premiumPriceCents: number
+  actualPriceCents: number | null
   status: QuoteStatus
   createdAt: string
   updatedAt: string
@@ -533,6 +534,7 @@ function QuotesTab() {
                   <th className="table__num">Hora base</th>
                   <th className="table__num">Mínimo</th>
                   <th className="table__num">Recomendado</th>
+                  <th className="table__num">Fechado por</th>
                   <th className="table__num">Premium</th>
                   <th>Status</th>
                   <th style={{ width: 96 }} />
@@ -548,6 +550,17 @@ function QuotesTab() {
                     <td className="table__num">{money(quote.minimumPriceCents)}</td>
                     <td className="table__num">
                       <strong>{money(quote.recommendedPriceCents)}</strong>
+                    </td>
+                    <td className="table__num">
+                      {quote.actualPriceCents === null ? (
+                        <span className="muted">—</span>
+                      ) : quote.actualPriceCents === quote.recommendedPriceCents ? (
+                        <span className="muted">{money(quote.actualPriceCents)}</span>
+                      ) : (
+                        <strong className={quote.actualPriceCents > quote.recommendedPriceCents ? 'pos' : 'neg'}>
+                          {money(quote.actualPriceCents)}
+                        </strong>
+                      )}
                     </td>
                     <td className="table__num muted">{money(quote.premiumPriceCents)}</td>
                     <td style={{ minWidth: 150 }}>
@@ -613,11 +626,21 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
   const accounts = useAccounts()
   const [accountId, setAccountId] = useState<number | null>(null)
   const [paidOn, setPaidOn] = useState(() => new Date().toISOString().slice(0, 10))
+  // Parte do recomendado — o usuário só digita algo diferente se o valor de
+  // fato fechado com o cliente divergiu (negociação, desconto, ajuste).
+  const [actualPrice, setActualPrice] = useState(() => centsToInput(quote.recommendedPriceCents))
+  const actualPriceCents = parseMoneyInput(actualPrice)
+  const actualDiffersFromRecommended = actualPriceCents !== null && actualPriceCents !== quote.recommendedPriceCents
 
   const approve = useMutation({
     mutationFn: () => {
       if (accountId === null) throw new Error('escolha a conta')
-      return api.post(`/pricing/quotes/${quote.id}/approve`, { accountId, paidOn })
+      if (actualPriceCents === null || actualPriceCents <= 0) throw new Error('informe o valor fechado')
+      return api.post(`/pricing/quotes/${quote.id}/approve`, {
+        accountId,
+        paidOn,
+        actualPriceCents,
+      })
     },
     onSuccess: () => {
       telemetry.action('pricing', 'quote_approved')
@@ -640,7 +663,7 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
           <Button
             variant="primary"
             icon="check"
-            disabled={accountId === null || approve.isPending}
+            disabled={accountId === null || !actualPriceCents || actualPriceCents <= 0 || approve.isPending}
             onClick={() => approve.mutate()}
           >
             Aprovar
@@ -650,9 +673,19 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
     >
       <div className="stack">
         <p className="chart__note">
-          Cria um lançamento de receita de {money(quote.recommendedPriceCents)} e move o status desta
-          cotação para "Aprovada".
+          Cria um lançamento de receita com o valor fechado abaixo (recomendado:{' '}
+          {money(quote.recommendedPriceCents)}) e move o status desta cotação para "Aprovada".
         </p>
+        <div className="field">
+          <label className="field__label">Valor fechado (R$)</label>
+          <TextInput value={actualPrice} onChange={setActualPrice} numeral />
+          {actualDiffersFromRecommended && (
+            <span className="field__hint">
+              Diferente do recomendado ({money(quote.recommendedPriceCents)}) — o recomendado continua
+              guardado para referência, só o lançamento usa este valor.
+            </span>
+          )}
+        </div>
         <div className="field">
           <label className="field__label">Conta</label>
           <Select

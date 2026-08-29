@@ -351,6 +351,7 @@ export type QuoteRow = {
   minimumPriceCents: number
   recommendedPriceCents: number
   premiumPriceCents: number
+  actualPriceCents: number | null
   status: QuoteStatus
   createdAt: string
   updatedAt: string
@@ -492,23 +493,40 @@ export async function setQuoteStatus(id: number, status: QuoteStatus): Promise<Q
  * `specs/client-projects` existing: one real income transaction, not a
  * recurring template. Blocked once already approved so the same quote can
  * never create the transaction twice.
+ *
+ * `actualPriceCents` (opcional) é o valor de fato negociado com o cliente,
+ * quando difere do recomendado — sem ele, o lançamento usa o recomendado,
+ * exatamente como antes. O valor gravado em `projectQuotes.actualPriceCents`
+ * é sempre o mesmo que foi de fato lançado no ledger (nunca um "valor real"
+ * solto que discorda do lançamento) — coerente com a mesma regra que já
+ * bloqueia editar horas/multiplicadores depois de aprovada.
  */
-export async function approveQuote(id: number, input: { accountId: number; paidOn: string }): Promise<QuoteRow> {
+export async function approveQuote(
+  id: number,
+  input: { accountId: number; paidOn: string; actualPriceCents?: number },
+): Promise<QuoteRow> {
   const quote = await getQuote(id)
   if (!quote) throw new PricingError('cotação não encontrada')
   if (quote.status === 'approved') throw new PricingError('esta cotação já foi aprovada')
+
+  const actualPriceCents = input.actualPriceCents ?? quote.recommendedPriceCents
+  if (actualPriceCents <= 0) throw new PricingError('valor fechado precisa ser maior que zero')
 
   await createTransaction({
     accountId: input.accountId,
     postedOn: input.paidOn,
     description: `Projeto: ${quote.clientLabel}`,
-    amountCents: Math.abs(quote.recommendedPriceCents),
+    amountCents: Math.abs(actualPriceCents),
     source: 'manual',
     sourceQuoteId: id,
   })
 
   const row = (
-    await db.update(projectQuotes).set({ status: 'approved' }).where(eq(projectQuotes.id, id)).returning()
+    await db
+      .update(projectQuotes)
+      .set({ status: 'approved', actualPriceCents })
+      .where(eq(projectQuotes.id, id))
+      .returning()
   )[0]!
   return toQuoteRow(row)
 }

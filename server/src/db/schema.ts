@@ -866,6 +866,8 @@ export const projectQuotes = pgTable(
     recommendedPriceCents: int('recommended_price_cents').notNull(),
     /** recommendedPriceCents × 1.3 — a third anchor point, never a fourth price the API lets you approve at (`services/pricing.ts`) */
     premiumPriceCents: int('premium_price_cents').notNull(),
+    /** what was actually negotiated at approval — null until approved; approveQuote defaults it to recommendedPriceCents when the user doesn't override it, never silently different from what the ledger transaction actually used */
+    actualPriceCents: int('actual_price_cents'),
     status: quoteStatusEnum('status').notNull().default('draft'),
     createdAt: text('created_at').notNull().default(now),
     /** Last edit, distinct from createdAt — decisions/0021, an edit recomputes the frozen numbers. */

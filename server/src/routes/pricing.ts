@@ -171,6 +171,7 @@ export async function pricingRoutes(app: FastifyInstance) {
       .object({
         accountId: z.number().int().positive(),
         paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        actualPriceCents: z.number().int().positive().optional(),
       })
       .parse(req.body)
     try {
