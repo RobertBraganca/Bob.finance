@@ -367,3 +367,62 @@ concentrados em código novo (`supabase/functions/`, `server/src/db/client.ts`)
 - **Limite de conexão do pooler**: fan-out concorrente (`Promise.all`) pode
   estourar o teto de conexões do pooler (session: 15 clientes; transação:
   trava sem erro em vez de rejeitar) — ver linha de dívida técnica acima.
+
+## Rodada de correções — teste manual pós-login (29/08/2026)
+
+Feedback do usuário testando o app já com login real em produção:
+
+- **Toast falso de "não autenticado" no primeiro carregamento**: `api.ts`
+  disparava `emitToast` em QUALQUER 401, mesmo quando era só a corrida
+  normal de largada entre `AuthProvider` terminar `getSession()` e a
+  primeira leva de queries do Painel disparar sem token ainda — o
+  `retry: 1` do QueryClient já resolvia sozinho ~1s depois, mas o toast já
+  tinha assustado o usuário por um erro que na prática nunca ficou sem
+  dado. Corrigido: só alarma um 401 que chegou com token de verdade
+  (sessão morta), não um sem token nenhum. Ver `src/lib/api.ts`.
+- **Exportar CSV falhava acima de 2000 lançamentos**: `Transactions.tsx`
+  pedia `limit: total` numa chamada só; o schema do endpoint
+  (`ledger/index.ts`, `.max(2000)`) rejeitava qualquer filtro com mais
+  linhas que isso — o que é rotina neste ledger de ~8 mil lançamentos reais
+  ao exportar um período largo. Corrigido: exportação agora pagina em
+  blocos de 2000.
+- **Dropdown cortado + tabela sempre com scroll interno**: `.table-wrap`
+  tinha `max-height: 620px; overflow: auto` fixo em TODA tabela do app,
+  independente de quantas linhas ela realmente tem — além de gerar barra
+  de rolagem redundante numa tabela curta, qualquer `Select`/dropdown
+  aberto perto do fim de uma linha era cortado por esse overflow (um
+  `position: absolute` é sempre clipado pelo ancestral mais próximo com
+  overflow non-visible, mesmo posicionado relativo a outro ancestral mais
+  interno). Corrigido em duas frentes: `.table-wrap` só rola no eixo X por
+  padrão agora (telas com lista realmente longa — Daily, Import — optam
+  por um teto vertical via `style` inline, não dependem mais do default);
+  e o painel do `DropdownSelect` (`Dropdown.tsx`) passou a ser portado via
+  `createPortal` pra `document.body`, posicionado em `fixed` a partir do
+  retângulo real do anchor (recalculado em scroll/resize) — nunca mais
+  clipado por overflow de nenhum ancestral (tabela ou modal). z-index do
+  painel subiu pra 90 (acima de `.overlay` 60 e `.toasts` 80) porque, uma
+  vez portado pra body, ele compete no stacking context da raiz, não mais
+  dentro do modal que o contém.
+- **Cores de categoria expandidas de 4 para 6**: `Categories.tsx` PALETTE
+  e `CategoryRing.tsx` MAX_SEGMENTS foram de 4 para 6 — 2 hues novas
+  (anil `#1c93b0`, âmbar `#a8721f`) validadas com o script do skill de
+  dataviz (`validate_palette.js`) contra os dois surfaces do app
+  (`#ffffff`/`#080808`), mantendo vermelho/amarelo reservados para status.
+  As 4 cores originais (identidade BOB.OS) ficaram como estavam.
+- **"Sobra em aportes" (unallocatedCents > 0) — investigado, não é bug**:
+  revisão do código (`investments.ts`, `suggestContribution`) confirma que
+  a redistribuição em rodadas (corrigida em 29/08/2026, ver seção anterior
+  "Padrões recorrentes de bug" / `decisions/0022`/`0019`) já cobre os dois
+  ramos (fecha todo gap e sobra vs. não fecha todo gap) — `unallocatedCents`
+  só fica positivo quando NENHUMA classe elegível consegue absorver mais:
+  ou toda classe com meta definida já está no alvo, ou os ativos restantes
+  não têm nota de resistência respondida. A mensagem que a tela mostra já
+  é exatamente essa explicação. Se o usuário via R$ 7.285,21 sem destino,
+  o caminho é o próprio usuário: definir meta pra mais uma classe, ou
+  responder critérios de mais ativos — não uma correção de código aqui.
+- **Travessão em texto de usuário**: regra "pt-BR sem travessão" (linha
+  339 acima) valia só na intenção — vários textos de UI (títulos, toasts,
+  hints) acumularam "—" ao longo das sessões. Varredura feita em `src/`
+  (comentários de código, deliberadamente, NÃO foram tocados — são
+  documentação pra dev, não "texto do projeto" do ponto de vista do
+  usuário).
