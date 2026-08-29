@@ -368,6 +368,11 @@ function SnapshotModal({ card, onClose }: { card: CardRow; onClose: () => void }
               <span className="field__hint">De um limite total de {money(card.creditLimitCents)}.</span>
             </div>
           </div>
+          <div className="row row--between">
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--on-slab-2)' }}>
+              {(usedBpsPreview / 100).toFixed(0)}% usado · {money(usedPreview)} de {money(card.creditLimitCents)}
+            </span>
+          </div>
           <Meter usedBps={usedBpsPreview} state={capUsageState(usedBpsPreview)} />
         </div>
         <DialogFooter>

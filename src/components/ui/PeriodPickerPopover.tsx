@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { Segmented } from './index'
+import { DateRangeFields, usePopoverDismiss } from './DateRangePopover'
 import { MONTHS_SHORT, date as fmtDate, periodLong as fmtPeriodLong } from '../../lib/format'
 import type { RangePreset } from '../../lib/store'
 
@@ -57,21 +58,7 @@ export function PeriodPickerPopover({
     setViewYear(Number(anchor.slice(0, 4)))
   }, [open, anchor])
 
-  useEffect(() => {
-    if (!open) return
-    const onDocClick = (event: MouseEvent) => {
-      if (anchorRef.current && !anchorRef.current.contains(event.target as Node)) setOpen(false)
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDocClick)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  usePopoverDismiss(open, anchorRef, () => setOpen(false))
 
   // The single calendar month this selection maps to, if any — drives
   // both the trigger label and which grid cell shows as selected.
@@ -121,31 +108,17 @@ export function PeriodPickerPopover({
           />
 
           {mode === 'custom' ? (
-            <>
-              <div className="field">
-                <label className="field__label">De</label>
-                <input className="input" type="date" value={draftFrom} onChange={(e) => setDraftFrom(e.target.value)} />
-              </div>
-              <div className="field">
-                <label className="field__label">Até</label>
-                <input className="input" type="date" value={draftTo} onChange={(e) => setDraftTo(e.target.value)} />
-              </div>
-              <div className="row row--between">
-                <button type="button" className="btn btn--quiet btn--sm" onClick={() => setOpen(false)}>
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--primary btn--sm"
-                  onClick={() => {
-                    onCustom(draftFrom, draftTo)
-                    setOpen(false)
-                  }}
-                >
-                  Aplicar
-                </button>
-              </div>
-            </>
+            <DateRangeFields
+              from={draftFrom}
+              to={draftTo}
+              onFromChange={setDraftFrom}
+              onToChange={setDraftTo}
+              onCancel={() => setOpen(false)}
+              onApply={() => {
+                onCustom(draftFrom, draftTo)
+                setOpen(false)
+              }}
+            />
           ) : (
             <>
               <div className="period-picker__year-nav">

@@ -1,5 +1,73 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Icon, type IconName } from './Icon'
+
+/**
+ * Close-on-outside-click + close-on-Escape, shared by every popover panel
+ * anchored to a `.popover-anchor` trigger (this file and PeriodPickerPopover,
+ * which used to each carry an identical copy of this effect).
+ */
+export function usePopoverDismiss(open: boolean, anchorRef: RefObject<HTMLElement | null>, onDismiss: () => void) {
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (event: MouseEvent) => {
+      if (anchorRef.current && !anchorRef.current.contains(event.target as Node)) onDismiss()
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onDismiss()
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, anchorRef, onDismiss])
+}
+
+/**
+ * The "De"/"Até" date field pair plus Cancelar/Aplicar footer — identical in
+ * this popover and in PeriodPickerPopover's "Personalizado" mode. Kept here,
+ * not duplicated, so a future change to this block (validation, a third
+ * field) only happens once.
+ */
+export function DateRangeFields({
+  from,
+  to,
+  onFromChange,
+  onToChange,
+  onCancel,
+  onApply,
+  applyLabel = 'Aplicar',
+}: {
+  from: string
+  to: string
+  onFromChange: (value: string) => void
+  onToChange: (value: string) => void
+  onCancel: () => void
+  onApply: () => void
+  applyLabel?: string
+}) {
+  return (
+    <>
+      <div className="field">
+        <label className="field__label">De</label>
+        <input className="input" type="date" value={from} onChange={(e) => onFromChange(e.target.value)} />
+      </div>
+      <div className="field">
+        <label className="field__label">Até</label>
+        <input className="input" type="date" value={to} onChange={(e) => onToChange(e.target.value)} />
+      </div>
+      <div className="row row--between" style={{ marginTop: 'var(--sp-1)' }}>
+        <button type="button" className="btn btn--quiet btn--sm" onClick={onCancel}>
+          Cancelar
+        </button>
+        <button type="button" className="btn btn--primary btn--sm" onClick={onApply}>
+          {applyLabel}
+        </button>
+      </div>
+    </>
+  )
+}
 
 /**
  * A compact trigger (same pill chrome as FilterSelect) that opens a small
@@ -30,21 +98,7 @@ export function DateRangePopover({
     setDraftTo(to)
   }, [from, to])
 
-  useEffect(() => {
-    if (!open) return
-    const onDocClick = (event: MouseEvent) => {
-      if (anchorRef.current && !anchorRef.current.contains(event.target as Node)) setOpen(false)
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDocClick)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  usePopoverDismiss(open, anchorRef, () => setOpen(false))
 
   return (
     <div className="popover-anchor" ref={anchorRef}>
@@ -55,29 +109,17 @@ export function DateRangePopover({
       </button>
       {open && (
         <div className="popover-panel" role="dialog" aria-label="Escolher período">
-          <div className="field">
-            <label className="field__label">De</label>
-            <input className="input" type="date" value={draftFrom} onChange={(e) => setDraftFrom(e.target.value)} />
-          </div>
-          <div className="field">
-            <label className="field__label">Até</label>
-            <input className="input" type="date" value={draftTo} onChange={(e) => setDraftTo(e.target.value)} />
-          </div>
-          <div className="row row--between" style={{ marginTop: 'var(--sp-1)' }}>
-            <button type="button" className="btn btn--quiet btn--sm" onClick={() => setOpen(false)}>
-              Cancelar
-            </button>
-            <button
-              type="button"
-              className="btn btn--primary btn--sm"
-              onClick={() => {
-                onApply(draftFrom, draftTo)
-                setOpen(false)
-              }}
-            >
-              Aplicar
-            </button>
-          </div>
+          <DateRangeFields
+            from={draftFrom}
+            to={draftTo}
+            onFromChange={setDraftFrom}
+            onToChange={setDraftTo}
+            onCancel={() => setOpen(false)}
+            onApply={() => {
+              onApply(draftFrom, draftTo)
+              setOpen(false)
+            }}
+          />
         </div>
       )}
     </div>
