@@ -23,6 +23,7 @@ import {
 } from '../ui/sidebar'
 import { useMeta, useRange } from '../../lib/store'
 import { useTheme } from '../../lib/theme'
+import { useAuth } from '../../lib/auth'
 import { date as fmtDate } from '../../lib/format'
 import logo from '../../assets/logo-red.svg'
 
@@ -78,6 +79,7 @@ export function Sidebar() {
   const { setOpenMobile } = useSidebar()
   const { theme, toggle } = useTheme()
   const isDark = theme === 'dark'
+  const { signOut } = useAuth()
   // Aberto por padrão se a rota atual já está em Configurações, ou se o
   // sinal de "comece aqui" (nenhum lançamento ainda) está ativo — do
   // contrário, começa fechado para não competir por espaço com o resto.
@@ -166,6 +168,12 @@ export function Sidebar() {
             <SidebarMenuButton tooltip={isDark ? 'Usar tema claro' : 'Usar tema escuro'} onClick={toggle}>
               <Icon name={isDark ? 'sun' : 'moon'} size={16} />
               <span>{isDark ? 'Tema claro' : 'Tema escuro'}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton tooltip="Sair" onClick={() => signOut()}>
+              <Icon name="logout" size={16} />
+              <span>Sair</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

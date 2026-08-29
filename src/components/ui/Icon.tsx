@@ -41,6 +41,7 @@ import {
   IconShieldFilled,
   IconWorldFilled,
   IconGripVertical,
+  IconLogout,
   type Icon as TablerIcon,
 } from '@tabler/icons-react'
 
@@ -123,6 +124,8 @@ const ICONS: Record<string, TablerIcon> = {
   // Drag handle for reordering — sem filled na Tabler, e não faria
   // diferença visual num ícone deste tamanho.
   grip: IconGripVertical,
+  // Sem "logout" filled na Tabler — outline mantido (login/29/08/2026).
+  logout: IconLogout,
 }
 
 export type IconName = keyof typeof ICONS

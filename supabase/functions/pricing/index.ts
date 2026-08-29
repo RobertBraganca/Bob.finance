@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { z, ZodError } from 'zod'
 import * as pricing from '../_shared/services/pricing.ts'
+import { requireAdmin } from '../_shared/auth.ts'
 
 /**
  * Precificação de projetos. Ver `specs/project-pricing`.
@@ -39,6 +40,7 @@ const simulateBody = z.object({
 const app = new Hono().basePath('/pricing')
 
 app.use('*', cors({ origin: '*' }))
+app.use('*', requireAdmin)
 
 // Zod falhando é problema do dado de entrada, não falha de servidor —
 // mesmo tratamento que o setErrorHandler do Fastify dava.
@@ -183,6 +185,7 @@ app.post('/quotes/:id/approve', async (c) => {
     .object({
       accountId: z.number().int().positive(),
       paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      actualPriceCents: z.number().int().positive().optional(),
     })
     .parse(await c.req.json())
   return c.json(await pricing.approveQuote(id, body))

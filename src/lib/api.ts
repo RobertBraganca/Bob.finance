@@ -18,6 +18,7 @@
 
 import { telemetry } from './telemetry'
 import { emitToast } from './toastBus'
+import { getAccessToken } from './authToken'
 
 export class ApiError extends Error {
   constructor(
@@ -48,11 +49,18 @@ function resolveUrl(path: string): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Edge Functions agora exigem uma sessão real (requireAdmin, ver
+  // supabase/functions/_shared/auth.ts) — a anon key sozinha não basta mais
+  // desde a revisão de 29/08/2026. Sem token (deslogado, ou ainda
+  // carregando a sessão), a chamada cai como 401 do próprio servidor, não
+  // fingida no cliente.
+  const accessToken = getAccessToken()
   const response = await fetch(resolveUrl(path), {
     ...init,
     headers: {
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
       ...(SUPABASE_ANON_KEY ? { apikey: SUPABASE_ANON_KEY } : {}),
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...init?.headers,
     },
   })

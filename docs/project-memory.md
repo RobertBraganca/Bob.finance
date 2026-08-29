@@ -2,8 +2,9 @@
 
 Lida e atualizada por `docs/PROJECT_REVIEWER.md` a cada sessão de revisão.
 Condensada, não um log — edite em vez de só adicionar. Última atualização:
-2026-08-28 (primeira revisão completa executada — ver seção de
-recomendações abaixo para o resultado).
+2026-08-29 (avaliação de um documento externo de feedback de usuário +
+correção dos bugs confirmados + duas features novas — ver seção de
+recomendações abaixo).
 
 ## Trabalho concorrente em outra sessão (observado, não desta sessão)
 
@@ -130,14 +131,28 @@ contra dado real.
 
 ## Segurança — estado registrado (não repetir a investigação do zero na próxima revisão)
 
-- Sem autenticação nenhuma; a anon key pública é o único portão de qualquer
-  Edge Function, todas com `cors({ origin: '*' })` e zero checagem de usuário
-  por requisição. RLS está ligada em todas as tabelas mas sem policy nenhuma
-  E é contornada de qualquer forma (conexão direta via `postgres-js`, não via
-  PostgREST) — o próprio comentário da migração já registra isso como
-  "defesa em profundidade, não o modelo de acesso real". Risco real para um
-  app de uma pessoa só SE a anon key vazar (está no bundle do cliente) e a
-  URL for descoberta — aceitável hoje, não defendido contra ator visado.
+- **Resolvida (29/08/2026, `decisions/0033`)**: ~~sem autenticação
+  nenhuma~~ — `pricing`, `insights`, `ledger` agora exigem uma sessão
+  Supabase Auth válida (`_shared/auth.ts`, `requireAdmin`), checada contra
+  o servidor de Auth (não só decodificação local), e o `user.id` precisa
+  bater com `ADMIN_USER_ID` fixo no código. Frontend ganhou tela de login
+  (`src/pages/Login.tsx`, `src/lib/auth.tsx`) e `App.tsx` não renderiza
+  nada do app sem sessão. Verificado ao vivo contra o projeto real: as três
+  funções devolvem 401 sem `Authorization` e com token inválido — **o
+  caminho de sucesso (login de verdade) não foi testado nesta sessão**, só
+  o usuário tem a senha.
+- RLS continua ligada em todas as tabelas mas sem policy nenhuma, e
+  continua contornada (conexão direta via `postgres-js`, não via
+  PostgREST) — a proteção real agora é o middleware acima, não RLS. Não
+  mudou, só deixou de ser a única linha de defesa.
+- Cadastro público de conta na API do Supabase Auth continua tecnicamente
+  possível (a plataforma permite por padrão; o app só não expõe tela para
+  isso) — não é brecha de acesso a dado (`requireAdmin` rejeita qualquer
+  UID que não seja o admin), só ruído. Desligar "Allow new users to
+  sign up" no painel (Authentication → Providers → Email) fecha isso,
+  deliberadamente não automatizado — ver `decisions/0033`, "Consequências".
+- **Fastify (`server/src/routes/*`) não ganhou este middleware** — nunca
+  teve rota exposta em produção, continua sem.
 - Upload de CSV na Edge Function não tem limite de tamanho de corpo (Fastify
   tinha 25MB via `bodyLimit`, o lado Hono não tem equivalente) — risco de
   custo/DoS, correção simples.
@@ -149,6 +164,64 @@ contra dado real.
   Vercel (poderia ser um controle de acesso real complementar).
 
 ## Recomendações anteriores e resultado
+
+**29/08/2026 — avaliação de um documento externo de feedback (usuário
+testou o app por ~10h e escreveu um PDF de observações)**. Cada ponto foi
+verificado contra o código antes de agir — vários já estavam implementados
+(cores consistentes de Meter, reajuste de saldo, status de precificação),
+um era mal-entendido (granularidade diária do gráfico), um era esclarecido
+sem ser bug (divergência do preset "Máximo"). Dos confirmados como reais:
+
+- **Escopo de edição de dívida no Painel (adotada, implementada)**:
+  `listPending` (`services/cashFlow.ts`, as duas árvores) nunca devolvia
+  `debtId` — só `forecastId` — então o modal de editar/excluir pendência no
+  Painel (`Dashboard.tsx`) nunca perguntava o escopo (`only`/
+  `this_and_future`/`all`) para uma parcela de dívida, só para forecast.
+  Mesmo bug em dois pontos (editar e excluir). A mesma tela em Lançamentos
+  já funcionava certo. Corrigido nos dois pontos; `debt.ts`'s
+  `MATERIALIZE_HORIZON_MONTHS` também corrigido de 6 para 24, defasado
+  desde `decisions/0028` (que só atualizou `cashFlow.ts`).
+- **Sobra de aporte não alocada, ramo "fecha todo gap" (adotada,
+  implementada)**: `decisions/0022` já tinha corrigido a redistribuição em
+  rodadas para o ramo "aporte não fecha todo gap"; o ramo do peso-alvo
+  (`decisions/0019`, quando fecha e sobra) fazia uma única passada, sem
+  repasse — mesmo defeito, nunca corrigido ali. Aplicado o mesmo algoritmo
+  de rodadas. Reproduz exatamente a queixa do usuário (R$38 mil de aporte,
+  ~R$8 mil parado).
+- **BRAPI para fundos/cripto/Tesouro**: usuário confirmou que não vale a
+  pena agora (exige plano pago da BRAPI) — não implementado, mantido como
+  limitação deliberada (`decisions/0006`), não dívida técnica.
+- **Impacto do aporte na meta, aba Aportar (nova feature, implementada)**:
+  pedido do usuário — ao informar um valor de aporte, mostrar por meta
+  ativa quanto isso adianta a conclusão e quanto cobre do gap de hoje.
+  Reusa `goalProjection` com um `extraContributionCents` opcional (nunca
+  uma segunda fórmula), novo campo `contributionShareOfGapBps`. Ver
+  `docs/specs/investments/spec.md`, seção "Impacto do aporte na meta".
+  Verificado ao vivo: meta "Consolidar 5k em reserva" com aporte de R$2.000
+  mostrou "alcança em set/26, em vez de out/26" e "cobre 62% do que falta".
+- **Valor fechado vs. recomendado na aprovação de cotação (nova feature,
+  implementada)**: pedido do usuário — aprovar pode registrar um valor
+  diferente do recomendado (negociação). `projectQuotes.actualPriceCents`
+  (nullable, backfilado para cotações já aprovadas = o recomendado, já que
+  foi o que de fato virou lançamento na época). `approveQuote` aceita
+  `actualPriceCents` opcional; sem ele, comportamento idêntico a antes.
+  Coluna "Fechado por" na tabela de histórico. Verificado ao vivo: modal
+  pré-preenche com o recomendado, editável.
+- **Formulário de pagamento de dívida (`DebtPaymentModal`) — não
+  "corrigido"**: na investigação, esse modal não é o mesmo tipo de entrada
+  que o formulário compartilhado (`TransactionForm`) — registra um evento
+  em `debtPayments` (parcela paga/novo uso), não necessariamente um
+  lançamento em `transactions`. Forçar categoria/conta nele sem também
+  fazê-lo criar um lançamento real seria adicionar campos que não
+  significam nada ali. Decisão: não mexer sem antes decidir com o usuário
+  se `debtPayments` deveria sempre gerar um lançamento real (mudança maior,
+  risco de duplicar contagem com a reconciliação que já existe) — deixado
+  em aberto, não implementado.
+- **Login via Supabase (sem Auth completo) + usuário admin**: pedido pelo
+  usuário, ainda não iniciado — escopo exato (proteger rotas já, ou só
+  preparar a tela?) foi levado de volta para o usuário antes de mexer,
+  dado o tamanho do raio de impacto (toda a postura de segurança hoje
+  registrada como "sem autenticação, RLS decorativo" assume isso).
 
 Primeira revisão completa, 2026-08-28 (ver relatório entregue ao usuário na
 sessão). Ações já executadas na mesma sessão, como resultado direto da

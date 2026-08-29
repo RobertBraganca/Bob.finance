@@ -4,6 +4,8 @@ import { Sidebar } from './components/shell/Shell'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from './components/ui/sidebar'
 import { Card, Icon } from './components/ui'
 import { telemetry } from './lib/telemetry'
+import { useAuth } from './lib/auth'
+import { LoginPage } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { DrePage } from './pages/Dre'
 import { ImportPage } from './pages/Import'
@@ -72,6 +74,14 @@ function usePageViewTelemetry() {
 
 export function App() {
   usePageViewTelemetry()
+  const { session, loading } = useAuth()
+
+  // Nada renderiza (nem a tela de login) até saber se já existe uma sessão
+  // salva — evita o flash de "login" antes do redirect silencioso de quem
+  // já estava logado.
+  if (loading) return null
+  if (!session) return <LoginPage />
+
   return (
     <SidebarProvider>
       <Sidebar />

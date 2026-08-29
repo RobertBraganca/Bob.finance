@@ -2,6 +2,7 @@ import '@supabase/functions-js/edge-runtime.d.ts'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { z, ZodError } from 'zod'
+import { requireAdmin } from '../_shared/auth.ts'
 import { addMonths, periodBounds, todayIso } from '../_shared/core/dates.ts'
 import * as analytics from '../_shared/services/analytics.ts'
 import * as benchmarksService from '../_shared/services/benchmarks.ts'
@@ -58,6 +59,7 @@ async function resolvePeriod(period?: string): Promise<string> {
 
 const app = new Hono().basePath('/insights')
 app.use('*', cors({ origin: '*' }))
+app.use('*', requireAdmin)
 
 app.onError((error, c) => {
   if (error instanceof ZodError) return c.json({ error: 'dados inválidos', issues: error.issues }, 400)
@@ -660,7 +662,8 @@ app.delete('/investments/goals/:id', async (c) => {
 
 app.get('/investments/goals/:id/projection', async (c) => {
   const { id } = idParam.parse(c.req.param())
-  const projection = await investments.goalProjection(id)
+  const query = z.object({ extraContributionCents: z.coerce.number().int().nonnegative().default(0) }).parse(c.req.query())
+  const projection = await investments.goalProjection(id, undefined, query.extraContributionCents)
   if (!projection) return c.json({ error: 'meta não encontrada' }, 404)
   return c.json(projection)
 })

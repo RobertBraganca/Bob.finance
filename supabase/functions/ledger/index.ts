@@ -4,6 +4,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { z, ZodError } from 'zod'
 import { eq, sql } from 'drizzle-orm'
+import { requireAdmin } from '../_shared/auth.ts'
 import { db, schema } from '../_shared/db/client.ts'
 import { profileConfigSchema, validateProfileShape } from '../_shared/csv/profile.ts'
 import * as categoriesService from '../_shared/services/categories.ts'
@@ -23,6 +24,7 @@ const idParam = z.object({ id: z.coerce.number().int().positive() })
 
 const app = new Hono().basePath('/ledger')
 app.use('*', cors({ origin: '*' }))
+app.use('*', requireAdmin)
 
 app.onError((error, c) => {
   if (error instanceof ZodError) return c.json({ error: 'dados inválidos', issues: error.issues }, 400)

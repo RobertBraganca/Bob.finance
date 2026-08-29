@@ -5,6 +5,7 @@
     "drizzle-orm": "npm:drizzle-orm@^0.45.2",
     "postgres": "npm:postgres@^3.4.9",
     "zod": "npm:zod@^4.4.3",
-    "papaparse": "npm:papaparse@^5.6.0"
+    "papaparse": "npm:papaparse@^5.6.0",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@^2"
   }
 }
