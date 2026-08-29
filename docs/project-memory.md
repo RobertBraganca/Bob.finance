@@ -426,3 +426,42 @@ Feedback do usuário testando o app já com login real em produção:
   (comentários de código, deliberadamente, NÃO foram tocados — são
   documentação pra dev, não "texto do projeto" do ponto de vista do
   usuário).
+
+## Otimização de performance (29/08/2026) — code splitting + N+1
+
+Usuário pediu formas de acelerar carregamento inicial, troca de tela,
+cálculo e busca. Dois pontos concretos, achados por medição (não palpite):
+build de produção com um bundle JS único (`vite build`) e leitura de
+código em `investments.ts`.
+
+- **Code splitting por rota** (`src/App.tsx`): as 14 telas eram import
+  estático — um bundle único de 1.428 KB (402 KB gzip) carregava inteiro
+  mesmo pra quem só abre o Painel. Cada página virou `lazy(() =>
+  import(...).then(m => ({default: m.XPage})))` (export nomeado, não
+  default — por isso o `.then`), com um `<Suspense>` genérico
+  (`RouteFallback`, reusa `PageSkeleton` já existente) em volta de
+  `<Routes>`. `LoginPage` continua import estático de propósito: é a
+  única coisa que precisa carregar antes de saber se existe sessão.
+  Resultado medido: entry chunk caiu pra 699 KB (210 KB gzip) — quase
+  metade — e cada tela (mais o Recharts que ela usa, via `frame.tsx`,
+  ~316 KB/95 KB gzip, compartilhado entre telas com gráfico) só baixa na
+  primeira visita, ficando em cache do navegador depois. Ainda dá pra
+  cortar mais separando vendor (React/Recharts) do código do app via
+  `build.rollupOptions.output.manualChunks` — não feito, é refinamento
+  de cache de longo prazo, não o ganho principal.
+- **N+1 em `suggestContribution`** (`investments.ts`, espelhado em
+  `server/src/services/` e `supabase/functions/_shared/services/`):
+  a função chamava `positions()` (JOIN+GROUP BY sobre TODOS os trades da
+  carteira, mais uma busca de notas) uma vez pro total (resultado
+  descartado) e MAIS UMA VEZ por classe de ativo dentro do
+  `assetAllocationWithinClass`, dentro de um `Promise.all` — N classes =
+  N+1 leituras idênticas da carteira inteira. `assetAllocationWithinClass`
+  ganhou um 3º parâmetro opcional `preloaded?: {allRows, classTargetBps}`
+  (callers standalone — rota de UI, `scripts/verify.ts` — continuam se
+  virando sozinhos sem passar nada) e passou a reusar a nota já anexada
+  em cada `Position` em vez de reconsultar `notesForAssets` da fatia da
+  classe. `suggestContribution` agora busca `positions()` uma única vez e
+  repassa pra cada classe do `Promise.all`. Não mexido: `reserveStatus()`
+  também chama `positions()` internamente e é usada standalone em 6+
+  lugares (rotas, `financialHealth.ts`, `financialEngine.ts`) — juntar
+  isso é um refactor à parte, maior que o N+1 pontual pedido aqui.
