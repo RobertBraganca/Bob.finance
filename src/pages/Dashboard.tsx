@@ -46,7 +46,7 @@ import {
   type MeterState,
   type PendingDeleteScope,
 } from '../components/ui'
-import { Alert, AlertAction, AlertDescription } from '../components/ui/alert'
+import { Alert, AlertAction, AlertDescription, AlertTitle } from '../components/ui/alert'
 import { PageHeader, RangeFilter } from '../components/shell/Shell'
 import { IncomeExpenseChart } from '../components/charts/IncomeExpenseChart'
 import { TransactionForm, type TransactionFormValue } from '../components/forms/TransactionForm'
@@ -664,23 +664,51 @@ type HomeBanner = { id: string; severity: HomeBannerSeverity } & (
   | { kind: 'trend_down'; deltaBps: number }
 )
 
-/** Frase pronta a partir do dado bruto do servidor — moeda/percentual sempre formatados aqui, nunca no backend. */
-function bannerMessage(b: HomeBanner): string {
+/**
+ * Título curto (escaneável) + descrição com o detalhe/números — mesma
+ * composição que a própria doc do shadcn usa em todo exemplo (nunca só
+ * AlertDescription sozinha: o CSS do componente assume um grid de 2
+ * linhas, ícone ocupando as duas via row-span — sem AlertTitle a grade
+ * não fecha e o layout sai torto). Moeda/percentual sempre formatados
+ * aqui, nunca no backend.
+ */
+function bannerContent(b: HomeBanner): { title: string; description: string } {
   switch (b.kind) {
     case 'spend_cap_exceeded':
-      return `Você já passou do teto de gasto do mês: ${money(b.spentCents)} de um teto de ${money(b.capCents)}.`
+      return {
+        title: 'Teto de gasto do mês estourado',
+        description: `${money(b.spentCents)} de um teto de ${money(b.capCents)}.`,
+      }
     case 'spend_cap_at_risk':
-      return `No ritmo atual, você deve fechar o mês em ${money(b.projectedCents)}, acima do teto de ${money(b.capCents)}.`
+      return {
+        title: 'No ritmo de estourar o teto do mês',
+        description: `Projeção de fechamento: ${money(b.projectedCents)}, acima do teto de ${money(b.capCents)}.`,
+      }
     case 'category_cap_exceeded':
-      return `Categoria ${b.categoryName} já passou do teto do mês: ${money(b.spentCents)} de ${money(b.capCents)}.`
+      return {
+        title: `Categoria ${b.categoryName} passou do teto`,
+        description: `${money(b.spentCents)} de ${money(b.capCents)} usados este mês.`,
+      }
     case 'category_cap_at_risk':
-      return `Categoria ${b.categoryName} está no ritmo de passar do teto do mês (${money(b.spentCents)} de ${money(b.capCents)} já usados).`
+      return {
+        title: `Categoria ${b.categoryName} no ritmo de passar do teto`,
+        description: `${money(b.spentCents)} de ${money(b.capCents)} já usados este mês.`,
+      }
     case 'category_concentration':
-      return `Categoria ${b.categoryName} representa ${bps(b.shareBps, 0)} dos seus gastos este mês.`
+      return {
+        title: `Categoria ${b.categoryName} concentra o gasto do mês`,
+        description: `Representa ${bps(b.shareBps, 0)} do total gasto este mês.`,
+      }
     case 'trend_up':
-      return `Seus gastos estão subindo: no ritmo atual, a projeção deste mês é ${bps(b.deltaBps, 0)} maior que o mês passado.`
+      return {
+        title: 'Seus gastos estão subindo',
+        description: `No ritmo atual, a projeção deste mês é ${bps(b.deltaBps, 0)} maior que o mês passado.`,
+      }
     case 'trend_down':
-      return `Seus gastos estão ${bps(Math.abs(b.deltaBps), 0)} menores que no mês passado, no ritmo atual.`
+      return {
+        title: 'Seus gastos estão em queda',
+        description: `No ritmo atual, ${bps(Math.abs(b.deltaBps), 0)} menores que no mês passado.`,
+      }
   }
 }
 
@@ -723,15 +751,19 @@ function HomeBanners() {
 
   return (
     <div className="stack stack--tight" style={{ marginBottom: 'var(--sp-4)' }}>
-      {banners.map((b) => (
-        <Alert key={b.id} variant={b.severity}>
-          <Icon name={BANNER_ICON[b.severity]} size={16} />
-          <AlertDescription style={{ color: 'inherit' }}>{bannerMessage(b)}</AlertDescription>
-          <AlertAction>
-            <Button variant="ghost" size="sm" icon="x" title="Dispensar por hoje" onClick={() => dismiss(b.id)} />
-          </AlertAction>
-        </Alert>
-      ))}
+      {banners.map((b) => {
+        const { title, description } = bannerContent(b)
+        return (
+          <Alert key={b.id} variant={b.severity}>
+            <Icon name={BANNER_ICON[b.severity]} size={16} />
+            <AlertTitle>{title}</AlertTitle>
+            <AlertDescription>{description}</AlertDescription>
+            <AlertAction>
+              <Button variant="ghost" size="sm" icon="x" title="Dispensar por hoje" onClick={() => dismiss(b.id)} />
+            </AlertAction>
+          </Alert>
+        )
+      })}
     </div>
   )
 }

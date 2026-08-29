@@ -599,33 +599,28 @@
 }
 
 /* ---- Alert (avisos do termômetro mensal, ver `alert.tsx`) --------
-   Ao contrário do `.badge` acima (pastel fixo, nunca ajustado pro
-   tema escuro), aqui usamos color-mix() contra --surface — que já é
-   theme-aware (tokens.css redefine em [data-theme='dark']) — então o
-   fundo/borda acompanham o tema sozinhos, sem duplicar um segundo jogo
-   de hex. Corpo do texto fica em --ink-1 (nunca a cor de status pura):
-   "status nunca carrega significado só pela cor" já é regra do resto do
-   app (tokens.css). */
-.alert--good,
-.alert--warning,
-.alert--critical {
-  border-left-width: 3px;
-  color: var(--ink-1);
-}
+   Mesmo padrão que a própria doc do shadcn recomenda pra cor customizada
+   ("Custom Colors": border-amber-200 bg-amber-50 text-amber-900) — borda
+   e fundo INTEIROS na cor de status, texto na mesma família (não uma
+   tarja só na borda esquerda, que não é o desenho do componente). Usamos
+   color-mix() contra --surface/--line (theme-aware, tokens.css redefine
+   em [data-theme='dark']) em vez de duplicar um segundo jogo de hex —
+   mesma ideia da doc, só com os tokens --status-* deste app no lugar da
+   paleta amber do Tailwind. */
 .alert--good {
   background: color-mix(in srgb, var(--status-good) 10%, var(--surface));
-  border-color: color-mix(in srgb, var(--status-good) 35%, var(--line));
-  border-left-color: var(--status-good);
+  border-color: color-mix(in srgb, var(--status-good) 40%, var(--line));
+  color: color-mix(in srgb, var(--status-good) 70%, var(--ink-1));
 }
 .alert--warning {
   background: color-mix(in srgb, var(--status-warning) 12%, var(--surface));
-  border-color: color-mix(in srgb, var(--status-warning) 35%, var(--line));
-  border-left-color: var(--status-warning);
+  border-color: color-mix(in srgb, var(--status-warning) 40%, var(--line));
+  color: color-mix(in srgb, var(--status-warning) 70%, var(--ink-1));
 }
 .alert--critical {
   background: color-mix(in srgb, var(--status-critical) 8%, var(--surface));
-  border-color: color-mix(in srgb, var(--status-critical) 35%, var(--line));
-  border-left-color: var(--status-critical);
+  border-color: color-mix(in srgb, var(--status-critical) 40%, var(--line));
+  color: color-mix(in srgb, var(--status-critical) 70%, var(--ink-1));
 }
 .alert--good svg {
   color: var(--status-good);
