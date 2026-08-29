@@ -340,6 +340,152 @@ export async function goalHistory(months = 12, accountId?: number | null) {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Home banners — "termômetro mensal"
+ *
+ * Avisos TEMPORÁRIOS e dispensáveis (não um card fixo — isso já existe,
+ * é "Modo mês" no Painel) que só aparecem quando há algo específico a
+ * dizer sobre o mês corrente: estourou (ou está no ritmo de estourar) o
+ * teto geral ou de uma categoria, uma categoria concentra boa parte do
+ * gasto, ou a projeção do mês foge muito do mês passado. Nunca um
+ * veredito ("você falhou") — sempre uma leitura do que já está
+ * acontecendo, mesma régua de "mês corrente sempre mostra progresso,
+ * nunca veredito prematuro". Retorna dado bruto (cents, bps, nome da
+ * categoria), não a frase pronta — a formatação de moeda/texto é sempre
+ * client-side (`lib/format.ts`), nunca duplicada aqui.
+ * ------------------------------------------------------------------ */
+export type BannerSeverity = 'good' | 'warning' | 'critical'
+
+export type HomeBanner = { id: string; severity: BannerSeverity } & (
+  | { kind: 'spend_cap_exceeded'; spentCents: number; capCents: number }
+  | { kind: 'spend_cap_at_risk'; projectedCents: number; capCents: number }
+  | { kind: 'category_cap_exceeded'; categoryName: string; spentCents: number; capCents: number }
+  | { kind: 'category_cap_at_risk'; categoryName: string; spentCents: number; capCents: number }
+  | { kind: 'category_concentration'; categoryName: string; shareBps: number }
+  | { kind: 'trend_up'; deltaBps: number }
+  | { kind: 'trend_down'; deltaBps: number }
+)
+
+/** Categoria concentrando mais que isso do gasto do mês vira aviso — abaixo disso é distribuição normal, não notícia. */
+const CONCENTRATION_AT_BPS = 4000
+/** Projeção de fechamento do mês comparada ao mês passado — dentro dessa faixa é variação normal, não notícia. */
+const TREND_UP_AT_BPS = 1500
+const TREND_DOWN_AT_BPS = -1000
+/** Nunca mais que isso ao mesmo tempo — "aviso" implica exceção, não um mural. */
+const MAX_BANNERS = 3
+
+/** Projeta o fechamento do mês pelo ritmo até agora — mesma ideia de `paceCents`, na direção oposta (dado o gasto real, qual o total esperado). */
+function projectMonthEnd(spentCentsSoFar: number, period: string): number {
+  const { daysElapsed, daysTotal } = dayCounts(period)
+  if (daysElapsed <= 0) return spentCentsSoFar
+  return Math.round((spentCentsSoFar / daysElapsed) * daysTotal)
+}
+
+export async function homeBanners(accountId?: number | null): Promise<HomeBanner[]> {
+  const currentPeriod = todayIso().slice(0, 7)
+  const lastPeriod = addMonths(currentPeriod, -1)
+  const { start, end } = periodBounds(currentPeriod)
+
+  // Sequencial de propósito, não Promise.all: `getPeriodProgress` sozinho já
+  // dispara 5 queries concorrentes, e rodar duas chamadas dela ao mesmo
+  // tempo (mais o category breakdown) empilha o suficiente pro pooler de
+  // transação desta Edge Function travar sem erro — mesmo achado que já
+  // forçou `goalHistory` (logo abaixo) a virar sequencial nesta árvore
+  // (nunca reproduzido no server Node/pooler de sessão). Esta rota roda a
+  // cada carregamento do Painel — mais frequente que goals-history — não
+  // vale arriscar o mesmo travamento aqui.
+  const current = await getPeriodProgress(currentPeriod, accountId)
+  const last = await getPeriodProgress(lastPeriod, accountId)
+  const concentration = await categoryBreakdown(
+    { from: start, to: end, accountId: accountId ?? null },
+    { flow: 'expense', level: 'parent' },
+  )
+
+  const banners: HomeBanner[] = []
+  const flaggedCategoryIds = new Set<number>()
+
+  // 1) Teto geral do mês — só quando o ritmo ou o total já preocupa.
+  const spend = current.progress.spend
+  if (spend.capCents !== null) {
+    if (spend.state === 'exceeded') {
+      banners.push({
+        id: 'spend-cap',
+        severity: 'critical',
+        kind: 'spend_cap_exceeded',
+        spentCents: spend.spentCents,
+        capCents: spend.capCents,
+      })
+    } else if (spend.state === 'at_risk') {
+      banners.push({
+        id: 'spend-cap',
+        severity: 'warning',
+        kind: 'spend_cap_at_risk',
+        projectedCents: projectMonthEnd(spend.spentCents, currentPeriod),
+        capCents: spend.capCents,
+      })
+    }
+  }
+
+  // 2) Pior categoria com teto (no máximo uma, a mais grave) — evita que
+  // 3+ categorias apertadas virem 3+ avisos separados sobre a mesma coisa.
+  const worstCap = [...current.caps]
+    .filter((c) => c.state === 'exceeded' || c.state === 'at_risk')
+    .sort((a, b) => b.usedBps - a.usedBps)[0]
+  if (worstCap) {
+    flaggedCategoryIds.add(worstCap.categoryId)
+    banners.push(
+      worstCap.state === 'exceeded'
+        ? {
+            id: `cap-${worstCap.categoryId}`,
+            severity: 'critical',
+            kind: 'category_cap_exceeded',
+            categoryName: worstCap.name,
+            spentCents: worstCap.spentCents,
+            capCents: worstCap.capCents,
+          }
+        : {
+            id: `cap-${worstCap.categoryId}`,
+            severity: 'warning',
+            kind: 'category_cap_at_risk',
+            categoryName: worstCap.name,
+            spentCents: worstCap.spentCents,
+            capCents: worstCap.capCents,
+          },
+    )
+  }
+
+  // 3) Concentração — observação neutra, independe de ter teto configurado;
+  // pula a categoria que já virou aviso de teto acima (mesma notícia, duas vezes).
+  const topCategory = concentration
+    .filter((c) => c.categoryId !== null && !flaggedCategoryIds.has(c.categoryId))
+    .sort((a, b) => b.shareBps - a.shareBps)[0]
+  if (topCategory && topCategory.shareBps >= CONCENTRATION_AT_BPS) {
+    banners.push({
+      id: `concentration-${topCategory.categoryId}`,
+      severity: 'warning',
+      kind: 'category_concentration',
+      categoryName: topCategory.name,
+      shareBps: topCategory.shareBps,
+    })
+  }
+
+  // 4) Tendência vs. mês passado — projeção de fechamento contra o total
+  // JÁ FECHADO do mês anterior, nunca o parcial de hoje contra o fechado
+  // (senão todo início de mês pareceria uma economia enorme).
+  if (last.actual.expenseCents > 0) {
+    const projectedCents = projectMonthEnd(current.actual.expenseCents, currentPeriod)
+    const deltaBps = Math.round(((projectedCents - last.actual.expenseCents) / last.actual.expenseCents) * 10_000)
+    if (deltaBps >= TREND_UP_AT_BPS) {
+      banners.push({ id: 'trend', severity: 'warning', kind: 'trend_up', deltaBps })
+    } else if (deltaBps <= TREND_DOWN_AT_BPS) {
+      banners.push({ id: 'trend', severity: 'good', kind: 'trend_down', deltaBps })
+    }
+  }
+
+  const rank: Record<BannerSeverity, number> = { critical: 0, warning: 1, good: 2 }
+  return banners.sort((a, b) => rank[a.severity] - rank[b.severity]).slice(0, MAX_BANNERS)
+}
+
 /** Suggests caps from the median of the last N months of actual spending. */
 export async function suggestCaps(period: string, lookbackMonths = 3) {
   const from = periodBounds(addMonths(period, -lookbackMonths)).start

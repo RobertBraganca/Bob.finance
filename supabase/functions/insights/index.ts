@@ -223,6 +223,9 @@ app.get('/goals-history', async (c) => {
   return c.json(await goalsService.goalHistory(query.months))
 })
 
+/** "Termômetro mensal" — avisos dispensáveis do Painel, ver goals.ts. */
+app.get('/home/banners', async (c) => c.json({ banners: await goalsService.homeBanners() }))
+
 /* ---------------------------------------------------------------- *
  * Debt
  * ---------------------------------------------------------------- */

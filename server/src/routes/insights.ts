@@ -227,6 +227,9 @@ export async function insightsRoutes(app: FastifyInstance) {
     return goalsService.goalHistory(query.months)
   })
 
+  /** "Termômetro mensal" — avisos dispensáveis do Painel, ver goals.ts. */
+  app.get('/home/banners', async () => ({ banners: await goalsService.homeBanners() }))
+
   /* ---------------------------------------------------------------- *
    * Debt
    * ---------------------------------------------------------------- */
