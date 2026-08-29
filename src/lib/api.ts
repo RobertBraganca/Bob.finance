@@ -74,12 +74,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // representa qualquer fricção real de UX (validação, rota ainda não
     // portada, falha do backend) sem precisar anotar cada callsite.
     telemetry.error(functionFor(path), `http_${response.status}`, { path, message })
+    // Um 401 sem token nenhum enviado (`accessToken` vazio) é o retrato
+    // normal da corrida de largada entre a sessão do Supabase terminar de
+    // carregar e a primeira leva de queries do Painel disparar — não uma
+    // falha real. `retry: 1` do QueryClient (main.tsx) já tenta de novo
+    // ~1s depois, quando o token já está pronto, e a tela carrega normal;
+    // sem este check o usuário via um toast de "não autenticado" mesmo
+    // quando nada realmente ficou sem dado (achado de 29/08/2026, teste
+    // manual pós-login). Um 401 com token enviado mesmo assim rejeitado
+    // ("sessão inválida ou expirada") é sessão morta de verdade — esse
+    // continua avisando.
+    const isStartupRace = response.status === 401 && !accessToken
     // GET failures are queries — until now nothing noticed when one failed,
     // every EmptyState rendered identically to "sem dado" (achado da
     // revisão de 28/08/2026). Mutations (post/put/patch/del) already carry
     // their own per-call onError toast at the call site; auto-toasting
     // those here too would double up the same failure.
-    if (!init?.method) emitToast(`Falha ao carregar dado: ${message}`, 'error')
+    if (!init?.method && !isStartupRace) emitToast(`Falha ao carregar dado: ${message}`, 'error')
     throw new ApiError(message, response.status, payload?.issues)
   }
   return payload as T
