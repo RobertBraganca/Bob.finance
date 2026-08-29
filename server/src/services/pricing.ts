@@ -146,10 +146,14 @@ export type AppliedMultiplier = {
   multiplierBps: number
 }
 
+/** Puramente informativo: um terceiro ponto de ancoragem para negociação, não um preço que `approveQuote` aceita — a aprovação sempre gera o lançamento no `recommendedPriceCents` (ver `docs/decisions/0012`-style: evidenciar, nunca prescrever). */
+const PREMIUM_MULTIPLIER_BPS = 13_000
+
 export type Simulation = {
   hourlyBaseCents: number
   minimumPriceCents: number
   recommendedPriceCents: number
+  premiumPriceCents: number
   breakdown: {
     period: string
     breakEvenCents: number
@@ -267,11 +271,15 @@ export async function simulate(input: SimulateInput): Promise<Simulation> {
   const extraMarginBps = input.extraMarginBps ?? 0
   const extraMarginCents = Math.round((priceWithTaxCents * extraMarginBps) / 10_000)
   const recommendedPriceCents = priceWithTaxCents + extraMarginCents
+  // Terceiro ponto de ancoragem, não um quarto preço aprovável — ver a
+  // constante acima.
+  const premiumPriceCents = Math.round((recommendedPriceCents * PREMIUM_MULTIPLIER_BPS) / 10_000)
 
   return {
     hourlyBaseCents,
     minimumPriceCents,
     recommendedPriceCents,
+    premiumPriceCents,
     breakdown: {
       period,
       breakEvenCents: breakEven.breakEvenCents,
@@ -293,7 +301,7 @@ export async function simulate(input: SimulateInput): Promise<Simulation> {
     multipliers,
     assumptions: {
       formula:
-        'hora base = (ponto de equilíbrio do mês menos os impostos) ÷ horas faturáveis; preço mínimo = horas estimadas × hora base; preço recomendado = (preço mínimo + custos diretos) × multiplicadores, com o imposto embutido no preço e a margem extra por cima',
+        'hora base = (ponto de equilíbrio do mês menos os impostos) ÷ horas faturáveis; preço mínimo = horas estimadas × hora base; preço recomendado = (preço mínimo + custos diretos) × multiplicadores, com o imposto embutido no preço e a margem extra por cima; preço premium = preço recomendado × 1,3 (referência de ancoragem para negociação, não um preço que a aprovação aceita)',
       periodo: period,
       pontoDeEquilibrioCents: breakEven.breakEvenCents,
       impostosNoPontoDeEquilibrioCents: taxesCents,
@@ -317,6 +325,7 @@ export async function simulate(input: SimulateInput): Promise<Simulation> {
       precoComImpostoCents: priceWithTaxCents,
       margemExtraBps: extraMarginBps,
       margemExtraCents: extraMarginCents,
+      precoPremiumCents: premiumPriceCents,
       origemDoPontoDeEquilibrio: 'specs/motor-financeiro (financialEngine.breakEven)',
     },
   }
@@ -341,6 +350,7 @@ export type QuoteRow = {
   hourlyBaseCents: number
   minimumPriceCents: number
   recommendedPriceCents: number
+  premiumPriceCents: number
   status: QuoteStatus
   createdAt: string
   updatedAt: string
@@ -374,6 +384,7 @@ export async function saveQuote(input: SimulateInput & { clientLabel: string }):
         hourlyBaseCents: result.hourlyBaseCents,
         minimumPriceCents: result.minimumPriceCents,
         recommendedPriceCents: result.recommendedPriceCents,
+        premiumPriceCents: result.premiumPriceCents,
       })
       .returning()
   )[0]!
@@ -449,6 +460,7 @@ export async function updateQuote(id: number, patch: QuoteEdit): Promise<QuoteRo
       hourlyBaseCents: result.hourlyBaseCents,
       minimumPriceCents: result.minimumPriceCents,
       recommendedPriceCents: result.recommendedPriceCents,
+      premiumPriceCents: result.premiumPriceCents,
     })
   }
 
@@ -492,6 +504,7 @@ export async function approveQuote(id: number, input: { accountId: number; paidO
     description: `Projeto: ${quote.clientLabel}`,
     amountCents: Math.abs(quote.recommendedPriceCents),
     source: 'manual',
+    sourceQuoteId: id,
   })
 
   const row = (

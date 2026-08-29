@@ -15,7 +15,9 @@ preço.
   isso à mão toda vez que um cliente pede orçamento.
 - Como usuário, eu quero informar horas estimadas, complexidade, urgência,
   porte do cliente e direitos de uso de um projeto e ver o preço mínimo
-  (nunca cobrar abaixo disso) e o preço recomendado.
+  (nunca cobrar abaixo disso), o preço recomendado e uma referência premium,
+  como três pontos de ancoragem para negociar, não como três opções que o
+  sistema me diz para escolher.
 - Como usuário, eu quero que os multiplicadores de complexidade, urgência,
   porte e direitos de uso sejam configuráveis por mim, não uma tabela fixa
   no código, porque o que é "projeto complexo" varia por área de atuação.
@@ -40,11 +42,16 @@ preço.
 - `projectQuotes` — histórico de simulações: rótulo/nome do cliente (texto
   livre — sem tabela de cliente ainda, ver Fora de escopo), horas
   estimadas, id de cada opção de multiplicador escolhida, custos diretos
-  informados (JSON, `{label, amountCents}[]`), e os três números de saída
-  (`horaBaseCents`, `precoMinimoCents`, `precoRecomendadoCents`) congelados
-  no momento da simulação — não recalculados depois, porque uma cotação
-  enviada a um cliente não deveria mudar de valor se o usuário editar seus
-  custos mensais na semana seguinte.
+  informados (JSON, `{label, amountCents}[]`), e os quatro números de saída
+  (`horaBaseCents`, `precoMinimoCents`, `precoRecomendadoCents`,
+  `premiumPriceCents`) congelados no momento da simulação — não
+  recalculados depois, porque uma cotação enviada a um cliente não deveria
+  mudar de valor se o usuário editar seus custos mensais na semana
+  seguinte. `premiumPriceCents` foi adicionado em 28/08/2026, avaliado a
+  partir do projeto BOB.OS (`calculadora-freelas`, que já calcula o mesmo
+  terceiro ponto) — coluna aditiva, backfilada para cotações já existentes
+  a partir do `recommendedPriceCents` já congelado (função determinística,
+  não um novo cálculo sobre dado histórico).
 
 ## Contrato de API
 | Rota | Método | Observação |
@@ -52,7 +59,7 @@ preço.
 | `/pricing/settings` | GET/PUT | Horas disponíveis e percentual faturável |
 | `/pricing/multipliers` | GET | Lista por dimensão, agrupado |
 | `/pricing/multipliers/:id` | POST/PATCH/DELETE | CRUD de uma opção |
-| `/pricing/simulate` | POST | `{estimatedHours, directCosts[], complexityId, urgencyId, clientSizeId, usageRightsId, extraMarginBps?}` → preço mínimo, recomendado, `premissas` — não grava nada |
+| `/pricing/simulate` | POST | `{estimatedHours, directCosts[], complexityId, urgencyId, clientSizeId, usageRightsId, extraMarginBps?}` → preço mínimo, recomendado, premium, `premissas` — não grava nada |
 | `/pricing/quotes` | GET/POST | Lista histórico / grava uma simulação como cotação |
 | `/pricing/quotes/:id` | GET/PATCH/DELETE | Editar rótulo, excluir |
 
@@ -83,6 +90,12 @@ os parâmetros para recalcular depois (ver Modelo de dados).
   profissional pretendia receber), mais margem extra opcional do próprio
   projeto (`extraMarginBps`, distinta da margem mensal já embutida na hora
   base).
+- **Preço premium = preço recomendado × 1,3 — só um terceiro ponto de
+  ancoragem, nunca um quarto preço que a aprovação aceita.** `approveQuote`
+  continua gerando o lançamento de receita sempre em `recommendedPriceCents`;
+  o premium existe só para o usuário ter uma referência de até onde puxar
+  numa negociação, sem o sistema sugerir ativamente que ele cobre mais
+  (mesmo princípio de "evidenciar, nunca prescrever" do PRD §4).
 - **Nenhum multiplicador é obrigatório ter todas as opções preenchidas** —
   uma dimensão sem nenhuma opção ativa (usuário apagou todas) usa
   multiplicador neutro (1.0×) para aquela dimensão, nunca bloqueia o
@@ -98,8 +111,8 @@ os parâmetros para recalcular depois (ver Modelo de dados).
 ## UI
 `Pricing.tsx` (rota `/precificacao`, grupo "Planejar" da navegação, ao lado
 de "Motor financeiro"): formulário de simulação (horas, custos diretos,
-quatro seletores de multiplicador), resultado com preço mínimo e
-recomendado lado a lado, disclosure "como calculamos" com a `premissas`,
+quatro seletores de multiplicador), resultado com preço mínimo, recomendado
+e premium lado a lado, disclosure "como calculamos" com a `premissas`,
 botão "salvar como cotação". Tela de configuração (`/pricing/settings` +
 CRUD de `/pricing/multipliers`) segue o mesmo padrão de edição em lista já
 usado em `Categories.tsx` para regras.
@@ -159,7 +172,12 @@ Nenhuma tabela nova.
 - **Aprovar cria um lançamento único de verdade** (`POST /transactions`
   internamente, `amountCents = recommendedPriceCents`, direção entrada,
   `source: 'manual'`), não um template recorrente — é a conversão simples
-  que não depende de `specs/client-projects` existir.
+  que não depende de `specs/client-projects` existir. A transação gravada
+  carrega `sourceQuoteId` apontando de volta para esta cotação (coluna
+  nullable em `transactions`, `on delete set null`) — sem isso, editar ou
+  apagar o lançamento depois deixava o orçamento aprovado sem nenhum jeito
+  de saber que sua receita tinha sumido (achado da revisão de 28/08/2026,
+  ver `docs/project-memory.md`).
 - **Status é sempre editável manualmente** para trás e para frente (ex.
   "aprovado" pode voltar para "em ajuste" se o cliente pedir mudança
   depois) — nunca uma máquina de estado travada.

@@ -69,6 +69,7 @@ type Simulation = {
   hourlyBaseCents: number
   minimumPriceCents: number
   recommendedPriceCents: number
+  premiumPriceCents: number
   breakdown: {
     period: string
     breakEvenCents: number
@@ -95,6 +96,7 @@ type Quote = {
   hourlyBaseCents: number
   minimumPriceCents: number
   recommendedPriceCents: number
+  premiumPriceCents: number
   status: QuoteStatus
   createdAt: string
   updatedAt: string
@@ -327,13 +329,19 @@ function SimulateTab() {
                 </span>
                 <span className="kv__v">{money(result.minimumPriceCents)}</span>
                 <span className="kv__k" style={{ color: 'var(--on-slab-2)' }}>
+                  Preço premium
+                </span>
+                <span className="kv__v">{money(result.premiumPriceCents)}</span>
+                <span className="kv__k" style={{ color: 'var(--on-slab-2)' }}>
                   Hora base
                 </span>
                 <span className="kv__v">{money(result.hourlyBaseCents)}</span>
               </div>
               <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-xs)' }}>
-                Considerando os parâmetros configurados, o preço mínimo é {money(result.minimumPriceCents)}{' '}
-                e o recomendado é {money(result.recommendedPriceCents)}.
+                Considerando os parâmetros configurados, o preço mínimo é {money(result.minimumPriceCents)},{' '}
+                o recomendado é {money(result.recommendedPriceCents)} e uma referência premium (30% acima do
+                recomendado) é {money(result.premiumPriceCents)} — três pontos de ancoragem, a decisão de
+                quanto cobrar continua sua.
               </p>
             </div>
           </Slab>
@@ -358,6 +366,8 @@ function SimulateTab() {
               <span className="kv__v">{bps(result.breakdown.taxRateBps)}</span>
               <span className="kv__k">Margem extra do projeto</span>
               <span className="kv__v">{bps(result.breakdown.extraMarginBps)}</span>
+              <span className="kv__k">Preço premium (recomendado × 1,3)</span>
+              <span className="kv__v">{money(result.premiumPriceCents)}</span>
             </div>
             <hr className="divider" />
             <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
@@ -451,6 +461,8 @@ function SaveQuoteModal({
           <span className="kv__v">{money(result.minimumPriceCents)}</span>
           <span className="kv__k">Preço recomendado</span>
           <span className="kv__v">{money(result.recommendedPriceCents)}</span>
+          <span className="kv__k">Preço premium</span>
+          <span className="kv__v">{money(result.premiumPriceCents)}</span>
         </div>
         <p className="chart__note">
           Os valores ficam congelados nesta cotação. Alterar seus custos mensais depois não muda um
@@ -498,7 +510,13 @@ function QuotesTab() {
   return (
     <div className="bento">
       <Card span={12} flush title="Cotações salvas" subtitle="Números congelados no momento de cada simulação">
-        {rows.length === 0 ? (
+        {quotes.isError ? (
+          <EmptyState
+            icon="alert"
+            title="Falha ao carregar"
+            body="Não foi possível carregar as cotações salvas agora. Tente novamente em instantes."
+          />
+        ) : rows.length === 0 ? (
           <EmptyState
             icon="file"
             title="Nenhuma cotação salva"
@@ -515,6 +533,7 @@ function QuotesTab() {
                   <th className="table__num">Hora base</th>
                   <th className="table__num">Mínimo</th>
                   <th className="table__num">Recomendado</th>
+                  <th className="table__num">Premium</th>
                   <th>Status</th>
                   <th style={{ width: 96 }} />
                 </tr>
@@ -530,6 +549,7 @@ function QuotesTab() {
                     <td className="table__num">
                       <strong>{money(quote.recommendedPriceCents)}</strong>
                     </td>
+                    <td className="table__num muted">{money(quote.premiumPriceCents)}</td>
                     <td style={{ minWidth: 150 }}>
                       <Select
                         value={quote.status}
@@ -755,6 +775,8 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
           <span className="kv__v">{money(quote.minimumPriceCents)}</span>
           <span className="kv__k">Preço recomendado (congelado hoje)</span>
           <span className="kv__v">{money(quote.recommendedPriceCents)}</span>
+          <span className="kv__k">Preço premium (congelado hoje)</span>
+          <span className="kv__v">{money(quote.premiumPriceCents)}</span>
         </div>
         {preview && (
           <div className="kv">
@@ -765,6 +787,10 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
             <span className="kv__k">Preço recomendado (recalculado agora)</span>
             <span className="kv__v">
               <strong>{money(preview.recommendedPriceCents)}</strong>
+            </span>
+            <span className="kv__k">Preço premium (recalculado agora)</span>
+            <span className="kv__v">
+              <strong>{money(preview.premiumPriceCents)}</strong>
             </span>
           </div>
         )}

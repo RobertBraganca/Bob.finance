@@ -171,26 +171,37 @@ export async function materializeDebtInstallments(debtId: number): Promise<{ cre
     const postedOn = `${period}-${String(day).padStart(2, '0')}`
     const description = debt.name
     const descriptionNorm = normalizeDescription(description)
-    await db.insert(transactions).values({
-      accountId: debt.accountId,
-      postedOn,
-      description,
-      descriptionNorm,
-      amountCents: -Math.abs(amountCents),
-      direction: directionOf(-Math.abs(amountCents)),
-      source: 'manual',
-      categorizedBy: 'none',
-      dedupeHash: dedupeHash({
+    // onConflictDoNothing is the authoritative guard against the race two
+    // concurrent materialization calls for the same debt can hit (both see
+    // "period missing" before either INSERT commits) — `existingPeriods`
+    // above is just a cheap pre-filter, not the real guarantee.
+    const inserted = await db
+      .insert(transactions)
+      .values({
         accountId: debt.accountId,
         postedOn,
-        amountCents: -Math.abs(amountCents),
+        description,
         descriptionNorm,
-      }),
-      pending: true,
-      debtId: debt.id,
-      occurrencePeriod: period,
-    })
-    created++
+        amountCents: -Math.abs(amountCents),
+        direction: directionOf(-Math.abs(amountCents)),
+        source: 'manual',
+        categorizedBy: 'none',
+        dedupeHash: dedupeHash({
+          accountId: debt.accountId,
+          postedOn,
+          amountCents: -Math.abs(amountCents),
+          descriptionNorm,
+        }),
+        pending: true,
+        debtId: debt.id,
+        occurrencePeriod: period,
+      })
+      .onConflictDoNothing({
+        target: [transactions.debtId, transactions.occurrencePeriod],
+        where: sql`${transactions.debtId} is not null`,
+      })
+      .returning({ id: transactions.id })
+    if (inserted.length > 0) created++
   }
   return { created }
 }

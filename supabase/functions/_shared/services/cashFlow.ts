@@ -139,23 +139,34 @@ export async function materialize(forecastId: number): Promise<{ created: number
     const postedOn = `${period}-${String(day).padStart(2, '0')}`
     const description = forecast.description
     const descriptionNorm = normalizeDescription(description)
-    await db.insert(transactions).values({
-      accountId: forecast.accountId,
-      postedOn,
-      description,
-      descriptionNorm,
-      amountCents: forecast.amountCents,
-      direction: directionOf(forecast.amountCents),
-      categoryId: forecast.categoryId,
-      source: 'manual',
-      categorizedBy: forecast.categoryId ? 'manual' : 'none',
-      dedupeHash: dedupeHash({ accountId: forecast.accountId, postedOn, amountCents: forecast.amountCents, descriptionNorm }),
-      pending: true,
-      forecastId: forecast.id,
-      occurrencePeriod: period,
-      notes: forecast.notes,
-    })
-    created++
+    // onConflictDoNothing is the authoritative guard against the race two
+    // concurrent materialize() calls for the same forecast can hit (both see
+    // "period missing" before either INSERT commits) — the `existing` Set
+    // above is just a cheap pre-filter, not the real guarantee.
+    const inserted = await db
+      .insert(transactions)
+      .values({
+        accountId: forecast.accountId,
+        postedOn,
+        description,
+        descriptionNorm,
+        amountCents: forecast.amountCents,
+        direction: directionOf(forecast.amountCents),
+        categoryId: forecast.categoryId,
+        source: 'manual',
+        categorizedBy: forecast.categoryId ? 'manual' : 'none',
+        dedupeHash: dedupeHash({ accountId: forecast.accountId, postedOn, amountCents: forecast.amountCents, descriptionNorm }),
+        pending: true,
+        forecastId: forecast.id,
+        occurrencePeriod: period,
+        notes: forecast.notes,
+      })
+      .onConflictDoNothing({
+        target: [transactions.forecastId, transactions.occurrencePeriod],
+        where: sql`${transactions.forecastId} is not null`,
+      })
+      .returning({ id: transactions.id })
+    if (inserted.length > 0) created++
   }
   return { created }
 }

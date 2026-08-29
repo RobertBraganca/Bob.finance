@@ -37,7 +37,14 @@ mercado real para ações e FIIs via BRAPI.
 - `assetValuations` — marcação a mercado por data; sem cotação, o custo
   médio é a referência (honesta, não escondida).
 - `investmentGoals`, `targetAllocations` — meta de valor/data e meta de
-  alocação por classe.
+  alocação por classe. `goalId` nulo em `targetAllocations` é a política
+  global (a única exposta na UI hoje, ver seção "Metas de investimento"
+  abaixo); unicidade garantida por dois índices únicos parciais,
+  `target_alloc_goal_uq` (`where goal_id is not null`) e
+  `target_alloc_global_uq` sobre só `assetClass` (`where goal_id is null`)
+  — um único índice não parcial sobre `(goalId, assetClass)` nunca
+  disparava para a política global, porque Postgres nunca considera dois
+  `NULL` iguais (achado da revisão de 28/08/2026).
 - `criteria`, `assetCriteriaAnswers` — banco de perguntas por classe e
   resposta sim/não por ativo ("Diagrama do Cerrado").
 - `emergencyReserveSettings` — múltiplo (6x/12x/24x), janela de meses para

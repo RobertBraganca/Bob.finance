@@ -340,6 +340,8 @@ export const transactions = pgTable(
     forecastId: int('forecast_id').references(() => cashFlowForecasts.id, { onDelete: 'cascade' }),
     /** the debt whose remaining parcela this row materializes, if any */
     debtId: int('debt_id').references(() => debts.id, { onDelete: 'cascade' }),
+    /** the approved quote whose revenue this row is, if any (decisions/0032 follow-up) */
+    sourceQuoteId: int('source_quote_id').references(() => projectQuotes.id, { onDelete: 'set null' }),
     /**
      * The YYYY-MM occurrence a materialized row fills, fixed at creation
      * time — independent of `postedOn`, which the user can freely edit
@@ -367,6 +369,19 @@ export const transactions = pgTable(
     index('txn_import_batch_idx').on(t.importBatchId),
     index('txn_forecast_idx').on(t.forecastId),
     index('txn_debt_idx').on(t.debtId),
+    index('txn_source_quote_idx').on(t.sourceQuoteId),
+    // Guards the race in materialize()/materializeDebtInstallments(): two
+    // concurrent calls both seeing "period missing" before either INSERT
+    // commits used to be able to double-insert the same pending occurrence.
+    // NULLs are never equal to each other in Postgres, so legacy rows
+    // materialized before occurrencePeriod existed (occurrence_period is
+    // null) never conflict with one another.
+    uniqueIndex('txn_forecast_occurrence_uq')
+      .on(t.forecastId, t.occurrencePeriod)
+      .where(sql`${t.forecastId} is not null`),
+    uniqueIndex('txn_debt_occurrence_uq')
+      .on(t.debtId, t.occurrencePeriod)
+      .where(sql`${t.debtId} is not null`),
   ],
 )
 
@@ -600,7 +615,18 @@ export const skippedOccurrences = pgTable(
   (t) => [
     index('skipped_occurrences_forecast_idx').on(t.forecastId),
     index('skipped_occurrences_debt_idx').on(t.debtId),
-    uniqueIndex('skipped_occurrences_uq').on(t.forecastId, t.debtId, t.period),
+    // Split in two, both partial: a plain unique index on (forecastId,
+    // debtId, period) never fires here, because forecastId/debtId are
+    // nullable and every real row has exactly one of them null — Postgres
+    // never treats two NULLs as equal, so the old single index gave false
+    // confidence while never actually deduping (found in the 28/08/2026
+    // review, same defect the txn_*_occurrence_uq indexes below had).
+    uniqueIndex('skipped_occurrences_forecast_uq')
+      .on(t.forecastId, t.period)
+      .where(sql`${t.forecastId} is not null`),
+    uniqueIndex('skipped_occurrences_debt_uq')
+      .on(t.debtId, t.period)
+      .where(sql`${t.debtId} is not null`),
   ],
 )
 
@@ -681,7 +707,19 @@ export const targetAllocations = pgTable(
     /** basis points of the portfolio: 3000 = 30% */
     targetBps: int('target_bps').notNull(),
   },
-  (t) => [index('target_allocations_goal_idx').on(t.goalId), uniqueIndex('target_alloc_uq').on(t.goalId, t.assetClass)],
+  (t) => [
+    index('target_allocations_goal_idx').on(t.goalId),
+    // Split in two, both partial: `goalId is null` means "global policy"
+    // (a real, used case, not an absence of one) — a plain unique index on
+    // (goalId, assetClass) never fires for those rows, same NULL-defeats-
+    // uniqueness defect as skipped_occurrences above.
+    uniqueIndex('target_alloc_goal_uq')
+      .on(t.goalId, t.assetClass)
+      .where(sql`${t.goalId} is not null`),
+    uniqueIndex('target_alloc_global_uq')
+      .on(t.assetClass)
+      .where(sql`${t.goalId} is null`),
+  ],
 )
 
 /* ------------------------------------------------------------------ *
@@ -826,6 +864,8 @@ export const projectQuotes = pgTable(
     hourlyBaseCents: int('hourly_base_cents').notNull(),
     minimumPriceCents: int('minimum_price_cents').notNull(),
     recommendedPriceCents: int('recommended_price_cents').notNull(),
+    /** recommendedPriceCents × 1.3 — a third anchor point, never a fourth price the API lets you approve at (`services/pricing.ts`) */
+    premiumPriceCents: int('premium_price_cents').notNull(),
     status: quoteStatusEnum('status').notNull().default('draft'),
     createdAt: text('created_at').notNull().default(now),
     /** Last edit, distinct from createdAt — decisions/0021, an edit recomputes the frozen numbers. */

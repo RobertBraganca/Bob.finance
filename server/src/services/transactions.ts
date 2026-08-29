@@ -266,6 +266,8 @@ export type ManualEntry = {
   categoryId?: number | null
   notes?: string | null
   source?: 'manual' | 'daily' | 'adjustment'
+  /** the approved quote this revenue came from, if any */
+  sourceQuoteId?: number | null
 }
 
 /** Quick-add path used by both the daily tracker and the manual entry form. */
@@ -292,6 +294,7 @@ export async function createTransaction(entry: ManualEntry) {
         source: entry.source ?? 'manual',
         categorizedBy: entry.categoryId ? 'manual' : 'none',
         dedupeHash: hash,
+        sourceQuoteId: entry.sourceQuoteId ?? null,
       })
       .returning()
   )[0]!

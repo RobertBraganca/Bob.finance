@@ -39,13 +39,30 @@ nem aplicar a conciliação sozinha.
   linha preenche, independente da `postedOn` — que o usuário pode editar
   livremente (ex. corrigir a data real de pagamento) sem que a próxima
   materialização confunda "a data mudou" com "essa ocorrência nunca foi
-  preenchida" e recrie uma duplicata para o mês esvaziado.
+  preenchida" e recrie uma duplicata para o mês esvaziado. A unicidade de
+  `(forecastId, occurrencePeriod)` é garantida por um índice único parcial
+  no banco (`txn_forecast_occurrence_uq`, `where forecast_id is not null`),
+  não só pela checagem em memória que `materialize()` já fazia — duas
+  chamadas concorrentes (duas abas, um retry) que vissem "período ausente"
+  antes de qualquer INSERT confirmar podiam duplicar a mesma pendência;
+  `onConflictDoNothing` no insert é a garantia real agora, a checagem em
+  memória continua só como filtro barato (achado da revisão de
+  28/08/2026, ver `docs/project-memory.md`). O equivalente para dívida
+  (`debtId`, `txn_debt_occurrence_uq`) segue a mesma regra — ver
+  `specs/debt`.
 - `skippedOccurrences` — `(forecastId | debtId, period)` que o usuário
   excluiu explicitamente de uma pendência materializada. Sem isso, excluir
   uma pendência pareceria não funcionar: a próxima materialização recriaria
   a mesma linha, porque só sabia dizer "existe uma linha para este
   período?", nunca "o usuário decidiu que este período não é para
-  materializar".
+  materializar". Unicidade garantida por dois índices únicos parciais,
+  `skipped_occurrences_forecast_uq`/`skipped_occurrences_debt_uq`
+  (`where forecast_id/debt_id is not null`) — um único índice não parcial
+  sobre `(forecastId, debtId, period)` nunca dispararia de verdade, porque
+  toda linha real tem exatamente uma das duas colunas `NULL` e Postgres
+  nunca considera dois `NULL` iguais (achado da revisão de 28/08/2026,
+  corrigido na mesma sessão que corrigiu o mesmo defeito em
+  `txn_forecast_occurrence_uq`/`txn_debt_occurrence_uq` acima).
 
 ## Contrato de API
 | Rota | Método | Observação |
