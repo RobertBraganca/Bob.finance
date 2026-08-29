@@ -1,25 +1,54 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/shell/Shell'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from './components/ui/sidebar'
-import { Card, Icon } from './components/ui'
+import { Card, Icon, PageSkeleton } from './components/ui'
 import { telemetry } from './lib/telemetry'
 import { useAuth } from './lib/auth'
 import { LoginPage } from './pages/Login'
-import { Dashboard } from './pages/Dashboard'
-import { DrePage } from './pages/Dre'
-import { ImportPage } from './pages/Import'
-import { TransactionsPage } from './pages/Transactions'
-import { CategoriesPage } from './pages/Categories'
-import { DailyPage } from './pages/Daily'
-import { GoalsPage } from './pages/Goals'
-import { DebtPage } from './pages/Debt'
-import { CreditCardsPage } from './pages/CreditCards'
-import { InvestmentsPage } from './pages/Investments'
-import { FinancialHealthPage } from './pages/FinancialHealth'
-import { FinancialEnginePage } from './pages/FinancialEngine'
-import { PricingPage } from './pages/Pricing'
-import { SettingsPage } from './pages/Settings'
+
+/**
+ * Uma tela por rota, carregada só na primeira visita — antes disto, o
+ * build de produção gerava um bundle único de ~1,4 MB (402 KB gzip) com as
+ * 14 telas inteiras, mesmo pra quem só abre o Painel (achado de 29/08/2026).
+ * `LoginPage` acima fica de fora de propósito: é a única coisa que TEM que
+ * carregar antes de saber se existe sessão, então adiá-la só atrasaria o
+ * próprio login. Cada `import()` resolve pro módulo inteiro da página — o
+ * `.then` extrai só o export nomeado que `React.lazy` precisa (`default`).
+ */
+const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })))
+const DrePage = lazy(() => import('./pages/Dre').then((m) => ({ default: m.DrePage })))
+const ImportPage = lazy(() => import('./pages/Import').then((m) => ({ default: m.ImportPage })))
+const TransactionsPage = lazy(() => import('./pages/Transactions').then((m) => ({ default: m.TransactionsPage })))
+const CategoriesPage = lazy(() => import('./pages/Categories').then((m) => ({ default: m.CategoriesPage })))
+const DailyPage = lazy(() => import('./pages/Daily').then((m) => ({ default: m.DailyPage })))
+const GoalsPage = lazy(() => import('./pages/Goals').then((m) => ({ default: m.GoalsPage })))
+const DebtPage = lazy(() => import('./pages/Debt').then((m) => ({ default: m.DebtPage })))
+const CreditCardsPage = lazy(() => import('./pages/CreditCards').then((m) => ({ default: m.CreditCardsPage })))
+const InvestmentsPage = lazy(() => import('./pages/Investments').then((m) => ({ default: m.InvestmentsPage })))
+const FinancialHealthPage = lazy(() =>
+  import('./pages/FinancialHealth').then((m) => ({ default: m.FinancialHealthPage })),
+)
+const FinancialEnginePage = lazy(() =>
+  import('./pages/FinancialEngine').then((m) => ({ default: m.FinancialEnginePage })),
+)
+const PricingPage = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.PricingPage })))
+const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })))
+
+/** Fallback do Suspense enquanto o chunk da rota baixa — só aparece na
+ * primeira visita a cada tela (chunk fica em cache do navegador depois).
+ * Genérico de propósito: não sabe ainda qual tela está vindo. */
+function RouteFallback() {
+  return (
+    <PageSkeleton
+      cards={[
+        { span: 12, variant: 'block', height: 120 },
+        { span: 6, variant: 'lines', lines: 4 },
+        { span: 6, variant: 'lines', lines: 4 },
+      ]}
+    />
+  )
+}
 
 /**
  * `.claude/launch.json` keeps `autoPort: true` on purpose (vite.config.ts's
@@ -92,22 +121,24 @@ export function App() {
         </div>
         <div className="main">
           <PortWarning />
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/diario" element={<DailyPage />} />
-            <Route path="/lancamentos" element={<TransactionsPage />} />
-            <Route path="/dre" element={<DrePage />} />
-            <Route path="/metas" element={<GoalsPage />} />
-            <Route path="/dividas" element={<DebtPage />} />
-            <Route path="/cartoes" element={<CreditCardsPage />} />
-            <Route path="/investimentos" element={<InvestmentsPage />} />
-            <Route path="/saude" element={<FinancialHealthPage />} />
-            <Route path="/motor" element={<FinancialEnginePage />} />
-            <Route path="/precificacao" element={<PricingPage />} />
-            <Route path="/importar" element={<ImportPage />} />
-            <Route path="/categorias" element={<CategoriesPage />} />
-            <Route path="/ajustes" element={<SettingsPage />} />
-          </Routes>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/diario" element={<DailyPage />} />
+              <Route path="/lancamentos" element={<TransactionsPage />} />
+              <Route path="/dre" element={<DrePage />} />
+              <Route path="/metas" element={<GoalsPage />} />
+              <Route path="/dividas" element={<DebtPage />} />
+              <Route path="/cartoes" element={<CreditCardsPage />} />
+              <Route path="/investimentos" element={<InvestmentsPage />} />
+              <Route path="/saude" element={<FinancialHealthPage />} />
+              <Route path="/motor" element={<FinancialEnginePage />} />
+              <Route path="/precificacao" element={<PricingPage />} />
+              <Route path="/importar" element={<ImportPage />} />
+              <Route path="/categorias" element={<CategoriesPage />} />
+              <Route path="/ajustes" element={<SettingsPage />} />
+            </Routes>
+          </Suspense>
         </div>
       </SidebarInset>
     </SidebarProvider>
