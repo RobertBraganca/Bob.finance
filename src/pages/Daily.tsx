@@ -330,7 +330,7 @@ function RecentDaily({ period }: { period: string }) {
           body="Use o formulário acima para registrar gastos do dia a dia."
         />
       ) : (
-        <div className="table-wrap" style={{ maxHeight: 360 }}>
+        <div className="table-wrap" style={{ maxHeight: 360, overflowY: 'auto' }}>
           <table className="table">
             <thead>
               <tr>

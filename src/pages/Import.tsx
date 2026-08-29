@@ -565,7 +565,10 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
             </div>
           </div>
 
-          <div className="table-wrap" style={{ maxHeight: 420, border: '1px solid var(--line)', borderRadius: 'var(--r-md)' }}>
+          <div
+            className="table-wrap"
+            style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 'var(--r-md)' }}
+          >
             <table className="table">
               <thead>
                 <tr>

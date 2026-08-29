@@ -447,11 +447,15 @@
   min-width: 0;
 }
 .dropdown-panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 50;
-  min-width: 100%;
+  /* position/top/left vêm inline (Dropdown.tsx) — o painel é portado para
+     document.body e posicionado em `fixed` a partir do retângulo real do
+     anchor, para nunca ser cortado por um ancestral com overflow (tabela,
+     modal). Por ser portado direto pra body (irmão de `.overlay`, não mais
+     descendente dela), o z-index compete no stacking context da raiz —
+     precisa ficar ACIMA de `.overlay` (60) e `.toasts` (80), senão um
+     Select aberto dentro de um Modal renderizava atrás do próprio backdrop
+     do modal. */
+  z-index: 90;
   max-width: min(360px, 90vw);
   max-height: 320px;
   overflow-y: auto;
@@ -663,9 +667,15 @@
   background: #fdf3e0;
 }
 
+/* Só rolagem horizontal por padrão — uma tabela curta (a maioria) deve
+   abrir inteira, deixando a PÁGINA rolar, não uma caixa interna com altura
+   fixa arbitrária. Além de gerar barra de rolagem redundante, uma altura
+   fixa cortava qualquer dropdown aberto perto do fim da tabela (corrigido
+   à parte, ver `.dropdown-panel`). Uma tela com lista realmente longa
+   (Daily, Import) opta por um teto vertical via `style` inline, com
+   `overflowY: 'auto'` explícito — não depende mais deste default. */
 .table-wrap {
-  max-height: 620px;
-  overflow: auto;
+  overflow-x: auto;
 }
 
 /* ---- Collapsible asset-class group card -------------------------- */

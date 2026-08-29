@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ')
@@ -43,6 +44,13 @@ export function DropdownSelect<T extends string | number>({
   const panelRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [typeahead, setTypeahead] = useState('')
+  // Painel sai do fluxo do anchor via portal (ver comentário acima do
+  // `.dropdown-panel` mais abaixo) — sem isto, qualquer ancestral com
+  // overflow:auto (tabela, modal) corta o painel no meio, mesmo ele sendo
+  // um `position: absolute` "correto" dentro do próprio anchor.
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(
+    null,
+  )
 
   const flat = useMemo(() => groups.flatMap((g) => g.options), [groups])
   const currentFlatIndex = flat.findIndex((o) => o.value === value)
@@ -57,7 +65,14 @@ export function DropdownSelect<T extends string | number>({
   useEffect(() => {
     if (!open) return
     const onDocMouseDown = (event: MouseEvent) => {
-      if (anchorRef.current && !anchorRef.current.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Node
+      // O painel mora fora do anchor no DOM (portal), então "dentro" agora
+      // significa dentro do anchor OU dentro do painel — sem o segundo
+      // check, o próprio clique numa opção fecharia o painel antes do
+      // onClick da opção rodar.
+      if (anchorRef.current?.contains(target)) return
+      if (panelRef.current?.contains(target)) return
+      setOpen(false)
     }
     document.addEventListener('mousedown', onDocMouseDown)
     return () => document.removeEventListener('mousedown', onDocMouseDown)
@@ -67,6 +82,35 @@ export function DropdownSelect<T extends string | number>({
     if (!open) return
     const el = panelRef.current?.querySelector('[data-highlighted="true"]') as HTMLElement | null
     el?.scrollIntoView({ block: 'nearest' })
+  }, [open, highlighted])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const GAP = 4
+    const VIEWPORT_MARGIN = 8
+    const updatePosition = () => {
+      const anchor = anchorRef.current
+      if (!anchor) return
+      const rect = anchor.getBoundingClientRect()
+      const panelHeight = panelRef.current?.offsetHeight ?? 0
+      const openUp = rect.bottom + GAP + panelHeight > window.innerHeight && rect.top > panelHeight
+      const estimatedWidth = Math.min(Math.max(rect.width, 200), Math.min(360, window.innerWidth * 0.9))
+      const maxLeft = window.innerWidth - VIEWPORT_MARGIN - estimatedWidth
+      const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, maxLeft))
+      const top = openUp ? rect.top - GAP - panelHeight : rect.bottom + GAP
+      setPanelPos({ top, left, width: rect.width, openUp })
+    }
+    updatePosition()
+    // Recalcula a posição travada em rolagem de QUALQUER ancestral (não só
+    // window) e em resize — `capture: true` é o que deixa o listener no
+    // document enxergar o scroll de um container interno como `.table-wrap`,
+    // já que scroll não faz bubbling normalmente.
+    window.addEventListener('resize', updatePosition)
+    document.addEventListener('scroll', updatePosition, true)
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      document.removeEventListener('scroll', updatePosition, true)
+    }
   }, [open, highlighted])
 
   useEffect(() => {
@@ -153,7 +197,10 @@ export function DropdownSelect<T extends string | number>({
       ref={anchorRef}
       onKeyDown={onKeyDown}
       onBlur={(event) => {
-        if (!anchorRef.current?.contains(event.relatedTarget as Node)) setOpen(false)
+        const related = event.relatedTarget as Node | null
+        if (anchorRef.current?.contains(related)) return
+        if (panelRef.current?.contains(related)) return
+        setOpen(false)
       }}
     >
       {renderTrigger({
@@ -168,14 +215,20 @@ export function DropdownSelect<T extends string | number>({
           onClick: () => setOpen((v) => !v),
         },
       })}
-      {open && (
-        <div
-          className={cx('dropdown-panel', panelClassName)}
-          role="listbox"
-          aria-label={ariaLabel}
-          ref={panelRef}
-          style={panelMinWidth ? { minWidth: panelMinWidth } : undefined}
-        >
+      {open &&
+        createPortal(
+          <div
+            className={cx('dropdown-panel', panelClassName)}
+            role="listbox"
+            aria-label={ariaLabel}
+            ref={panelRef}
+            style={{
+              position: 'fixed',
+              ...(panelPos
+                ? { top: panelPos.top, left: panelPos.left, minWidth: panelMinWidth ?? panelPos.width }
+                : { top: 0, left: 0, visibility: 'hidden' }),
+            }}
+          >
           {placeholder !== undefined && (
             <button
               type="button"
@@ -226,8 +279,9 @@ export function DropdownSelect<T extends string | number>({
           {flat.length === 0 && placeholder === undefined && (
             <div className="dropdown-option dropdown-option--empty">Nada disponível</div>
           )}
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
