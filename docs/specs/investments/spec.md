@@ -107,6 +107,12 @@ mercado real para ações e FIIs via BRAPI.
   considerado; ativos sem setor conhecido (cotação nunca atualizada) dividem
   um grupo "Sem setor" único. Nunca sugere vender — só direciona dinheiro
   novo. Um ativo com nota 0 nunca é sugerido.
+  **Performance (29/08/2026):** `suggestContribution` lia a carteira
+  inteira (`positions()`) N+1 vezes — uma pro total, descartada, mais uma
+  por classe dentro do `assetAllocationWithinClass`. Agora lê uma vez só e
+  repassa via o 3º parâmetro opcional dessa função (`preloaded`); callers
+  standalone (rota de "ver alocação de uma classe", `scripts/verify.ts`)
+  continuam buscando sozinhos, sem esse parâmetro.
 - **Sugestão de aporte é sempre em cotas inteiras** da última cotação
   conhecida — um valor sugerido menor que uma cota (ex. R$7 para uma cota de
   R$10) não é executável, então esse ativo fica de fora daquela rodada em

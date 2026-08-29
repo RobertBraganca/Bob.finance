@@ -514,41 +514,50 @@ export type ClassAllocationDetail = {
 export async function assetAllocationWithinClass(
   assetClass: string,
   goalId?: number | null,
+  /**
+   * Caller já tem a carteira (e o alvo da classe) em mãos — `suggestContribution`
+   * chama esta função uma vez por classe dentro de um `Promise.all`, e sem
+   * isto cada chamada refazia `positions()` (JOIN+GROUP BY sobre todos os
+   * trades) e a busca de metas do zero, N vezes para a MESMA carteira
+   * (achado de 29/08/2026). Standalone callers (rota de UI, scripts/verify.ts)
+   * seguem se virando sozinhos.
+   */
+  preloaded?: { allRows: Position[]; classTargetBps: number | null },
 ): Promise<ClassAllocationDetail> {
-  const allRows = await positions()
+  const allRows = preloaded?.allRows ?? (await positions())
   const totalPortfolioCents = allRows.reduce((s, p) => s + p.marketValueCents, 0)
   const classRows = allRows.filter((p) => p.assetClass === assetClass)
   const classValueCents = classRows.reduce((s, p) => s + p.marketValueCents, 0)
 
-  const classTarget = (
-    await db
-      .select({ targetBps: targetAllocations.targetBps })
-      .from(targetAllocations)
-      .where(
-        and(
-          eq(targetAllocations.assetClass, assetClass as AssetClass),
-          goalId ? eq(targetAllocations.goalId, goalId) : sql`goal_id is null`,
-        ),
-      )
-  )[0]
-  const classTargetBps = classTarget?.targetBps ?? null
+  const classTargetBps =
+    preloaded !== undefined
+      ? preloaded.classTargetBps
+      : ((
+          await db
+            .select({ targetBps: targetAllocations.targetBps })
+            .from(targetAllocations)
+            .where(
+              and(
+                eq(targetAllocations.assetClass, assetClass as AssetClass),
+                goalId ? eq(targetAllocations.goalId, goalId) : sql`goal_id is null`,
+              ),
+            )
+        )[0]?.targetBps ?? null)
   const classTargetValueCents =
     classTargetBps === null ? null : Math.round((classTargetBps / 10_000) * totalPortfolioCents)
 
-  const notes = await notesForAssets(classRows.map((p) => p.assetId))
+  // Cada Position já carrega sua própria nota — `positions()` já buscou
+  // `notesForAssets` uma vez para a carteira inteira (linha acima). Reconsultar
+  // aqui só pra fatia da classe seria o mesmo dado, uma segunda vez.
   // An asset with no note (nothing answered yet) has no valid weight —
   // excluding it from the sum is what makes "unscored" mean "claims
   // nothing yet" rather than "scored zero", which is a very different,
   // unfair statement.
-  const noteSum = classRows.reduce((sum, p) => {
-    const note = notes.get(p.assetId)?.note
-    return note === null || note === undefined ? sum : sum + note
-  }, 0)
+  const noteSum = classRows.reduce((sum, p) => (p.note === null ? sum : sum + p.note), 0)
 
   let unscoredValueCents = 0
   const assetSlices: AssetAllocationSlice[] = classRows.map((p) => {
-    const n = notes.get(p.assetId)
-    const note = n?.note ?? null
+    const note = p.note
     const scored = note !== null
     if (!scored) unscoredValueCents += p.marketValueCents
 
@@ -564,9 +573,9 @@ export async function assetAllocationWithinClass(
       name: p.name,
       ticker: p.ticker,
       sector: p.sector,
-      note: n?.note ?? null,
-      answered: n?.answered ?? 0,
-      totalCriteria: n?.total ?? 0,
+      note: p.note,
+      answered: p.answeredCriteria,
+      totalCriteria: p.totalCriteria,
       valueCents: p.marketValueCents,
       actualBps,
       targetBps,
@@ -725,7 +734,13 @@ function allocateAcrossSectors(
 }
 
 export async function suggestContribution(amountCents: number, goalId?: number | null): Promise<ContributionPlan> {
-  const totalBeforeCents = (await positions()).reduce((s, p) => s + p.marketValueCents, 0)
+  // Uma só leitura da carteira serve o total E cada classe abaixo — antes
+  // eram N+1 chamadas idênticas a positions() (uma aqui pro total,
+  // descartada, mais uma por classe dentro do Promise.all), cada uma
+  // refazendo o mesmo JOIN+GROUP BY sobre todos os trades e a mesma busca
+  // de notas por ativo (achado de 29/08/2026).
+  const allRows = await positions()
+  const totalBeforeCents = allRows.reduce((s, p) => s + p.marketValueCents, 0)
   const totalAfterCents = totalBeforeCents + amountCents
 
   const reserve = await reserveStatus()
@@ -740,7 +755,10 @@ export async function suggestContribution(amountCents: number, goalId?: number |
   // class that started at or above its own target — see decisions/0019.
   const allClasses = await Promise.all(
     classTargets.map(async (ct) => {
-      const detail = await assetAllocationWithinClass(ct.assetClass, goalId)
+      const detail = await assetAllocationWithinClass(ct.assetClass, goalId, {
+        allRows,
+        classTargetBps: ct.targetBps,
+      })
       const targetValueCents = Math.round((ct.targetBps / 10_000) * totalAfterCents)
       return {
         assetClass: ct.assetClass,
