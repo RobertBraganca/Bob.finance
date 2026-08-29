@@ -1,117 +1,127 @@
 import {
-  IconLayoutDashboard,
-  IconUpload,
-  IconList,
-  IconTags,
-  IconCalendar,
+  IconLayoutDashboardFilled,
+  IconFileUploadFilled,
+  IconListFilled,
+  IconTagsFilled,
+  IconCalendarFilled,
   IconTarget,
   IconBuildingMonument,
   IconTrendingUp,
-  IconSettings,
-  IconWallet,
-  IconChevronDown,
-  IconChevronRight,
-  IconArrowUpRight,
-  IconArrowDownLeft,
-  IconArrowRight,
-  IconPlus,
-  IconCheck,
-  IconX,
-  IconAlertTriangle,
-  IconInfoCircle,
-  IconSearch,
-  IconTrash,
+  IconSettingsFilled,
+  IconCreditCardFilled,
+  IconChevronDownFilled,
+  IconChevronRightFilled,
+  IconCircleArrowUpRightFilled,
+  IconCircleArrowDownLeftFilled,
+  IconArrowBigRightFilled,
+  IconPlusFilled,
+  IconCheckFilled,
+  IconXFilled,
+  IconAlertTriangleFilled,
+  IconInfoCircleFilled,
+  IconSearchFilled,
+  IconTrashFilled,
   IconRefresh,
-  IconDownload,
-  IconFile,
-  IconSparkles,
+  IconDownloadFilled,
+  IconFileFilled,
+  IconSparklesFilled,
   IconBuildingBank,
-  IconPencil,
-  IconFilter,
-  IconHome,
-  IconClock,
-  IconScale,
-  IconSun,
-  IconMoon,
-  IconCalculator,
-  IconGauge,
-  IconCash,
-  IconStack2,
-  IconDots,
-  IconShield,
-  IconWorld,
+  IconPencilFilled,
+  IconFilterFilled,
+  IconHomeFilled,
+  IconClockFilled,
+  IconScaleFilled,
+  IconSunFilled,
+  IconMoonFilled,
+  IconCalculatorFilled,
+  IconGaugeFilled,
+  IconCashBanknoteFilled,
+  IconStack2Filled,
+  IconDotsFilled,
+  IconShieldFilled,
+  IconWorldFilled,
   IconGripVertical,
   type Icon as TablerIcon,
 } from '@tabler/icons-react'
 
 /**
- * Tabler Icons (shadcn migration, Fase 0) — replaces a hand-rolled SVG set
- * that lived here before. Same call signature as always
- * (`{name, size, strokeWidth, className}`), so every one of the ~150+
- * `<Icon name="..." />` call sites across the app needed zero changes;
- * only this mapping is new. `strokeWidth` (this component's own prop
- * name, kept for that reason) maps to Tabler's own `stroke` prop.
- *
- * A few names here don't have a 1:1 Tabler glyph and were picked for
- * closest visual/semantic match to what they replace — same
- * disambiguation comments the old hand-rolled set already carried are
- * kept below where a name doesn't literally match its Tabler icon.
+ * Tabler Icons, estilo filled (pedido do usuário, 29/08/2026) — a maior
+ * parte troca direto para a variante `...Filled` da própria Tabler; onde
+ * não existe uma variante filled (arrows/chevrons puramente lineares
+ * ganham `IconArrowBigRightFilled`/`IconCircleArrow*Filled`, formas sem
+ * versão preenchida alguma ficam documentadas abaixo), a escolha some no
+ * comentário ao lado da entrada. Mesma assinatura de chamada de sempre
+ * (`{name, size, strokeWidth, className}`), então nenhum dos ~150+
+ * `<Icon name="..." />` call sites precisou mudar.
  */
 const ICONS: Record<string, TablerIcon> = {
-  dashboard: IconLayoutDashboard,
-  upload: IconUpload,
-  list: IconList,
-  tags: IconTags,
-  calendar: IconCalendar,
+  dashboard: IconLayoutDashboardFilled,
+  // Tabler não tem "upload" filled — o arquivo-com-seta-de-upload é o
+  // equivalente preenchido mais próximo do glifo antigo.
+  upload: IconFileUploadFilled,
+  list: IconListFilled,
+  tags: IconTagsFilled,
+  calendar: IconCalendarFilled,
+  // Sem "target" filled na Tabler — outline mantido de propósito, não é
+  // um esquecimento (ver ADR 0031).
   target: IconTarget,
-  // Landmark: a columned monument/government-building glyph — Tabler has
-  // no icon literally named "landmark".
+  // Landmark: nem outline nem filled existem com esse nome — mantém o
+  // monumento de colunas de sempre, sem versão preenchida na Tabler.
   landmark: IconBuildingMonument,
+  // Sem "trending" filled na Tabler — outline mantido.
   trending: IconTrendingUp,
-  settings: IconSettings,
-  wallet: IconWallet,
-  chevronDown: IconChevronDown,
-  chevronRight: IconChevronRight,
-  arrowUpRight: IconArrowUpRight,
-  arrowDownLeft: IconArrowDownLeft,
-  arrowRight: IconArrowRight,
-  plus: IconPlus,
-  check: IconCheck,
-  x: IconX,
-  alert: IconAlertTriangle,
-  info: IconInfoCircle,
-  search: IconSearch,
-  trash: IconTrash,
+  settings: IconSettingsFilled,
+  // "wallet" não tem filled; o cartão preenchido encaixa igual ou melhor
+  // nos dois lugares que usam esta chave (nav de Cartões, filtro de conta).
+  wallet: IconCreditCardFilled,
+  chevronDown: IconChevronDownFilled,
+  chevronRight: IconChevronRightFilled,
+  // Setas diagonais não têm filled — o badge circular preenchido com a
+  // mesma seta é o equivalente da Tabler pra essa direção.
+  arrowUpRight: IconCircleArrowUpRightFilled,
+  arrowDownLeft: IconCircleArrowDownLeftFilled,
+  arrowRight: IconArrowBigRightFilled,
+  plus: IconPlusFilled,
+  check: IconCheckFilled,
+  x: IconXFilled,
+  alert: IconAlertTriangleFilled,
+  info: IconInfoCircleFilled,
+  search: IconSearchFilled,
+  trash: IconTrashFilled,
+  // Sem "refresh"/rotate filled na Tabler — outline mantido.
   refresh: IconRefresh,
-  download: IconDownload,
-  file: IconFile,
-  sparkle: IconSparkles,
+  download: IconDownloadFilled,
+  file: IconFileFilled,
+  sparkle: IconSparklesFilled,
+  // Sem "bank" filled na Tabler — outline mantido.
   bank: IconBuildingBank,
-  pencil: IconPencil,
-  filter: IconFilter,
-  home: IconHome,
-  clock: IconClock,
-  scale: IconScale,
-  sun: IconSun,
-  moon: IconMoon,
+  pencil: IconPencilFilled,
+  filter: IconFilterFilled,
+  home: IconHomeFilled,
+  clock: IconClockFilled,
+  scale: IconScaleFilled,
+  sun: IconSunFilled,
+  moon: IconMoonFilled,
   // Precificação tinha o mesmo "target" de Metas do mês — nada a ver com
   // preço. Calculadora encaixa melhor em "precificação".
-  calculator: IconCalculator,
+  calculator: IconCalculatorFilled,
   // Motor financeiro tinha o mesmo "scale" de DRE — um medidor encaixa
   // melhor em "motor/simulador" do que uma balança.
-  gauge: IconGauge,
+  gauge: IconGaugeFilled,
   // Classe 'cash' tinha o mesmo "wallet" de Cartões (nav) e de 'funds'.
-  banknote: IconCash,
+  // Sem "cash" filled — a cédula (banknote) preenchida é o equivalente.
+  banknote: IconCashBanknoteFilled,
   // Classe 'funds' tinha o mesmo "wallet" de Cartões (nav) e de 'cash'.
-  layers: IconStack2,
+  layers: IconStack2Filled,
   // Classe 'other' tinha o mesmo "tags" de Categorias e regras.
-  dots: IconDots,
+  dots: IconDotsFilled,
   // Classe 'fixed_income' tinha o mesmo "bank" de Contas e bancos (nav).
-  shield: IconShield,
+  shield: IconShieldFilled,
   // Classe 'etf_intl' caía no fallback genérico ("wallet") por falta de
   // entrada própria.
-  globe: IconWorld,
-  // Drag handle for reordering.
+  globe: IconWorldFilled,
+  // Drag handle for reordering — sem filled na Tabler, e não faria
+  // diferença visual num ícone deste tamanho.
   grip: IconGripVertical,
 }
 
