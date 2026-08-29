@@ -346,14 +346,14 @@ function BusinessSummary({
         Custo médio de serviço
       </span>
       <span className="kv__v">
-        {serviceAverages && serviceAverages.expenseTransactionCount > 0 ? money(serviceAverages.avgExpensePerTransactionCents) : '—'}
+        {serviceAverages && serviceAverages.expenseTransactionCount > 0 ? money(serviceAverages.avgExpensePerTransactionCents) : '-'}
       </span>
 
       <span className="kv__k" title="Média histórica da conta PJ, não afetada pelo período selecionado">
         Preço médio de serviço
       </span>
       <span className="kv__v">
-        {serviceAverages && serviceAverages.revenueTransactionCount > 0 ? money(serviceAverages.avgRevenuePerTransactionCents) : '—'}
+        {serviceAverages && serviceAverages.revenueTransactionCount > 0 ? money(serviceAverages.avgRevenuePerTransactionCents) : '-'}
       </span>
 
       <span className="kv__k" style={{ fontWeight: 600 }}>

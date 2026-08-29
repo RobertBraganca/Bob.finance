@@ -311,7 +311,7 @@ export function AllocationVsTargetChart({
           { header: 'Objetivo', value: (row) => (row.targetBps === null ? '-' : bps(row.targetBps)), align: 'right' },
         ],
       }}
-      note="Mesmo número do card 'Alocação por classe' — uma segunda leitura visual, lado a lado por classe."
+      note="Mesmo número do card 'Alocação por classe', uma segunda leitura visual, lado a lado por classe."
     >
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={slices} margin={{ top: 12, right: 12, bottom: 24, left: 0 }}>

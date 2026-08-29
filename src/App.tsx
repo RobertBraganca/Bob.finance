@@ -37,7 +37,7 @@ function PortWarning() {
       <Card muted className="row row--wrap">
         <Icon name="alert" size={16} />
         <span style={{ fontSize: 'var(--text-xs)' }}>
-          Servidor nesta sessão está na porta {port}, não a 5173 padrão — personalizações salvas
+          Servidor nesta sessão está na porta {port}, não a 5173 padrão. Personalizações salvas
           neste navegador (ex. arranjo do Painel) podem não persistir entre reinícios do servidor.
         </span>
       </Card>

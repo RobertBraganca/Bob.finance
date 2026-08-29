@@ -341,7 +341,7 @@ function SimulateTab() {
               <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-xs)' }}>
                 Considerando os parâmetros configurados, o preço mínimo é {money(result.minimumPriceCents)},{' '}
                 o recomendado é {money(result.recommendedPriceCents)} e uma referência premium (30% acima do
-                recomendado) é {money(result.premiumPriceCents)} — três pontos de ancoragem, a decisão de
+                recomendado) é {money(result.premiumPriceCents)}, três pontos de ancoragem: a decisão de
                 quanto cobrar continua sua.
               </p>
             </div>
@@ -553,7 +553,7 @@ function QuotesTab() {
                     </td>
                     <td className="table__num">
                       {quote.actualPriceCents === null ? (
-                        <span className="muted">—</span>
+                        <span className="muted">-</span>
                       ) : quote.actualPriceCents === quote.recommendedPriceCents ? (
                         <span className="muted">{money(quote.actualPriceCents)}</span>
                       ) : (
@@ -653,7 +653,7 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
 
   return (
     <Modal
-      title={`Aprovar cotação — ${quote.clientLabel}`}
+      title={`Aprovar cotação: ${quote.clientLabel}`}
       onClose={onClose}
       footer={
         <>
@@ -681,7 +681,7 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
           <TextInput value={actualPrice} onChange={setActualPrice} numeral />
           {actualDiffersFromRecommended && (
             <span className="field__hint">
-              Diferente do recomendado ({money(quote.recommendedPriceCents)}) — o recomendado continua
+              Diferente do recomendado ({money(quote.recommendedPriceCents)}): o recomendado continua
               guardado para referência, só o lançamento usa este valor.
             </span>
           )}
@@ -760,7 +760,7 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
 
   return (
     <Modal
-      title={`Editar cotação — ${quote.clientLabel}`}
+      title={`Editar cotação: ${quote.clientLabel}`}
       onClose={onClose}
       wide
       footer={
@@ -788,7 +788,7 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
       <div className="stack stack--loose">
         {quote.status === 'approved' && (
           <p className="chart__note">
-            Esta cotação já foi aprovada e gerou um lançamento de receita — mudar horas, custos ou
+            Esta cotação já foi aprovada e gerou um lançamento de receita: mudar horas, custos ou
             multiplicadores aqui será recusado, para o preço exibido não se descolar do que já está no
             ledger.
           </p>
@@ -829,7 +829,7 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
         )}
         <p className="chart__note">
           Salvar recalcula com o ponto de equilíbrio e a alíquota de agora, não os do momento em que esta
-          cotação foi criada — é isso que "editar" significa aqui (`decisions/0021`).
+          cotação foi criada: é isso que "editar" significa aqui (`decisions/0021`).
         </p>
       </div>
     </Modal>

@@ -1635,7 +1635,7 @@ function ProfitabilityKpiCard({
       <div className="stack stack--tight">
         <span className="stat__label">{label}</span>
         <span className="hero-figure" style={flat ? { color: 'var(--on-slab-2)' } : undefined}>
-          {totalBps === null ? '—' : signedBps(totalBps)}
+          {totalBps === null ? '-' : signedBps(totalBps)}
         </span>
         {diffBps !== null && (
           <span className="stat__foot">
@@ -1763,11 +1763,11 @@ function ProfitabilityTab() {
                       className="table__num"
                       style={value === null ? undefined : { color: value >= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}
                     >
-                      {value === null ? '—' : bps(value)}
+                      {value === null ? '-' : bps(value)}
                     </td>
                   ))}
                   <td className="table__num" style={{ fontWeight: 600 }}>
-                    {row.annualReturnBps === null ? '—' : bps(row.annualReturnBps)}
+                    {row.annualReturnBps === null ? '-' : bps(row.annualReturnBps)}
                   </td>
                   <td className="table__num">{bps(row.cumulativeReturnBps)}</td>
                 </tr>
@@ -2391,7 +2391,7 @@ function EditAssetButton({
               <label className="field__label">Código</label>
               <TextInput value={editedTicker} onChange={setEditedTicker} placeholder="opcional, ex. PETR4" />
               <span className="field__hint">
-                Trocar o código muda qual ativo real esta posição representa — as cotações
+                Trocar o código muda qual ativo real esta posição representa: as cotações
                 atualizadas passam a se referir ao novo código.
               </span>
             </div>
@@ -2579,7 +2579,7 @@ function GoalModal({
             ))}
           </div>
           <span className="field__hint">
-            Só organiza e identifica a meta — nunca influencia o cálculo de aporte.
+            Só organiza e identifica a meta, nunca influencia o cálculo de aporte.
           </span>
         </div>
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
@@ -3018,13 +3018,13 @@ function GoalContributionImpact({ goal, extraContributionCents }: { goal: Goal; 
     <Slab span={12}>
       <div className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
         <div className="stack stack--tight">
-          <span className="stat__label">{goal.name} — com este aporte</span>
+          <span className="stat__label">{goal.name}, com este aporte</span>
           <span style={{ fontSize: 'var(--text-base)' }}>
             {after.reachedPeriod === null
               ? 'a meta continua além do horizonte projetado, mesmo com este aporte'
               : changesEta && before.reachedPeriod
                 ? `alcança a meta em ${fmtPeriod(after.reachedPeriod)}, em vez de ${fmtPeriod(before.reachedPeriod)}`
-                : `alcança a meta em ${fmtPeriod(after.reachedPeriod)} — este aporte não muda a data prevista`}
+                : `alcança a meta em ${fmtPeriod(after.reachedPeriod)}, este aporte não muda a data prevista`}
           </span>
         </div>
         {after.contributionShareOfGapBps !== null && (

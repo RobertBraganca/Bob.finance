@@ -405,7 +405,7 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
 
   return (
     <Modal
-      title={`Conferir saldo — ${account.name}`}
+      title={`Conferir saldo: ${account.name}`}
       onClose={onClose}
       footer={
         mode === null ? (
@@ -464,7 +464,7 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
               <TextInput value={postedOn} onChange={setPostedOn} type="date" />
             </div>
             <p className="chart__note">
-              Categoria "Financeiro/Reajuste de saldo" — não conta como receita nem despesa, é uma
+              Categoria "Financeiro/Reajuste de saldo": não conta como receita nem despesa, é uma
               correção de registro.
             </p>
           </>
@@ -485,7 +485,7 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
               <CategorySelect value={categoryId} onChange={setCategoryId} direction={direction} />
             </div>
             <p className="chart__note">
-              Para dinheiro que realmente entrou ou saiu e nunca foi lançado — não um erro de registro.
+              Para dinheiro que realmente entrou ou saiu e nunca foi lançado, não um erro de registro.
             </p>
           </>
         )}

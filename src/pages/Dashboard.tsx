@@ -1051,7 +1051,7 @@ function PendingCard({ flow, title, span }: { flow: 'income' | 'expense'; title:
         {invisibleForecasts.length > 0 && (
           <p className="chart__note" style={{ marginTop: 'var(--sp-2)' }}>
             <Icon name="info" size={12} /> {invisibleForecasts.length} previsão(ões) só aparecerá(ão) mais perto da
-            data — confira em "Ver lançamentos"
+            data, confira em "Ver lançamentos"
           </p>
         )}
       </Card>
@@ -1203,7 +1203,7 @@ function PendingListModal({
         <div className="stack stack--tight" style={{ marginTop: 'var(--sp-4)' }}>
           <span className="field__label">Previsões que ainda não aparecem no histórico</span>
           <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-            Salvas normalmente — só ainda não viraram lançamento porque a primeira data está longe demais. Vão
+            Salvas normalmente, só ainda não viraram lançamento porque a primeira data está longe demais. Vão
             aparecer sozinhas conforme o mês se aproxima.
           </p>
           <div className="table-wrap">
@@ -1213,7 +1213,7 @@ function PendingListModal({
                   <tr key={f.id}>
                     <td>{f.description}</td>
                     <td className="muted">
-                      primeira ocorrência: {f.nextOccurrencePeriod ? fmtPeriodLong(f.nextOccurrencePeriod) : '—'}
+                      primeira ocorrência: {f.nextOccurrencePeriod ? fmtPeriodLong(f.nextOccurrencePeriod) : '-'}
                     </td>
                     <td className={`table__num ${flow === 'income' ? 'pos' : 'neg'}`}>
                       {money(Math.abs(f.amountCents))}
@@ -1575,7 +1575,7 @@ function ReconciliationCard({ span }: { span: BentoSpan }) {
                 variant="quiet"
                 size="sm"
                 icon="x"
-                title="Não é o mesmo — remover esta sugestão"
+                title="Não é o mesmo, remover esta sugestão"
                 onClick={() => dismiss.mutate({ pendingId: pending.id, matchId: match.id })}
               />
             </span>

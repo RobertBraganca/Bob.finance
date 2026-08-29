@@ -739,7 +739,7 @@ export function PendingEditScopeModal({
           </Button>
         </div>
         <p className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-          "Esta e as futuras" e "Todas" também atualizam o modelo — os próximos meses ainda não
+          "Esta e as futuras" e "Todas" também atualizam o modelo: os próximos meses ainda não
           lançados vão usar o novo valor quando forem gerados.
         </p>
       </div>

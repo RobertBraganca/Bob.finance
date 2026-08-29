@@ -201,12 +201,12 @@ export function ProfitabilityChart({
           { header: 'Mês', value: (row) => fmtPeriod(row.period) },
           ...availableKeys.map((key) => ({
             header: labelFor(key),
-            value: (row: IndexPoint) => (row[key] !== undefined ? row[key]!.toFixed(1) : '—'),
+            value: (row: IndexPoint) => (row[key] !== undefined ? row[key]!.toFixed(1) : '-'),
             align: 'right' as const,
           })),
         ],
       }}
-      note="Índices via ETF que replica cada um (IBOV≈BOVA11, IFIX≈XFIX11, SMLL≈SMAL11, IDIV≈DIVO11) só cobrem os últimos meses no plano gratuito da BRAPI — o histórico completo se acumula a cada atualização. CDI e IPCA vêm completos desde já (Banco Central)."
+      note="Índices via ETF que replica cada um (IBOV≈BOVA11, IFIX≈XFIX11, SMLL≈SMAL11, IDIV≈DIVO11) só cobrem os últimos meses no plano gratuito da BRAPI: o histórico completo se acumula a cada atualização. CDI e IPCA vêm completos desde já (Banco Central)."
     >
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
