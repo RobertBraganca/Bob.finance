@@ -68,6 +68,94 @@ async function uncategorizedGroups(range: Range): Promise<{ groups: Uncategorize
   return { groups, groupCount: groups.length, totalCount: rows.length }
 }
 
+/* ------------------------------------------------------------------ *
+ * DRE formal (PJ) — specs/dre, "DRE PJ formal"
+ *
+ * Waterfall contábil de verdade (Receita Bruta -> Lucro Líquido), em vez
+ * da lista simples de categorias que `dreReport` já mostra. Cada
+ * categoria-mãe é classificada uma vez em `dreGroup`
+ * (Categories.tsx) — sem classificação explícita, cai no balde padrão
+ * (Receita Bruta pro lado de receita, Despesa Operacional pro lado de
+ * despesa), nunca "some" do resultado. Mesma FLOW_KIND de analytics.ts
+ * reimplementada aqui (não exportada de lá) — categoria sem `kind`
+ * (nunca categorizada) cai pelo sinal do valor, igual o resto do app.
+ * ------------------------------------------------------------------ */
+export type FormalDre = {
+  range: Range
+  receitaBrutaCents: number
+  deducoesCents: number
+  receitaLiquidaCents: number
+  custosCents: number
+  lucroBrutoCents: number
+  despesasOperacionaisCents: number
+  resultadoOperacionalCents: number
+  /** positivo = mais receita financeira que despesa financeira */
+  resultadoFinanceiroCents: number
+  impostosCents: number
+  lucroLiquidoCents: number
+}
+
+export async function formalDre(range: Range): Promise<FormalDre> {
+  const rows = await db.execute<{
+    receitaBrutaCents: number
+    deducoesCents: number
+    custosCents: number
+    despesasOperacionaisCents: number
+    financeiroReceitaCents: number
+    financeiroDespesaCents: number
+    impostosCents: number
+  }>(sql`
+    select
+      coalesce(sum(case when flow = 'income' and (dre_group is null or dre_group not in ('deduction', 'financial')) and amount_cents > 0 then amount_cents else 0 end), 0) as "receitaBrutaCents",
+      coalesce(sum(case when dre_group = 'deduction' then abs(amount_cents) else 0 end), 0) as "deducoesCents",
+      coalesce(sum(case when flow = 'expense' and dre_group = 'cost' then abs(amount_cents) else 0 end), 0) as "custosCents",
+      coalesce(sum(case when flow = 'expense' and dre_group is null and amount_cents < 0 then -amount_cents else 0 end), 0) as "despesasOperacionaisCents",
+      coalesce(sum(case when dre_group = 'financial' and flow = 'income' then amount_cents else 0 end), 0) as "financeiroReceitaCents",
+      coalesce(sum(case when dre_group = 'financial' and flow = 'expense' then abs(amount_cents) else 0 end), 0) as "financeiroDespesaCents",
+      coalesce(sum(case when flow = 'expense' and dre_group = 'tax' then abs(amount_cents) else 0 end), 0) as "impostosCents"
+    from (
+      select
+        t.amount_cents,
+        c.dre_group,
+        case
+          when c.kind is null then (case when t.amount_cents > 0 then 'income' else 'expense' end)
+          else c.kind::text
+        end as flow
+      from transactions t
+      left join categories c on c.id = t.category_id
+      where t.posted_on between ${range.from} and ${range.to}
+        and t.pending = false
+        ${range.accountId ? sql`and t.account_id = ${range.accountId}` : sql``}
+    ) x
+  `)
+  const row = rows[0]
+
+  const receitaBrutaCents = row?.receitaBrutaCents ?? 0
+  const deducoesCents = row?.deducoesCents ?? 0
+  const receitaLiquidaCents = receitaBrutaCents - deducoesCents
+  const custosCents = row?.custosCents ?? 0
+  const lucroBrutoCents = receitaLiquidaCents - custosCents
+  const despesasOperacionaisCents = row?.despesasOperacionaisCents ?? 0
+  const resultadoOperacionalCents = lucroBrutoCents - despesasOperacionaisCents
+  const resultadoFinanceiroCents = (row?.financeiroReceitaCents ?? 0) - (row?.financeiroDespesaCents ?? 0)
+  const impostosCents = row?.impostosCents ?? 0
+  const lucroLiquidoCents = resultadoOperacionalCents + resultadoFinanceiroCents - impostosCents
+
+  return {
+    range,
+    receitaBrutaCents,
+    deducoesCents,
+    receitaLiquidaCents,
+    custosCents,
+    lucroBrutoCents,
+    despesasOperacionaisCents,
+    resultadoOperacionalCents,
+    resultadoFinanceiroCents,
+    impostosCents,
+    lucroLiquidoCents,
+  }
+}
+
 export async function dreReport(range: Range): Promise<DreReport> {
   const [totals, income, expense, uncategorized, serviceAverages] = await Promise.all([
     analytics.totals(range),

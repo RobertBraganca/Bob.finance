@@ -103,6 +103,12 @@ app.get('/analytics/dre', async (c) => {
   return c.json(await dreService.dreReport(range))
 })
 
+/** DRE formal (PJ), ver specs/dre "DRE PJ formal" — accountId é a conta PJ, resolvida no front igual o resto desta tela. */
+app.get('/analytics/dre/formal', async (c) => {
+  const range = await resolveRange(rangeQuery.parse(c.req.query()))
+  return c.json(await dreService.formalDre(range))
+})
+
 app.get('/analytics/categories', async (c) => {
   const query = rangeQuery
     .extend({

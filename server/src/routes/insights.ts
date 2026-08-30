@@ -87,6 +87,12 @@ export async function insightsRoutes(app: FastifyInstance) {
     return dreService.dreReport(range)
   })
 
+  /** DRE formal (PJ), ver specs/dre "DRE PJ formal" — accountId é a conta PJ, resolvida no front igual o resto desta tela. */
+  app.get('/analytics/dre/formal', async (req) => {
+    const range = await resolveRange(rangeQuery.parse(req.query))
+    return dreService.formalDre(range)
+  })
+
   app.get('/analytics/categories', async (req) => {
     const query = rangeQuery
       .extend({

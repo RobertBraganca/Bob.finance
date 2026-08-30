@@ -58,6 +58,19 @@ type DreResponse = {
   } | null
 }
 
+type FormalDreResponse = {
+  receitaBrutaCents: number
+  deducoesCents: number
+  receitaLiquidaCents: number
+  custosCents: number
+  lucroBrutoCents: number
+  despesasOperacionaisCents: number
+  resultadoOperacionalCents: number
+  resultadoFinanceiroCents: number
+  impostosCents: number
+  lucroLiquidoCents: number
+}
+
 type FlowEdge = {
   fromAccountId: number
   toAccountId: number
@@ -89,6 +102,15 @@ export function DrePage() {
     queryKey: ['dre', pf?.id, range.from, range.to],
     queryFn: () => api.get<DreResponse>('/analytics/dre', { accountId: pf!.id, from: range.from, to: range.to }),
     enabled: !!pf,
+    placeholderData: (previous) => previous,
+  })
+
+  // DRE formal (specs/dre, "DRE PJ formal") — só a conta PJ, é conceito de
+  // empresa (CSP, Imposto sobre o lucro não fazem sentido pra conta pessoal).
+  const formalDre = useQuery({
+    queryKey: ['dre-formal', pj?.id, range.from, range.to],
+    queryFn: () => api.get<FormalDreResponse>('/analytics/dre/formal', { accountId: pj!.id, from: range.from, to: range.to }),
+    enabled: !!pj,
     placeholderData: (previous) => previous,
   })
 
@@ -151,6 +173,7 @@ export function DrePage() {
           </Card>
         ) : (
           <div className="bento">
+            <FormalDreCard data={formalDre.data} isError={formalDre.isError} accountLabel={pj.name} />
             {reconciliation && <ReconciliationSlab data={reconciliation} pjLabel={pj.name} pfLabel={pf.name} />}
             <DreColumn
               accountId={pj.id}
@@ -165,6 +188,102 @@ export function DrePage() {
         )}
       </div>
     </>
+  )
+}
+
+/**
+ * DRE formal (PJ) — waterfall contábil de verdade, distinto do resumo
+ * simplificado que `BusinessSummary` já mostra dentro de cada `DreColumn`
+ * (aquele soma tudo em "Despesas Totais"; este separa Custo do Serviço,
+ * Despesa Operacional, Resultado Financeiro e Imposto sobre o Lucro, cada
+ * um numa linha própria — specs/dre, "DRE PJ formal"). Só a conta PJ:
+ * CSP e Imposto sobre o lucro não são conceito de conta pessoal.
+ */
+function FormalDreCard({
+  data,
+  isError,
+  accountLabel,
+}: {
+  data: FormalDreResponse | undefined
+  isError: boolean
+  accountLabel: string
+}) {
+  if (isError) {
+    return (
+      <Card span={12} flush title="DRE formal (PJ)">
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar"
+          body="Não foi possível carregar o DRE formal agora. Tente novamente em instantes."
+        />
+      </Card>
+    )
+  }
+  if (!data) {
+    return (
+      <Card span={12} flush title="DRE formal (PJ)">
+        <SkeletonLines lines={6} />
+      </Card>
+    )
+  }
+
+  return (
+    <Card span={12} flush title="DRE formal (PJ)" subtitle={`${accountLabel} · Receita Bruta → Lucro Líquido, no período selecionado`}>
+      <div className="kv" style={{ padding: '0 var(--sp-5)', fontSize: 'var(--text-base)' }}>
+        <span className="kv__k" style={{ gridColumn: '1 / -1', textTransform: 'uppercase', fontSize: 'var(--text-2xs)', letterSpacing: '0.03em' }}>
+          Receita
+        </span>
+        <span className="kv__k">Receita Bruta</span>
+        <span className="kv__v pos">{money(data.receitaBrutaCents)}</span>
+        <span className="kv__k">(−) Deduções da Receita</span>
+        <span className="kv__v neg">{money(data.deducoesCents)}</span>
+        <span className="kv__k" style={{ fontWeight: 600 }}>(=) Receita Líquida</span>
+        <span className={`kv__v ${data.receitaLiquidaCents < 0 ? 'neg' : 'pos'}`} style={{ fontWeight: 600 }}>
+          {money(data.receitaLiquidaCents)}
+        </span>
+
+        <span
+          className="kv__k"
+          style={{ gridColumn: '1 / -1', textTransform: 'uppercase', fontSize: 'var(--text-2xs)', letterSpacing: '0.03em', marginTop: 'var(--sp-2)' }}
+        >
+          Custos e Lucro Bruto
+        </span>
+        <span className="kv__k">(−) Custos dos Serviços Prestados (CSP)</span>
+        <span className="kv__v neg">{money(data.custosCents)}</span>
+        <span className="kv__k" style={{ fontWeight: 600 }}>(=) Lucro Bruto</span>
+        <span className={`kv__v ${data.lucroBrutoCents < 0 ? 'neg' : 'pos'}`} style={{ fontWeight: 600 }}>
+          {money(data.lucroBrutoCents)}
+        </span>
+
+        <span
+          className="kv__k"
+          style={{ gridColumn: '1 / -1', textTransform: 'uppercase', fontSize: 'var(--text-2xs)', letterSpacing: '0.03em', marginTop: 'var(--sp-2)' }}
+        >
+          Despesas Operacionais
+        </span>
+        <span className="kv__k">(−) Despesas Operacionais</span>
+        <span className="kv__v neg">{money(data.despesasOperacionaisCents)}</span>
+        <span className="kv__k" style={{ fontWeight: 600 }}>(=) Resultado Operacional (EBIT)</span>
+        <span className={`kv__v ${data.resultadoOperacionalCents < 0 ? 'neg' : 'pos'}`} style={{ fontWeight: 600 }}>
+          {money(data.resultadoOperacionalCents)}
+        </span>
+
+        <span
+          className="kv__k"
+          style={{ gridColumn: '1 / -1', textTransform: 'uppercase', fontSize: 'var(--text-2xs)', letterSpacing: '0.03em', marginTop: 'var(--sp-2)' }}
+        >
+          Resultado Final
+        </span>
+        <span className="kv__k">(+/−) Resultado Financeiro</span>
+        <span className={`kv__v ${data.resultadoFinanceiroCents < 0 ? 'neg' : 'pos'}`}>{money(data.resultadoFinanceiroCents)}</span>
+        <span className="kv__k">(−) Impostos sobre o Lucro</span>
+        <span className="kv__v neg">{money(data.impostosCents)}</span>
+        <span className="kv__k" style={{ fontWeight: 700 }}>(=) Lucro Líquido</span>
+        <span className={`kv__v ${data.lucroLiquidoCents < 0 ? 'neg' : 'pos'}`} style={{ fontWeight: 700 }}>
+          {money(data.lucroLiquidoCents)}
+        </span>
+      </div>
+    </Card>
   )
 }
 
