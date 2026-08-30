@@ -44,6 +44,28 @@ const KIND_LABEL: Record<string, string> = {
   investment: 'Investimento',
 }
 
+/**
+ * Classificação no DRE formal (specs/dre, "DRE PJ formal") — opções
+ * dependem do fluxo: dedução/resultado financeiro fazem sentido dos dois
+ * lados, custo (CSP) e imposto sobre o lucro só fazem sentido em
+ * despesa. String vazia = balde padrão (Receita Bruta ou Despesa
+ * Operacional), nunca gravado à parte.
+ */
+const DRE_GROUP_LABEL: Record<string, string> = {
+  deduction: 'Dedução da receita',
+  cost: 'Custo do serviço prestado (CSP)',
+  financial: 'Resultado financeiro',
+  tax: 'Imposto sobre o lucro',
+}
+const DRE_GROUPS_BY_KIND: Record<string, string[]> = {
+  income: ['deduction', 'financial'],
+  expense: ['deduction', 'cost', 'financial', 'tax'],
+}
+const DRE_DEFAULT_LABEL: Record<string, string> = {
+  income: 'Padrão (Receita Bruta)',
+  expense: 'Padrão (Despesa Operacional)',
+}
+
 type Rule = {
   id: number
   categoryId: number
@@ -233,14 +255,15 @@ function CategoryModal({
   const [name, setName] = useState(node?.name ?? '')
   const [color, setColor] = useState(node?.color ?? parent?.color ?? PALETTE[0]!.hex)
   const [kind, setKind] = useState(node?.kind ?? parent?.kind ?? 'expense')
+  const [dreGroup, setDreGroup] = useState(node?.dreGroup ?? parent?.dreGroup ?? '')
 
   const isChild = isEdit ? node!.parentId !== null : parent !== null
 
   const save = useMutation({
     mutationFn: () =>
       isEdit
-        ? api.patch(`/categories/${node!.id}`, { name, color, kind })
-        : api.post('/categories', { name, color, kind, parentId: parent?.id ?? null }),
+        ? api.patch(`/categories/${node!.id}`, { name, color, kind, dreGroup: dreGroup || null })
+        : api.post('/categories', { name, color, kind, dreGroup: dreGroup || null, parentId: parent?.id ?? null }),
     onSuccess: () => {
       toast(isEdit ? 'Categoria atualizada' : 'Categoria criada')
       queryClient.invalidateQueries()
@@ -282,7 +305,15 @@ function CategoryModal({
               <Select
                 value={kind}
                 options={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))}
-                onChange={(value) => setKind(value ?? 'expense')}
+                onChange={(value) => {
+                  const next = value ?? 'expense'
+                  setKind(next)
+                  // Uma classificação de DRE só vale pro fluxo em que foi
+                  // pensada (custo/imposto só em despesa, por exemplo) —
+                  // trocar o tipo de fluxo sem isso deixaria uma combinação
+                  // inválida selecionada, sem o usuário perceber.
+                  if (!(DRE_GROUPS_BY_KIND[next] ?? []).includes(dreGroup)) setDreGroup('')
+                }}
               />
               <span className="field__hint">
                 Transferências e investimentos ficam fora do cálculo de entradas e saídas.
@@ -315,12 +346,31 @@ function CategoryModal({
                 6 viram “Outras” nos gráficos.
               </span>
             </div>
+
+            {(kind === 'income' || kind === 'expense') && (
+              <div className="field">
+                <label className="field__label">Classificação no DRE (PJ)</label>
+                <Select
+                  value={dreGroup}
+                  options={[
+                    { value: '', label: DRE_DEFAULT_LABEL[kind]! },
+                    ...DRE_GROUPS_BY_KIND[kind]!.map((value) => ({ value, label: DRE_GROUP_LABEL[value]! })),
+                  ]}
+                  onChange={(value) => setDreGroup(value ?? '')}
+                />
+                <span className="field__hint">
+                  Só usado no DRE formal da conta PJ (specs/dre) — define em que linha (Receita
+                  Bruta, Dedução, Custo do serviço, Resultado financeiro, Imposto sobre o lucro)
+                  esta categoria entra. Sem escolher, cai no balde padrão.
+                </span>
+              </div>
+            )}
           </>
         )}
 
         {isChild && (
           <p className="field__hint">
-            Subcategorias herdam cor e tipo da mãe automaticamente.
+            Subcategorias herdam cor, tipo e classificação de DRE da mãe automaticamente.
           </p>
         )}
       </div>

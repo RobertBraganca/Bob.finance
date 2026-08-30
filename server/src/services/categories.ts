@@ -9,6 +9,7 @@ export type CategoryNode = {
   kind: string
   color: string
   icon: string
+  dreGroup: string | null
   sortOrder: number
   transactionCount: number
   children: CategoryNode[]
@@ -23,11 +24,13 @@ export async function categoryTree(): Promise<CategoryNode[]> {
     kind: string
     color: string
     icon: string
+    dreGroup: string | null
     sortOrder: number
     transactionCount: number
   }>(sql`
     select
       c.id, c.parent_id as "parentId", c.name, c.kind, c.color, c.icon,
+      c.dre_group as "dreGroup",
       c.sort_order as "sortOrder",
       (select count(*) from transactions t where t.category_id = c.id) as "transactionCount"
     from categories c
@@ -72,18 +75,39 @@ export async function categoryOptions() {
   `)
 }
 
+/** Valores válidos de `dreGroup` por `kind` — specs/dre ("DRE PJ formal"): dedução/resultado financeiro só fazem sentido pro lado de receita, custo/imposto só pro lado de despesa. */
+const DRE_GROUPS_BY_KIND: Record<string, readonly string[]> = {
+  income: ['deduction', 'financial'],
+  // 'deduction' também vale pro lado de despesa: dedução da receita pode
+  // ser modelada como saída de verdade (ex. imposto sobre venda pago
+  // separado), não só como redutor lançado direto na receita.
+  expense: ['deduction', 'cost', 'financial', 'tax'],
+}
+
+function assertValidDreGroup(kind: string, dreGroup: string | null | undefined) {
+  if (dreGroup === null || dreGroup === undefined) return
+  const allowed = DRE_GROUPS_BY_KIND[kind] ?? []
+  if (!allowed.includes(dreGroup)) {
+    throw new Error(`"${dreGroup}" não é uma classificação de DRE válida para uma categoria de ${kind}`)
+  }
+}
+
 export async function createCategory(input: {
   name: string
   parentId?: number | null
   kind?: string
   color?: string
   icon?: string
+  dreGroup?: string | null
 }) {
-  // A child always inherits its parent's kind and hue: the ring chart groups
-  // by parent, so a child with a different colour would misreport the group.
+  // A child always inherits its parent's kind, hue and classificação de
+  // DRE: o ring chart agrupa por mãe, e o DRE formal soma a filha dentro
+  // do balde da mãe — uma filha com valor diferente relataria a classe
+  // errada em ambos.
   let kind = input.kind ?? 'expense'
   let color = input.color ?? '#007bff'
   let icon = input.icon ?? 'tag'
+  let dreGroup = input.dreGroup ?? null
 
   if (input.parentId) {
     const parent = (await db.select().from(categories).where(eq(categories.id, input.parentId)))[0]
@@ -91,7 +115,9 @@ export async function createCategory(input: {
     kind = parent.kind
     color = input.color ?? parent.color
     icon = input.icon ?? parent.icon
+    dreGroup = parent.dreGroup
   }
+  assertValidDreGroup(kind, dreGroup)
 
   const siblings = (
     await db
@@ -109,6 +135,7 @@ export async function createCategory(input: {
         kind: kind as (typeof categories.$inferInsert)['kind'],
         color,
         icon,
+        dreGroup: dreGroup as (typeof categories.$inferInsert)['dreGroup'],
         sortOrder: siblings?.n ?? 0,
       })
       .returning()
@@ -117,8 +144,10 @@ export async function createCategory(input: {
 
 export async function updateCategory(
   id: number,
-  patch: { name?: string; color?: string; icon?: string; kind?: string; sortOrder?: number },
+  patch: { name?: string; color?: string; icon?: string; kind?: string; dreGroup?: string | null; sortOrder?: number },
 ) {
+  if (patch.dreGroup !== undefined) assertValidDreGroup(patch.kind ?? (await currentKind(id)), patch.dreGroup)
+
   const updated = (
     await db
       .update(categories)
@@ -127,7 +156,9 @@ export async function updateCategory(
       .returning()
   )[0]
   if (!updated) return null
-  // Recolouring a parent recolours its children, keeping the group coherent.
+  // Recolouring/reclassifying a parent propaga pros filhos, mantendo o
+  // grupo coerente — mesma razão de sempre: quem lê depois (ring chart,
+  // DRE formal) agrupa pela mãe.
   if (patch.color && updated.parentId === null) {
     await db.update(categories).set({ color: patch.color }).where(eq(categories.parentId, id))
   }
@@ -137,7 +168,18 @@ export async function updateCategory(
       .set({ kind: patch.kind as (typeof categories.$inferInsert)['kind'] })
       .where(eq(categories.parentId, id))
   }
+  if (patch.dreGroup !== undefined && updated.parentId === null) {
+    await db
+      .update(categories)
+      .set({ dreGroup: patch.dreGroup as (typeof categories.$inferInsert)['dreGroup'] })
+      .where(eq(categories.parentId, id))
+  }
   return updated
+}
+
+async function currentKind(id: number): Promise<string> {
+  const row = (await db.select({ kind: categories.kind }).from(categories).where(eq(categories.id, id)))[0]
+  return row?.kind ?? 'expense'
 }
 
 /**

@@ -49,6 +49,8 @@ export type CategoryNode = {
   kind: string
   color: string
   icon: string
+  /** Classificação no DRE formal (specs/dre) — null é o balde padrão (Receita Bruta/Despesa Operacional). Só existe pra categoria-mãe. */
+  dreGroup: string | null
   sortOrder: number
   transactionCount: number
   children: CategoryNode[]

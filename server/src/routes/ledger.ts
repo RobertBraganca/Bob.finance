@@ -224,6 +224,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
         kind: z.enum(['income', 'expense', 'transfer', 'investment']).optional(),
         color: z.string().optional(),
         icon: z.string().optional(),
+        dreGroup: z.enum(['deduction', 'cost', 'financial', 'tax']).nullable().optional(),
       })
       .parse(req.body)
     try {
@@ -233,7 +234,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
     }
   })
 
-  app.patch('/categories/:id', async (req) => {
+  app.patch('/categories/:id', async (req, reply) => {
     const { id } = idParam.parse(req.params)
     const body = z
       .object({
@@ -241,10 +242,15 @@ export async function ledgerRoutes(app: FastifyInstance) {
         color: z.string().optional(),
         icon: z.string().optional(),
         kind: z.enum(['income', 'expense', 'transfer', 'investment']).optional(),
+        dreGroup: z.enum(['deduction', 'cost', 'financial', 'tax']).nullable().optional(),
         sortOrder: z.number().int().optional(),
       })
       .parse(req.body)
-    return categoriesService.updateCategory(id, body)
+    try {
+      return await categoriesService.updateCategory(id, body)
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
+    }
   })
 
   app.delete('/categories/:id', async (req) => {

@@ -233,6 +233,7 @@ app.post('/categories', async (c) => {
       kind: z.enum(['income', 'expense', 'transfer', 'investment']).optional(),
       color: z.string().optional(),
       icon: z.string().optional(),
+      dreGroup: z.enum(['deduction', 'cost', 'financial', 'tax']).nullable().optional(),
     })
     .parse(await c.req.json())
   try {
@@ -250,10 +251,15 @@ app.patch('/categories/:id', async (c) => {
       color: z.string().optional(),
       icon: z.string().optional(),
       kind: z.enum(['income', 'expense', 'transfer', 'investment']).optional(),
+      dreGroup: z.enum(['deduction', 'cost', 'financial', 'tax']).nullable().optional(),
       sortOrder: z.number().int().optional(),
     })
     .parse(await c.req.json())
-  return c.json(await categoriesService.updateCategory(id, body))
+  try {
+    return c.json(await categoriesService.updateCategory(id, body))
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+  }
 })
 
 app.delete('/categories/:id', async (c) => {
