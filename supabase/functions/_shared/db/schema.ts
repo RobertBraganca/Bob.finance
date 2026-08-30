@@ -54,6 +54,15 @@ export const csvSignConventionEnum = pgEnum('csv_sign_convention', [
   'type_flag',
 ])
 export const categoryKindEnum = pgEnum('category_kind', ['income', 'expense', 'transfer', 'investment'])
+/**
+ * Onde uma categoria entra no DRE formal (specs/dre, "DRE PJ formal") —
+ * null é o padrão implícito (Receita Bruta pra income, Despesa
+ * Operacional pra expense), nunca gravado à parte porque não precisa:
+ * são os dois maiores baldes, tudo que não foi classificado explicitamente
+ * cai neles. Só existe pra categorias-mãe (parentId is null) — uma
+ * subcategoria herda da mãe, igual já faz com cor e kind.
+ */
+export const dreGroupEnum = pgEnum('dre_group', ['deduction', 'cost', 'financial', 'tax'])
 export const ruleFieldEnum = pgEnum('rule_field', ['description', 'raw_category'])
 export const ruleMatchTypeEnum = pgEnum('rule_match_type', ['contains', 'starts_with', 'equals', 'regex'])
 export const ruleDirectionEnum = pgEnum('rule_direction', ['any', 'in', 'out'])
@@ -139,6 +148,7 @@ export const categories = pgTable(
     kind: categoryKindEnum('kind').notNull().default('expense'),
     color: text('color').notNull().default('#2a78d6'),
     icon: text('icon').notNull().default('tag'),
+    dreGroup: dreGroupEnum('dre_group'),
     sortOrder: int('sort_order').notNull().default(0),
     archived: boolean('archived').notNull().default(false),
     createdAt: text('created_at').notNull().default(now),
