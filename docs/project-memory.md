@@ -490,3 +490,51 @@ mesmo achado já documentado acima ("Promise.all sob o pooler de
 transação da Edge Function pode travar sem erro"), aplicado
 preventivamente aqui porque esta rota roda a cada carregamento do
 Painel (mais frequente que `goals-history`, que já tinha essa correção).
+
+## Estudo de viabilidade de 14+1 candidatas (29/08/2026) e primeira leva implementada (30/08/2026)
+
+Usuário pediu um estudo de viabilidade formal (`docs/PROJECT_REVIEWER.md`
+como papel) de 15 ideias candidatas, sem implementar — depois pediu pra
+seguir com implementação na ordem do ranking sugerido. Achados que valem
+lembrar (a análise completa de cada candidata, incluindo as ainda não
+implementadas, não está condensada aqui — está no histórico da conversa,
+condensar se algum dia virar spec):
+
+- **Achado recorrente mais valioso**: várias candidatas pediam mecanismo
+  mais caro do que o necessário porque assumiam que "histórico" =
+  "snapshot persistido". Pelo menos 3 vezes (`healthScoreHistory`,
+  recordes do motor financeiro, patrimônio histórico) o mecanismo certo já
+  existe e é grátis: reusar a função de UM período, sem alterá-la, num
+  loop sequencial sobre vários períodos (mesmo padrão de
+  `goalHistory`/`homeBanners`) — nunca persistir nada. Antes de propor uma
+  tabela nova pra "ver evolução de X", checar se X já é derivável do
+  histórico de `transactions` para qualquer data passada.
+- **[1] Sequência do Diário, [3] Histórico do Health Score, [6] Simulador
+  no Painel, [12] Ativo ilíquido/imobilizado, [15] Sugestão de match
+  manual×CSV** — implementados. Todos Baixo custo confirmado na prática,
+  nenhum precisou de decisão de princípio nova.
+- **[2] Loop de revisão de pendências** — investigado, **já estava
+  100% resolvido**: `ReconciliationCard` (Dashboard.tsx) já é visível por
+  padrão, já lista cada pendência com confirmar/descartar, e já
+  `return null` quando zerado. Não construído — seria trabalho
+  redundante. A metade da candidata sobre regras aprendidas (promoção
+  automática em 3 hits, sem ação de "confirmar cedo") ficou fora de
+  escopo por ambiguidade não resolvida, não por já estar pronta.
+- **Bloqueio de infra, não de código**: a CLI do Supabase perdeu
+  autenticação no meio da sessão (token expirado após muitas horas) —
+  bloqueou migração/deploy até o usuário rodar `supabase login`
+  manualmente. Nenhum dado foi perdido; só pausou a aplicação de
+  migrações já escritas e testadas. Vale lembrar em sessões longas: se
+  `supabase db query`/`projects list` devolver 401 sem motivo aparente,
+  é isso, não um bug de código.
+- **`illiquid` como novo valor de enum** (`asset_class_kind`) confirmou
+  que `asset_valuations` nunca distinguiu cotação BRAPI de valor manual —
+  qualquer classe fora de `stocks`/`fii` já era 100% manual desde sempre;
+  a "nova classe" foi só um valor de enum + label + ícone, não um
+  mecanismo novo.
+- **`possibleManualMatchId`/`replaceManualMatch`** (`staged_transactions`)
+  é o primeiro mecanismo de sugestão desta sessão que, ao ser confirmado
+  pelo usuário, EXCLUI uma transação existente (o lançamento manual) como
+  parte do commit — precedente novo a lembrar se outra sugestão de
+  "substituir" aparecer: o padrão é sinalizar no staging, nunca aplicar
+  sozinho, e só agir no commit explícito.

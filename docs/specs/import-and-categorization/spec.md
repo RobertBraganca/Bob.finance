@@ -83,6 +83,18 @@ CRUD de regras, editor de memória aprendida.
   antes de entrar no pipeline genérico (ver README, seção "PicPay é um caso
   especial").
 
+## Sugestão de match contra lançamento manual (Status: implementado, 30/08/2026)
+Diferente de `duplicateOf` (hash exato — mesma descrição normalizada), uma
+linha em staging também é comparada contra transações não-pendentes de
+origem `manual`/`daily` já no ledger, por conta+valor exato+janela de ±15
+dias (nunca por descrição — texto livre do usuário nunca bate com o texto
+do banco; mesmo critério que `reconciliationCandidates`, `specs/cash-flow-
+reconciliation`, já usa). Só computado quando a linha não é já um
+duplicado certo. Sinaliza (`possibleManualMatchId`), nunca aplica sozinho:
+o usuário marca `replaceManualMatch` explicitamente na revisão, e só no
+commit o lançamento manual apontado é excluído (o CSV vira a fonte de
+verdade daquele evento). Ver estudo de viabilidade #15, 29/08/2026.
+
 ## Fora de escopo
 - Qualquer integração bancária automática (open finance). Importação é
   sempre um upload manual de arquivo.

@@ -67,12 +67,15 @@ de qual saldo é reduzido.
   reduzido em R$X") — mesmo contrato de memória de cálculo do ADR 0010.
 
 ## UI
-Um modal ou página "Simular", acessível de Saúde financeira e de
-Endividamento: formulário compacto (tipo de simulação, valor, origem do
-dinheiro), resultado com os deltas lado a lado (Health Score antes/depois,
-Runway antes/depois, disponível antes/depois), sem indicador visual de
-"bom" ou "ruim" além dos que o Health Score e o Radar já usam por conta
-própria.
+Um modal "Simular", acessível de Saúde financeira, Endividamento e — desde
+30/08/2026 (estudo de viabilidade #6, 29/08/2026) — também do Painel, como
+espaço exploratório de uso casual, não só quando há decisão real em jogo.
+Mudança só de entrada/UX: o modal continua o mesmo, `decisions/0016`
+inalterado (nunca persiste, sempre reusa as funções de produção).
+Formulário compacto (tipo de simulação, valor, origem do dinheiro),
+resultado com os deltas lado a lado (Health Score antes/depois, Runway
+antes/depois, disponível antes/depois), sem indicador visual de "bom" ou
+"ruim" além dos que o Health Score e o Radar já usam por conta própria.
 
 ## Casos de borda
 - Origem "reserva" escolhida mas o usuário não tem reserva configurada

@@ -35,6 +35,14 @@ teto (ver `specs/monthly-goals`).
 `Daily.tsx`: formulário de lançamento rápido + heatmap de intensidade por
 dia (`SpendHeatmap`) + card de ritmo projetado.
 
+## Sequência de uso (Status: implementado, 30/08/2026)
+Contador observacional de dias seguidos com lançamento (`source='daily'`),
+puramente derivado (`analytics.dailyStreak()`, dias distintos de
+`transactions`, sem tabela nova). Hoje ainda "conta" enquanto não vira meia-
+noite, senão o contador zeraria toda manhã antes do usuário abrir o app.
+Nunca prescritivo — nenhuma linguagem de "não quebre a sequência", só o fato
+("X dias seguidos"). Ver estudo de viabilidade #1, 29/08/2026.
+
 ## Casos de borda
 - Sem nenhum gasto ainda no mês: heatmap com todos os dias em zero, não
   vazio.

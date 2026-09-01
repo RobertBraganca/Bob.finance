@@ -115,6 +115,18 @@ fora da faixa) e o valor do threshold configurado ao lado de cada item. Toda
 métrica tem um link ou disclosure "como calculamos" que expande a memória de
 cálculo (`premissas` da API), nunca escondida atrás de um tooltip só.
 
+## Histórico do Health Score (Status: implementado, 30/08/2026)
+`GET /financial-health/score-history` — série dos últimos N meses, cada
+ponto uma chamada de `healthScore(period)` sem alterá-la, em loop
+(`financialHealth.ts#healthScoreHistory`), nunca um valor persistido. Um
+snapshot gravado ficaria defasado se uma transação de um mês antigo fosse
+corrigida depois; recalcular sempre evita isso por completo, mesmo espírito
+de "derivar, nunca guardar". Sequencial de propósito, não `Promise.all`,
+pelo mesmo risco de travamento de pooler já documentado em
+`goalHistory`/`homeBanners` sob Edge Functions. Mês sem dado suficiente vira
+um buraco na linha do gráfico (`ScoreHistoryChart`), nunca um zero. Ver
+estudo de viabilidade #3, 29/08/2026.
+
 ## Casos de borda
 - Nenhum dado suficiente para nenhum dos 5 indicadores do Health Score (app
   recém-instalado): estado explícito de "sem dado suficiente ainda", nunca

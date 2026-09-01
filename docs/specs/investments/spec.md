@@ -168,6 +168,18 @@ aparece na lista — silêncio, não "reduzir zero". Ver `decisions/0011`.
 - Classe sem nenhum ativo pontuado: não aparece no plano de aporte, não
   inventa sugestão.
 
+## Ativos ilíquidos / imobilizado (Status: implementado, 30/08/2026)
+Nova classe `illiquid` ("Imobilizado": imóvel, veículo, joia). Não é
+mecanismo novo — valor manual sem cotação de mercado já era o caminho padrão
+de `asset_valuations` pra qualquer classe fora de `stocks`/`fii`
+(`recordValuation` é o mesmo upsert usado tanto pelo formulário manual
+quanto pelo refresh de cotação BRAPI; `positions()` não distingue as duas
+origens). Ganha classe própria (não `other`) pelo mesmo motivo de `treasury`
+ter saído de `fixed_income`: linha visível própria em alocação/Meus ativos.
+Deliberadamente fora de `DEFAULT_LIQUID_ASSET_CLASSES`
+(`financialHealth.ts`) — contar imóvel como líquido pro Runway seria um bug
+de cálculo real. Ver estudo de viabilidade #12, 29/08/2026.
+
 ## Fora de escopo
 - Execução de ordem de compra/venda numa corretora — o app registra o que
   já aconteceu, nunca executa.
