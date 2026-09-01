@@ -32,8 +32,13 @@ teto (ver `specs/monthly-goals`).
   comparado ao teto vigente.
 
 ## UI
-`Daily.tsx`: formulário de lançamento rápido + heatmap de intensidade por
-dia (`SpendHeatmap`) + card de ritmo projetado.
+`Daily.tsx`: formulário de lançamento rápido + curva de intensidade por dia
+(`SpendAreaChart`, Area Chart - Gradient, 29/08/2026) + termômetro de
+gastos por dia da semana (`DailyHeatmap`, grade de calendário, 01/09/2026)
++ card de ritmo projetado. A curva e o termômetro leem a MESMA série
+(`daily.data.days`) de duas formas: a curva mostra tendência ao longo do
+mês, o termômetro separa por dia da semana — perguntas diferentes, nunca
+uma segunda fonte de dado.
 
 ## Sequência de uso (Status: implementado, 30/08/2026)
 Contador observacional de dias seguidos com lançamento (`source='daily'`),

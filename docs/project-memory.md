@@ -694,3 +694,54 @@ tokens de accent existentes no design system são sutis de propósito
 (pensados pra web, não pra essa comparação lado a lado específica) e podem
 precisar de reforço quando o pedido é para um elemento se diferenciar de
 vizinhos parecidos, não só ganhar uma variação sutil de tom.
+
+## Termômetro de gastos — heatmap de calendário no Diário (01/09/2026)
+
+`DailyHeatmap` (`src/components/charts/DailyHeatmap.tsx`), pedido com uma
+referência de JSX de uma biblioteca de componentes não identificada
+(`HeatmapInteractionProvider`/`HeatmapCells`/etc. — busca web não achou a
+origem; tratado como referência de DESIGN, não como pacote a instalar).
+Construído com Recharts+SVG à mão, no mesmo sistema de design do resto do
+app: rampa sequencial (`theme.sequential`, um hue só, claro→escuro),
+nenhuma nova paleta (reusa a rampa já validada de `chartTheme.ts`). Mesma
+série de `daily.data.days` que já alimenta "Intensidade por dia"
+(`SpendAreaChart`) — não é dado novo, é uma segunda leitura por dia da
+semana em vez de por dia do mês. Nota de contexto: "Intensidade por dia"
+já FOI um heatmap de calendário antes (`SpendHeatmap`), trocado por uma
+curva contínua a pedido do usuário em 29/08/2026 — o pedido de hoje não é
+reverter aquilo, é ADICIONAR a leitura por dia-da-semana como um segundo
+gráfico, ao lado da curva, não no lugar dela.
+
+Aritmética de data em UTC puro (`Date.UTC`/`getUTCDay`), nunca
+`new Date(isoString)` local — evita o dia deslizar num fuso horário
+positivo (o app roda em produção só pra um usuário no Brasil, mas a
+função não deveria depender disso pra estar certa). Rastreei a lógica de
+semanas manualmente contra agosto/2026 (começa num sábado, 31 dias, 6
+semanas de calendário) antes de confiar no resultado, em vez de só rodar e
+olhar. Verificação visual feita via HTML estático servindo o CSS já
+compilado (mesmo truque do card de imobilizado) — dev server local não
+loga sem as credenciais do usuário.
+
+## Anéis de progresso da alocação — "Ring Chart - Thick Rings" (01/09/2026)
+
+`AllocationRings` (`InvestmentCharts.tsx`, card "Progresso da alocação" em
+`Investments.tsx`), pedido com uma referência JSX de `RingChart`/`Ring`/
+`RingCenter`. Diferente do heatmap: esta busca ACHOU a origem real (Bklit
+UI, `pnpm dlx shadcn@latest add @bklit/ring-chart`), mas ela puxa
+`@visx/shape @visx/group @visx/responsive motion` como dependência —
+pacotes novos, fora do padrão Recharts-only já estabelecido no app pra
+todo gráfico até aqui. Decisão: construir com a técnica de anel de
+progresso que `CategoryRing` já usa (Pie de 2 fatias por anel, Recharts
+puro), sem instalar nada novo — mesmo critério aplicado ao heatmap do
+Diário, agora consolidado como padrão da sessão: uma referência visual
+externa vira ESPECIFICAÇÃO DE DESIGN a reproduzir no sistema existente,
+não uma ordem de instalar o pacote literal, a menos que o usuário peça a
+biblioteca especificamente (nunca pediu, só mostrou o resultado visual).
+Vale a mesma régua se aparecer uma terceira referência assim.
+
+Geometria conferida por cálculo manual (raios de cada anel concêntrico
+pra `size=220, strokeWidth=16, ringGap=6, 4 anéis`) antes de considerar
+pronto, sem renderizar de fato — verificação visual completa (abrir no
+navegador) ficou de fora desta vez porque é SVG gerado pelo Recharts em
+tempo de execução, não algo que dá pra aproximar com HTML/CSS estático
+como fiz pro card de imobilizado e pro heatmap.
