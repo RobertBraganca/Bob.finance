@@ -505,6 +505,11 @@ export async function insightsRoutes(app: FastifyInstance) {
         riskDebtToIncomeBps: bps.optional(),
         riskPositiveMarginBps: bps.optional(),
       })
+      // Mesmo bug de /financial-engine/settings (corpo vazio travava o
+      // update do Drizzle com 500 em vez de 400) — achado da avaliação de
+      // uso de 01/09/2026, corrigido aqui por precaução (nunca observado
+      // neste endpoint especificamente, mas é o mesmo padrão exato).
+      .refine((v) => Object.keys(v).length > 0, { message: 'nada para atualizar' })
       .parse(req.body)
     return { settings: await healthService.setSettings(body), defaults: healthService.DEFAULT_HEALTH_SETTINGS }
   })
@@ -597,6 +602,10 @@ export async function insightsRoutes(app: FastifyInstance) {
         reservePlannedCents: z.number().int().nonnegative().optional(),
         marginCents: z.number().int().nonnegative().optional(),
       })
+      // Corpo vazio ({}) travava o update do Drizzle com "No values to
+      // set" (500 em vez de 400) — achado da avaliação de uso de
+      // 01/09/2026.
+      .refine((v) => Object.keys(v).length > 0, { message: 'nada para atualizar' })
       .parse(req.body)
     return {
       settings: await engineService.setSettings(body),
