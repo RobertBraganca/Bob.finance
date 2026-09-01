@@ -1,9 +1,9 @@
-import { addMonths, periodOf, todayIso } from '../core/dates'
-import * as engine from './financialEngine'
-import * as health from './financialHealth'
-import { listDebts, projectPaydown } from './debt'
-import { compoundStep, portfolioSummary } from './investments'
-import type { Assumptions } from './financialHealth'
+import { addMonths, periodOf, todayIso } from '../core/dates.ts'
+import * as engine from './financialEngine.ts'
+import * as health from './financialHealth.ts'
+import { listDebts, projectPaydown } from './debt.ts'
+import { compoundStep, portfolioSummary } from './investments.ts'
+import type { Assumptions } from './financialHealth.ts'
 
 /**
  * Simulador de decisões: "e se eu fizesse X?".

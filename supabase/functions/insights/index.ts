@@ -17,6 +17,7 @@ import * as goalsService from '../_shared/services/goals.ts'
 import * as investments from '../_shared/services/investments.ts'
 import * as monthlyClosingService from '../_shared/services/monthlyClosing.ts'
 import * as quotesService from '../_shared/services/quotes.ts'
+import * as simulatorService from '../_shared/services/simulator.ts'
 import { ledgerBounds } from '../_shared/services/transactions.ts'
 import { accountFlows } from '../_shared/services/transfers.ts'
 
@@ -934,6 +935,54 @@ app.post('/cash-flow/pending/:id/settle', async (c) => {
 app.post('/cash-flow/reconciliation-candidates/dismiss', async (c) => {
   const body = z.object({ pendingId: z.number().int().positive(), matchId: z.number().int().positive() }).parse(await c.req.json())
   return c.json(await cashFlowService.dismissReconciliation(body.pendingId, body.matchId))
+})
+
+/* ---------------------------------------------------------------- *
+ * Simulador de decisões. Ver `specs/decision-simulator` e
+ * `decisions/0016`/`decisions/0035`. POST em todas porque o corpo não
+ * cabe numa query string, nunca porque escrevem: nenhuma grava em
+ * tabela alguma.
+ * ---------------------------------------------------------------- */
+const simulatorSourceSchema = z.enum(['balance', 'reserve', 'investment'])
+const simulatorPeriodSchema = z.string().regex(/^\d{4}-\d{2}$/).optional()
+
+app.post('/simulate/one-time-expense', async (c) => {
+  const body = z
+    .object({
+      amountCents: z.number().int().positive(),
+      source: simulatorSourceSchema,
+      accountId: z.number().int().positive().nullable().optional(),
+      period: simulatorPeriodSchema,
+    })
+    .parse(await c.req.json())
+  return c.json(await simulatorService.simulateOneTimeExpense(body))
+})
+
+app.post('/simulate/debt-payoff', async (c) => {
+  const body = z
+    .object({
+      debtId: z.number().int().positive(),
+      source: simulatorSourceSchema,
+      period: simulatorPeriodSchema,
+    })
+    .parse(await c.req.json())
+  try {
+    return c.json(await simulatorService.simulateDebtPayoff(body))
+  } catch (error) {
+    if (error instanceof simulatorService.SimulatorError) return c.json({ error: error.message }, 422)
+    throw error
+  }
+})
+
+app.post('/simulate/decumulation', async (c) => {
+  const body = z
+    .object({
+      monthlyWithdrawalCents: z.number().int().positive(),
+      expectedReturnBps: z.number().int().min(-10_000).max(100_000),
+      horizonMonths: z.number().int().positive().max(1200).optional(),
+    })
+    .parse(await c.req.json())
+  return c.json(await simulatorService.simulateDecumulation(body))
 })
 
 Deno.serve(app.fetch)

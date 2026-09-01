@@ -3,7 +3,9 @@
  *
  * Local dev (no VITE_SUPABASE_URL set): Vite proxies /api to the Fastify
  * server (vite.config.ts) — unchanged, still needed for routes not yet
- * ported to an Edge Function (backups, simulate).
+ * ported to an Edge Function (backups). `simulate` was ported into
+ * `insights` on 01/09/2026 (decisions/0035) — it has no dedicated prefix
+ * here, same as the rest of `insights.ts`, so it falls through below.
  *
  * Deployed build (VITE_SUPABASE_URL set, e.g. on Vercel): there is no
  * Fastify server to proxy to, so requests go straight to the Supabase

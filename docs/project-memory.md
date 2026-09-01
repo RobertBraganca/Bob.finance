@@ -607,3 +607,90 @@ condensar se algum dia virar spec):
   `20260831000000_add_monthly_closing_reviews.sql`, aplicada e registrada
   em `schema_migrations` do jeito manual já documentado nesta sessão
   (`supabase db push` não conecta neste ambiente).
+
+## ADRs de desbloqueio — Monte Carlo, Decumulação, Dívida×Patrimônio + exercício do motor genérico (01/09/2026)
+
+Três dos quatro itens que ficaram bloqueados por princípio no estudo de
+viabilidade original (29/08/2026) agora têm ADR redigido, seguindo o
+formato dos ADRs existentes (`decisions/0003`, `0010`, `0016` usados como
+referência de estrutura):
+
+- **[9] Monte Carlo** → `decisions/0034-monte-carlo-e-simulacao-com-piso-minimo-de-dados.md`.
+  Classificação travada em Simulação (nunca Projeção), piso de 24 meses de
+  retorno mensal por CLASSE de ativo antes de rodar (abaixo disso, "dado
+  insuficiente para simular esta classe" em vez de rodar mesmo assim).
+  Desbloqueado de PRINCÍPIO, mas continua bloqueado de DADO: nenhuma classe
+  do produto atinge 24 meses hoje (histórico real de cotação começa em
+  28/08/2026, dia da migração pra Supabase) — não é trabalho pendente, é
+  espera natural pelo uso contínuo do app.
+- **[13] Decumulação/aposentadoria** → `decisions/0035-decumulacao-e-extensao-do-simulador-de-decisoes.md`.
+  Extensão direta do `decisions/0016` (Simulador de decisões), não um
+  princípio novo: nunca calcula "quanto retirar", só mostra a consequência
+  de um valor de retirada que o usuário propõe, reusando o núcleo de
+  composição de `goalProjection` com o sinal do fluxo invertido. Desbloqueado
+  para virar spec (terceiro tipo de hipótese em
+  `specs/decision-simulator`, ao lado dos dois já travados pelo 0016).
+- **[14] Dívida × patrimônio** → `decisions/0036-divida-e-patrimonio-lado-a-lado-sem-hierarquia.md`.
+  Dois números lado a lado (juros da dívida vs. retorno da carteira), sem
+  hierarquia visual nem frase que implique "priorize A sobre B" — tabela de
+  frase proibida/permitida incluída no ADR. Resolve por extensão o framing
+  emocional do "Termômetro de Prosperidade" (Efeito do Progresso Dotado) de
+  uma avaliação anterior: fica formalmente FORA do produto, não adiado — é
+  uma feature diferente (engajamento emocional), não uma versão mais simples
+  da comparação neutra que entra. Desbloqueado para virar spec.
+- **[10] Motor genérico completo** — não recebeu ADR, recebeu exercício de
+  design primeiro: `design-exercises/motor-generico-de-metas.md`. Tabela
+  comparativa com dado real dos três domínios (`monthlyGoals`,
+  `investmentGoals`, `targetAllocations`) mostrou que cada um tem uma forma
+  diferente de "alvo" (absoluto-pra-cima, absoluto-pra-baixo,
+  relativo-ao-todo), pelo menos três fórmulas diferentes de "no ritmo" (e
+  uma quarta ausência total de fórmula em `targetAllocations`), dimensão de
+  tempo obrigatória/opcional/inexistente, e ausência de meta tratada como
+  estado explícito ou omissão silenciosa dependendo do domínio. Conclusão:
+  **não vale a pena generalizar a fórmula além do retrofit pontual já
+  feito** — resultado válido do exercício, não uma falha dele. Só o
+  vocabulário de saída (`GoalState`/`MeterState`) continua valendo unificar,
+  e isso já foi feito para dois dos três domínios. Fica registrada como
+  possível extensão pequena (não decidida): dar a `targetAllocations` um
+  badge de estado próprio por faixas de `driftBps`, nunca compartilhando
+  fórmula com os outros dois.
+
+## Decumulação implementada + achado: Simulador não tinha Edge Function (01/09/2026)
+
+Com o ADR 0035 pronto, implementado como terceiro tipo de hipótese do
+Simulador (`POST /simulate/decumulation`, `simulator.ts#simulateDecumulation`).
+Núcleo de composição extraído de `goalProjection` para uma função própria
+exportada (`investments.ts#compoundStep`), reusada por ambos com o sinal do
+fluxo invertido na retirada — nenhuma segunda fórmula de juros compostos.
+UI: `SimulatorModal.tsx` ganhou a aba "Decumulação", trocando a tabela de
+deltas (antes/depois) pelas outras duas por um gráfico de área da série
+projetada, com o mês de esgotamento marcado por uma `ReferenceLine`.
+
+**Achado ao implementar**: `services/simulator.ts` e `routes/simulate.ts`
+nunca tinham sido portados para uma Edge Function (`src/lib/api.ts` já
+documentava isso: "routes not yet ported... simulate") — ou seja, o
+Simulador inteiro (os dois tipos já existentes, gasto único e quitação de
+dívida, construídos antes nesta mesma sessão) só funcionava no Fastify
+local, retornando 404 em qualquer build implantado com
+`VITE_SUPABASE_URL` configurado. Corrigido junto: `simulator.ts` espelhado
+para `supabase/functions/_shared/services/simulator.ts`, e as três rotas
+`/simulate/*` adicionadas à Edge Function `insights` (que já é o fallback
+de `functionFor()` para qualquer rota sem prefixo próprio, então nenhuma
+mudança de roteamento foi necessária no frontend além de atualizar o
+comentário em `api.ts`).
+
+## Visualização dedicada para ativos imobilizados (01/09/2026)
+
+`IlliquidAssetsCard` (`src/pages/Investments.tsx`), pedido com referência
+visual em prints de apps de patrimônio externos. Detalhes em
+`specs/investments`. Nota de processo: o destaque visual inicial (só os
+tokens de `.slab--accent`, fundo/borda) ficou quase imperceptível ao lado
+de um card comum quando checado visualmente lado a lado (renderização
+estática do CSS já compilado, sem precisar de login) — a correção foi
+somar uma faixa lateral de 3px na cor da marca (`var(--brand)`), que já é
+a cor de ação primária do app em outros lugares, não uma cor de status.
+Vale lembrar disso da próxima vez que uma tarefa pedir "destaque": os
+tokens de accent existentes no design system são sutis de propósito
+(pensados pra web, não pra essa comparação lado a lado específica) e podem
+precisar de reforço quando o pedido é para um elemento se diferenciar de
+vizinhos parecidos, não só ganhar uma variação sutil de tom.

@@ -180,6 +180,20 @@ Deliberadamente fora de `DEFAULT_LIQUID_ASSET_CLASSES`
 (`financialHealth.ts`) — contar imóvel como líquido pro Runway seria um bug
 de cálculo real. Ver estudo de viabilidade #12, 29/08/2026.
 
+**Visualização dedicada (Status: implementado, 01/09/2026).** A tabela
+genérica de classe (`AssetGroupCard`) tem colunas que não fazem sentido
+para um bem físico: "Cotação" (não existe preço de mercado diário para um
+sofá), "% ideal"/"Comprar?" (rebalanceamento não se aplica a um imóvel
+único). `IlliquidAssetsCard` (`src/pages/Investments.tsx`) substitui a
+tabela só para esta classe: lista simples nome + valor, os
+`ILLIQUID_HIGHLIGHT_TOP_N` (3) maiores ativos em destaque quando recolhido
+e o resto somado em "e mais N...", card com destaque visual próprio
+(`.group-card--highlight`, faixa lateral na cor da marca) para diferenciar
+de imediato dos demais cards de classe na lista. Nenhuma taxonomia de
+subtipo foi criada (não existe campo para diferenciar "móveis" de
+"veículo") — agrupar por ativo individual, não por categoria, é o que o
+dado atual sustenta sem inventar precisão que não existe.
+
 ## Vocabulário de estado unificado (Status: implementado, 30/08/2026)
 `goalProjection` ganha `state: GoalState` (mesmo union type de
 `goals.ts`/`MeterState` do front) — estudo de viabilidade #10, 29/08/2026,

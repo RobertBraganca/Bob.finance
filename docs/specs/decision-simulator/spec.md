@@ -16,6 +16,10 @@ ideia.
 - Como usuário, eu quero testar "e se eu quitasse esta dívida agora", e
   ver quanto de juro futuro eu economizaria contra quanto minha reserva ou
   investimento diminuiria para pagar.
+- Como usuário planejando decumulação/aposentadoria, eu quero testar "e se
+  eu retirasse R$X/mês da minha carteira a partir de agora", e ver até
+  quando o patrimônio projetado dura, sem o sistema me dizer qual valor de
+  retirada "é seguro" (`decisions/0035`).
 
 ## Modelo de dados
 Nenhuma tabela nova, nenhuma escrita em nenhuma tabela existente — a
@@ -29,10 +33,16 @@ uma simulação para comparar depois, isso é fora de escopo desta versão
 |---|---|---|
 | `/simulate/one-time-expense` | POST | `{amountCents, source: 'balance'\|'reserve'\|'investment', accountId?}` → impacto em Health Score, Runway, disponível para alocação |
 | `/simulate/debt-payoff` | POST | `{debtId, source: 'balance'\|'reserve'\|'investment'}` → juro futuro economizado (reusa `specs/debt`, cenário acelerado com pagamento total), impacto em Health Score, Runway, disponível |
+| `/simulate/decumulation` | POST | `{monthlyWithdrawalCents, expectedReturnBps, horizonMonths?}` → série mês a mês do patrimônio da carteira sob retirada fixa, e o mês em que se esgota (ou `null`, se não esgotar dentro do horizonte) |
 
-`source` é de onde o dinheiro hipotético sai — não existe simulação sem
-essa escolha, porque o impacto em Reserva e em Runway depende inteiramente
-de qual saldo é reduzido.
+`source` é de onde o dinheiro hipotético sai nos dois primeiros tipos — não
+existe simulação sem essa escolha, porque o impacto em Reserva e em Runway
+depende inteiramente de qual saldo é reduzido. `/simulate/decumulation` não
+tem `source`: a retirada sai sempre do valor total da carteira de
+investimentos (`portfolioSummary().marketValueCents`), e sua saída é uma
+SÉRIE (mês a mês), não um par antes/depois como os outros dois — é a
+mesma diferença de forma que já existe entre `goalProjection` (série) e o
+resto de `investments.ts` (leitura pontual).
 
 ## Regras de negócio
 - **Cada função de leitura usada aqui é a mesma função de produção, nunca
@@ -65,6 +75,11 @@ de qual saldo é reduzido.
 - **`premissas` obrigatório**, com cada função reaproveitada citada pela
   origem (ex. "Health Score recalculado com `reserveStatus.currentCents`
   reduzido em R$X") — mesmo contrato de memória de cálculo do ADR 0010.
+- **Decumulação nunca calcula "quanto retirar" (`decisions/0035`).** O
+  retorno esperado e o valor de retirada mensal são sempre insumo do
+  usuário, nunca uma saída do sistema. A projeção reusa `compoundStep`
+  (mesmo passo de `investments.ts#goalProjection`), com o fluxo mensal
+  invertido — nenhuma segunda fórmula de juros compostos.
 
 ## UI
 Um modal "Simular", acessível de Saúde financeira, Endividamento e — desde
@@ -75,7 +90,10 @@ inalterado (nunca persiste, sempre reusa as funções de produção).
 Formulário compacto (tipo de simulação, valor, origem do dinheiro),
 resultado com os deltas lado a lado (Health Score antes/depois, Runway
 antes/depois, disponível antes/depois), sem indicador visual de "bom" ou
-"ruim" além dos que o Health Score e o Radar já usam por conta própria.
+"ruim" além dos que o Health Score e o Radar já usam por conta própria. O
+terceiro tipo, decumulação, troca o resultado de deltas por um gráfico da
+série projetada (mesmo padrão visual das demais séries temporais do
+produto) com o mês de esgotamento em destaque quando existir.
 
 ## Casos de borda
 - Origem "reserva" escolhida mas o usuário não tem reserva configurada
@@ -84,6 +102,15 @@ antes/depois, disponível antes/depois), sem indicador visual de "bom" ou
   resto do produto já usa.
 - Dívida escolhida em `/simulate/debt-payoff` já sem saldo (quitada): erro
   claro, não um cálculo de economia de juros sobre zero.
+- Retirada mensal maior que o suportado pelo retorno configurado: o
+  patrimônio esgota antes do fim do horizonte, `depletionMonth` marca
+  exatamente qual mês, e a série para de crescer em módulo ali (não
+  continua projetando valor negativo).
+- Retorno esperado configurado alto o bastante para nunca esgotar dentro
+  do horizonte simulado (padrão de 360 meses): `depletionMonth` volta
+  `null`, e a UI mostra "não se esgota no horizonte simulado", nunca
+  interpreta isso como "a retirada é segura para sempre" — é só o que o
+  horizonte simulado conseguiu mostrar.
 
 ## Fora de escopo
 - Salvar ou comparar simulações passadas — cada chamada é isolada e

@@ -750,6 +750,18 @@
   transform: rotate(180deg);
 }
 
+/* Ativos imobilizados pedem destaque visual próprio dentro da lista de
+   classes (01/09/2026). O tom de `.slab--accent` sozinho (fundo/borda)
+   comparado lado a lado com um `.card` comum ficou perto de imperceptível
+   em modo claro (checado visualmente) — a faixa lateral na cor da marca é
+   o que de fato lê como "este card é diferente dos outros" à distância,
+   sem usar uma cor de status (verde/amarelo/vermelho de veredito). */
+.group-card--highlight {
+  background: var(--slab-accent-bg);
+  border-color: var(--slab-accent-line);
+  border-left: 3px solid var(--brand);
+}
+
 /* ---- Meters ------------------------------------------------------ */
 .meter {
   display: flex;

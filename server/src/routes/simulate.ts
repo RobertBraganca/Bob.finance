@@ -43,4 +43,15 @@ export async function simulateRoutes(app: FastifyInstance) {
       throw error
     }
   })
+
+  app.post('/simulate/decumulation', async (req) => {
+    const body = z
+      .object({
+        monthlyWithdrawalCents: z.number().int().positive(),
+        expectedReturnBps: z.number().int().min(-10_000).max(100_000),
+        horizonMonths: z.number().int().positive().max(1200).optional(),
+      })
+      .parse(req.body)
+    return simulator.simulateDecumulation(body)
+  })
 }

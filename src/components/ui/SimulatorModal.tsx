@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis } from 'recharts'
 import { api } from '../../lib/api'
-import { bps, money, parseMoneyInput } from '../../lib/format'
+import { bps, money, parseMoneyInput, parsePercentInput, period as fmtPeriod } from '../../lib/format'
+import { themeFor } from '../../lib/chartTheme'
+import { useEffectiveSurface } from '../../lib/theme'
 // Importa do barrel uma vez só. NÃO é reexportado por ele: o barrel
 // importando este arquivo, que importa o barrel de volta, fecharia um ciclo.
 import { Assumptions, type AssumptionBag } from './Assumptions'
 import { Button, EmptyState, Select } from './index'
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from './chart'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from './dialog'
 import { Input } from './input'
 import { Tabs, TabsList, TabsTrigger } from './tabs'
@@ -43,20 +47,38 @@ const SOURCES = [
 
 type Source = (typeof SOURCES)[number]['value']
 
+type DecumulationPoint = { month: number; period: string; valueCents: number }
+
+type DecumulationResult = {
+  series: DecumulationPoint[]
+  startingValueCents: number
+  monthlyWithdrawalCents: number
+  expectedReturnBps: number
+  depletionMonth: number | null
+  depletionPeriod: string | null
+  assumptions: AssumptionBag
+}
+
+type SimKind = 'expense' | 'payoff' | 'decumulation'
+
 export function SimulatorModal({
   onClose,
   initialKind = 'expense',
   initialDebtId = null,
 }: {
   onClose: () => void
-  initialKind?: 'expense' | 'payoff'
+  initialKind?: SimKind
   initialDebtId?: number | null
 }) {
-  const [kind, setKind] = useState<'expense' | 'payoff'>(initialKind)
+  const [kind, setKind] = useState<SimKind>(initialKind)
   const [amount, setAmount] = useState('')
   const [source, setSource] = useState<Source>('balance')
   const [debtId, setDebtId] = useState<number | null>(initialDebtId)
+  const [withdrawal, setWithdrawal] = useState('')
+  const [expectedReturn, setExpectedReturn] = useState('8')
+  const [horizonYears, setHorizonYears] = useState('30')
   const [result, setResult] = useState<SimulationResult | null>(null)
+  const [decumulation, setDecumulation] = useState<DecumulationResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const debts = useQuery({
@@ -65,26 +87,46 @@ export function SimulatorModal({
     enabled: kind === 'payoff',
   })
 
-  const run = useMutation({
-    mutationFn: () =>
-      kind === 'expense'
-        ? api.post<SimulationResult>('/simulate/one-time-expense', {
-            amountCents: Math.abs(parseMoneyInput(amount) ?? 0),
-            source,
-          })
-        : api.post<SimulationResult>('/simulate/debt-payoff', { debtId, source }),
+  const run = useMutation<SimulationResult | DecumulationResult>({
+    mutationFn: (): Promise<SimulationResult | DecumulationResult> => {
+      if (kind === 'expense') {
+        return api.post<SimulationResult>('/simulate/one-time-expense', {
+          amountCents: Math.abs(parseMoneyInput(amount) ?? 0),
+          source,
+        })
+      }
+      if (kind === 'payoff') {
+        return api.post<SimulationResult>('/simulate/debt-payoff', { debtId, source })
+      }
+      return api.post<DecumulationResult>('/simulate/decumulation', {
+        monthlyWithdrawalCents: Math.abs(parseMoneyInput(withdrawal) ?? 0),
+        expectedReturnBps: parsePercentInput(expectedReturn) ?? 0,
+        horizonMonths: Math.round((Number(horizonYears) || 30) * 12),
+      })
+    },
     onSuccess: (data) => {
       setError(null)
-      setResult(data)
+      if (kind === 'decumulation') {
+        setResult(null)
+        setDecumulation(data as DecumulationResult)
+      } else {
+        setDecumulation(null)
+        setResult(data as SimulationResult)
+      }
     },
     onError: (e) => {
       setResult(null)
+      setDecumulation(null)
       setError(e instanceof Error ? e.message : 'não foi possível simular')
     },
   })
 
   const canRun =
-    kind === 'expense' ? (parseMoneyInput(amount) ?? 0) > 0 : debtId !== null
+    kind === 'expense'
+      ? (parseMoneyInput(amount) ?? 0) > 0
+      : kind === 'payoff'
+        ? debtId !== null
+        : (parseMoneyInput(withdrawal) ?? 0) > 0
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -94,19 +136,21 @@ export function SimulatorModal({
         <Tabs
           value={kind}
           onValueChange={(next) => {
-            setKind(next as 'expense' | 'payoff')
+            setKind(next as SimKind)
             setResult(null)
+            setDecumulation(null)
             setError(null)
           }}
         >
           <TabsList aria-label="Tipo de simulação">
             <TabsTrigger value="expense">Gasto único</TabsTrigger>
             <TabsTrigger value="payoff">Quitar dívida</TabsTrigger>
+            <TabsTrigger value="decumulation">Decumulação</TabsTrigger>
           </TabsList>
         </Tabs>
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
-          {kind === 'expense' ? (
+          {kind === 'expense' && (
             <div className="field" style={{ width: 180 }}>
               <label className="field__label">Valor</label>
               <Input
@@ -116,7 +160,8 @@ export function SimulatorModal({
                 className="text-right tabular-nums"
               />
             </div>
-          ) : (
+          )}
+          {kind === 'payoff' && (
             <div className="field" style={{ minWidth: 240, flex: 1 }}>
               <label className="field__label">Dívida a quitar</label>
               <Select
@@ -130,22 +175,65 @@ export function SimulatorModal({
               />
             </div>
           )}
-          <div className="field" style={{ minWidth: 200 }}>
-            <label className="field__label">De onde sai o dinheiro</label>
-            <Select
-              value={source}
-              options={SOURCES.map((s) => ({ value: s.value, label: s.label }))}
-              onChange={(v) => setSource((v ?? 'balance') as Source)}
-            />
-            <span className="field__hint">
-              O impacto em reserva e runway depende de qual saldo diminui
-            </span>
-          </div>
+          {kind === 'decumulation' && (
+            <>
+              <div className="field" style={{ width: 180 }}>
+                <label className="field__label">Retirada mensal</label>
+                <Input
+                  value={withdrawal}
+                  onChange={(e) => setWithdrawal(e.target.value)}
+                  placeholder="0,00"
+                  className="text-right tabular-nums"
+                />
+              </div>
+              <div className="field" style={{ width: 140 }}>
+                <label className="field__label">Retorno esperado (a.a.)</label>
+                <Input
+                  value={expectedReturn}
+                  onChange={(e) => setExpectedReturn(e.target.value)}
+                  placeholder="8"
+                  className="text-right tabular-nums"
+                />
+              </div>
+              <div className="field" style={{ width: 140 }}>
+                <label className="field__label">Horizonte (anos)</label>
+                <Input
+                  value={horizonYears}
+                  onChange={(e) => setHorizonYears(e.target.value)}
+                  placeholder="30"
+                  className="text-right tabular-nums"
+                />
+              </div>
+            </>
+          )}
+          {kind !== 'decumulation' && (
+            <div className="field" style={{ minWidth: 200 }}>
+              <label className="field__label">De onde sai o dinheiro</label>
+              <Select
+                value={source}
+                options={SOURCES.map((s) => ({ value: s.value, label: s.label }))}
+                onChange={(v) => setSource((v ?? 'balance') as Source)}
+              />
+              <span className="field__hint">
+                O impacto em reserva e runway depende de qual saldo diminui
+              </span>
+            </div>
+          )}
         </div>
+
+        {kind === 'decumulation' && (
+          <p className="chart__note">
+            O retorno esperado é um parâmetro que você escolhe, não um cálculo do sistema. O
+            resultado é sempre a consequência de retirar esse valor todo mês, nunca uma taxa de
+            retirada recomendada.
+          </p>
+        )}
 
         {error && (
           <EmptyState icon="info" title="Não dá para simular isso" body={error} />
         )}
+
+        {decumulation && <DecumulationChart result={decumulation} />}
 
         {result && (
           <div className="stack stack--loose">
@@ -212,6 +300,93 @@ export function SimulatorModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+const decumulationChartConfig = {
+  valueCents: { label: 'Patrimônio projetado' },
+} satisfies ChartConfig
+
+/**
+ * Mesmo padrão de Area Chart - Gradient das demais séries temporais do
+ * produto (`SpendAreaChart`, `ScoreHistoryChart`), com o mês de esgotamento
+ * marcado por uma `ReferenceLine` quando existir — nunca uma cor de
+ * veredito (o esgotamento é um fato calculado, não um alerta de "errou").
+ */
+function DecumulationChart({ result }: { result: DecumulationResult }) {
+  const theme = themeFor(useEffectiveSurface('paper'))
+  const gradientId = 'decumulation-area'
+
+  return (
+    <div className="stack stack--loose">
+      <hr className="divider" />
+      <div className="kv">
+        <span className="kv__k">Patrimônio inicial</span>
+        <span className="kv__v">{money(result.startingValueCents)}</span>
+        <span className="kv__k">Retirada mensal simulada</span>
+        <span className="kv__v">{money(result.monthlyWithdrawalCents)}</span>
+        <span className="kv__k">Retorno esperado (a.a.)</span>
+        <span className="kv__v">{bps(result.expectedReturnBps, 2)}</span>
+        <span className="kv__k">Esgotamento</span>
+        <span className="kv__v">
+          {result.depletionPeriod === null
+            ? 'não se esgota no horizonte simulado'
+            : `${fmtPeriod(result.depletionPeriod)} (mês ${result.depletionMonth})`}
+        </span>
+      </div>
+
+      <ChartContainer config={decumulationChartConfig} className="aspect-auto w-full" style={{ height: 220 }}>
+        <AreaChart data={result.series} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={theme.primary} stopOpacity={0.8} />
+              <stop offset="95%" stopColor={theme.primary} stopOpacity={0.1} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid vertical={false} stroke={theme.grid} />
+          <XAxis
+            dataKey="period"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            minTickGap={40}
+            tick={{ fill: theme.axisText, fontSize: 11 }}
+            tickFormatter={(value: string) => fmtPeriod(value)}
+          />
+          <ChartTooltip
+            cursor={{ stroke: theme.axis, strokeWidth: 1 }}
+            content={
+              <ChartTooltipContent
+                labelFormatter={(value) => fmtPeriod(String(value))}
+                formatter={(value) => (
+                  <div className="flex flex-1 items-center justify-between gap-4">
+                    <span className="text-muted-foreground">Patrimônio</span>
+                    <span className="font-mono font-medium tabular-nums">{money(Number(value))}</span>
+                  </div>
+                )}
+              />
+            }
+          />
+          {result.depletionPeriod !== null && (
+            <ReferenceLine
+              x={result.depletionPeriod}
+              stroke={theme.status.critical}
+              strokeDasharray="4 4"
+              label={{ value: 'esgota aqui', position: 'insideTopRight', fill: theme.status.critical, fontSize: 11 }}
+            />
+          )}
+          <Area
+            dataKey="valueCents"
+            type="natural"
+            fill={`url(#${gradientId})`}
+            fillOpacity={0.4}
+            stroke={theme.primary}
+          />
+        </AreaChart>
+      </ChartContainer>
+
+      <Assumptions data={result.assumptions} />
+    </div>
   )
 }
 

@@ -1272,8 +1272,8 @@ export async function goalProjection(
 
   for (let month = 0; month <= cap; month++) {
     if (month > 0) {
-      projected = projected * (1 + monthlyReturn) + goal.monthlyContributionCents
-      baseline = baseline * (1 + monthlyReturn)
+      projected = compoundStep(projected, monthlyReturn, goal.monthlyContributionCents)
+      baseline = compoundStep(baseline, monthlyReturn, 0)
       contributed += goal.monthlyContributionCents
     }
     series.push({
@@ -1351,6 +1351,17 @@ export async function goalProjection(
         ? Math.round((extraContributionCents / (goal.targetValueCents - summary.marketValueCents)) * 10_000)
         : null,
   }
+}
+
+/**
+ * Um passo de composição mensal: valor anterior, rendendo o retorno mensal,
+ * mais um fluxo fixo do mês (positivo = aporte, negativo = retirada).
+ * Núcleo compartilhado entre `goalProjection` (aporte) e a simulação de
+ * decumulação de `services/simulator.ts` (retirada, mesmo passo com o sinal
+ * invertido) — `decisions/0035` exige reusar, nunca duplicar esta fórmula.
+ */
+export function compoundStep(valueCents: number, monthlyReturn: number, monthlyFlowCents: number): number {
+  return valueCents * (1 + monthlyReturn) + monthlyFlowCents
 }
 
 /** Future-value of an annuity, solved for the payment. */

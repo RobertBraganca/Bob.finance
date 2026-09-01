@@ -596,30 +596,50 @@ function PortfolioTab({
           </p>
         )}
         <div className="stack stack--tight" style={{ padding: 'var(--sp-5)' }}>
-          {groups.map((group) => (
-            <AssetGroupCard
-              key={group.assetClass}
-              assetClass={group.assetClass}
-              label={group.label}
-              rows={group.rows}
-              classes={data.assetClasses}
-              actualBps={group.alloc?.actualBps ?? 0}
-              targetBps={group.alloc?.targetBps ?? null}
-              portfolioValueCents={data.marketValueCents}
-              expanded={expanded.has(group.assetClass)}
-              onToggle={() =>
-                setExpanded((current) => {
-                  const next = new Set(current)
-                  if (next.has(group.assetClass)) next.delete(group.assetClass)
-                  else next.add(group.assetClass)
-                  return next
-                })
-              }
-              onOpenCriteria={onOpenCriteria}
-              onAddTrade={() => onAddTrade(group.assetClass)}
-              onViewTrades={() => onViewTrades(group.label, group.rows.map((r) => r.assetId))}
-            />
-          ))}
+          {groups.map((group) =>
+            group.assetClass === 'illiquid' ? (
+              <IlliquidAssetsCard
+                key={group.assetClass}
+                rows={group.rows}
+                classes={data.assetClasses}
+                portfolioValueCents={data.marketValueCents}
+                expanded={expanded.has(group.assetClass)}
+                onToggle={() =>
+                  setExpanded((current) => {
+                    const next = new Set(current)
+                    if (next.has(group.assetClass)) next.delete(group.assetClass)
+                    else next.add(group.assetClass)
+                    return next
+                  })
+                }
+                onAddTrade={() => onAddTrade(group.assetClass)}
+                onViewTrades={() => onViewTrades(group.label, group.rows.map((r) => r.assetId))}
+              />
+            ) : (
+              <AssetGroupCard
+                key={group.assetClass}
+                assetClass={group.assetClass}
+                label={group.label}
+                rows={group.rows}
+                classes={data.assetClasses}
+                actualBps={group.alloc?.actualBps ?? 0}
+                targetBps={group.alloc?.targetBps ?? null}
+                portfolioValueCents={data.marketValueCents}
+                expanded={expanded.has(group.assetClass)}
+                onToggle={() =>
+                  setExpanded((current) => {
+                    const next = new Set(current)
+                    if (next.has(group.assetClass)) next.delete(group.assetClass)
+                    else next.add(group.assetClass)
+                    return next
+                  })
+                }
+                onOpenCriteria={onOpenCriteria}
+                onAddTrade={() => onAddTrade(group.assetClass)}
+                onViewTrades={() => onViewTrades(group.label, group.rows.map((r) => r.assetId))}
+              />
+            ),
+          )}
         </div>
       </Card>
     </div>
@@ -1247,6 +1267,126 @@ function AssetGroupCard({
             </Button>
             <Button variant="primary" size="sm" icon="plus" onClick={onAddTrade}>
               Adicionar lançamento
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+const ILLIQUID_HIGHLIGHT_TOP_N = 3
+
+/**
+ * Visualização dedicada para a classe `illiquid` (01/09/2026, pedido do
+ * usuário com referência visual em prints de apps de patrimônio externos).
+ * A tabela genérica de `AssetGroupCard` tem colunas que não fazem sentido
+ * aqui (Cotação, Comprar?, % ideal) — um carro ou um imóvel não tem cotação
+ * de mercado nem meta de rebalanceamento. Em vez disso: destaque visual
+ * próprio (`.group-card--highlight`) e lista simples nome + valor, com os
+ * `ILLIQUID_HIGHLIGHT_TOP_N` maiores primeiro e o resto agrupado em "e mais
+ * N..." quando recolhido — mesmo padrão de composição do valor total sem
+ * inventar uma taxonomia de subtipos que o produto não tem dado para
+ * sustentar (nenhum campo hoje diferencia "móveis" de "veículo").
+ */
+function IlliquidAssetsCard({
+  rows,
+  classes,
+  portfolioValueCents,
+  expanded,
+  onToggle,
+  onAddTrade,
+  onViewTrades,
+}: {
+  rows: Position[]
+  classes: Array<{ value: string; label: string }>
+  portfolioValueCents: number
+  expanded: boolean
+  onToggle: () => void
+  onAddTrade: () => void
+  onViewTrades: () => void
+}) {
+  const totalCents = rows.reduce((s, p) => s + p.marketValueCents, 0)
+  const shareBps = portfolioValueCents > 0 ? Math.round((totalCents / portfolioValueCents) * 10_000) : 0
+  const sorted = [...rows].sort((a, b) => b.marketValueCents - a.marketValueCents)
+  const top = sorted.slice(0, ILLIQUID_HIGHLIGHT_TOP_N)
+  const rest = sorted.slice(ILLIQUID_HIGHLIGHT_TOP_N)
+  const restCents = rest.reduce((s, p) => s + p.marketValueCents, 0)
+  const icon = ASSET_CLASS_ICON.illiquid ?? 'wallet'
+
+  return (
+    <div className="card group-card group-card--highlight">
+      <button type="button" className="group-head" onClick={onToggle} aria-expanded={expanded}>
+        <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0 }}>
+          <Icon name={icon} size={18} />
+          <strong className="truncate">Imobilizado</strong>
+        </span>
+        <span className="row row--wrap group-head__stats">
+          <MiniStat label="Ativos" value={String(rows.length)} />
+          <MiniStat label="Valor total" value={money(totalCents)} />
+          <MiniStat label="% na carteira" value={bps(shareBps, 1)} />
+        </span>
+        <span className="row" style={{ gap: 4, flex: 'none', color: 'var(--ink-2)', fontSize: 'var(--text-xs)' }}>
+          Ver detalhes
+          <Icon
+            name="chevronDown"
+            size={16}
+            className={`group-head__chevron${expanded ? ' group-head__chevron--open' : ''}`}
+          />
+        </span>
+      </button>
+
+      {!expanded ? (
+        <div className="stack stack--tight" style={{ padding: '0 var(--sp-5) var(--sp-5)' }}>
+          {top.map((p) => (
+            <div key={p.assetId} className="row row--between" style={{ gap: 'var(--sp-3)' }}>
+              <span className="row" style={{ gap: 'var(--sp-2)', minWidth: 0 }}>
+                <Icon name={icon} size={16} />
+                <span className="truncate">{p.name}</span>
+              </span>
+              <span className="tabular" style={{ fontWeight: 600 }}>
+                {money(p.marketValueCents)}
+              </span>
+            </div>
+          ))}
+          {rest.length > 0 && (
+            <div className="row row--between" style={{ gap: 'var(--sp-3)' }}>
+              <span className="muted">e mais {rest.length}...</span>
+              <span className="tabular muted">{money(restCents)}</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="stack stack--tight" style={{ padding: '0 var(--sp-5) var(--sp-5)' }}>
+            {sorted.map((p) => (
+              <div key={p.assetId} className="row row--between" style={{ gap: 'var(--sp-3)' }}>
+                <span className="row" style={{ gap: 'var(--sp-2)', minWidth: 0 }}>
+                  <Icon name={icon} size={16} />
+                  <span className="truncate">{p.name}</span>
+                </span>
+                <span className="row" style={{ gap: 4 }}>
+                  <span className="tabular" style={{ fontWeight: 600 }}>
+                    {money(p.marketValueCents)}
+                  </span>
+                  <EditAssetButton
+                    assetId={p.assetId}
+                    name={p.name}
+                    ticker={p.ticker}
+                    assetClass={p.assetClass}
+                    classes={classes}
+                  />
+                  <DeletePositionButton assetId={p.assetId} name={p.name} />
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="row row--between" style={{ padding: 'var(--sp-4) var(--sp-5)' }}>
+            <Button variant="ghost" size="sm" icon="list" onClick={onViewTrades}>
+              Lançamentos
+            </Button>
+            <Button variant="primary" size="sm" icon="plus" onClick={onAddTrade}>
+              Adicionar aporte
             </Button>
           </div>
         </>
