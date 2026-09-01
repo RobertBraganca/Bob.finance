@@ -17,6 +17,7 @@ import {
 } from '../lib/format'
 import {
   BENTO_CARD_LABELS,
+  BENTO_SPAN_LABELS,
   BENTO_SPAN_OPTIONS,
   DEFAULT_BENTO_LAYOUT,
   useBentoLayout,
@@ -629,7 +630,10 @@ function BentoSettingsModal({
               <label className="field__label">Largura</label>
               <Select
                 value={card.span}
-                options={BENTO_SPAN_OPTIONS.map((span) => ({ value: span, label: `${span}/12` }))}
+                options={BENTO_SPAN_OPTIONS.map((span) => ({
+                  value: span,
+                  label: BENTO_SPAN_LABELS[span] ?? `${span}/12`,
+                }))}
                 onChange={(span) => bento.setSpan(card.id, (span ?? card.span) as BentoSpan)}
               />
             </div>

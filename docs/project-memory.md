@@ -769,3 +769,38 @@ derivado na leitura, nunca gravado.
   com paddings e breakpoints diferentes (`.modal` vs `DialogContent`, que
   usa o `sm:` 640px do Tailwind, breakpoint que não existe no design
   system), 12-15 colunas em tabelas de Investimentos/Pricing.
+
+
+## Bento: masonry e duas colunas (01/09/2026)
+
+Duas mudanças no mesmo dia, na mesma reclamação ("cards com espaços vazios",
+depois "a ideia do bento é os cards se ajustarem ao conteúdo e ao espaço").
+
+**Masonry** (`src/components/ui/Bento.tsx`). Nem `stretch` nem
+`align-items: start` resolvem: o primeiro deixa o vazio DENTRO do card
+curto, o segundo deixa o vazio na PÁGINA embaixo dele. Como
+`grid-template-rows: masonry` ainda não é confiável em produção, o
+componente mede cada filho (ResizeObserver nos filhos e no grid,
+MutationObserver para filhos que entram/saem) e escreve
+`grid-row: span <altura + gap>` sobre `grid-auto-rows: 1px`.
+
+Armadilha achada na verificação: a primeira versão usava `margin-bottom`
+para o respiro vertical, e **margem não conta para a área do grid** — medido
+no navegador, os cards empilhados ficavam com 0px entre si. O gap tem que
+entrar no próprio span, lido do `column-gap` para não virar um segundo
+número solto no JS.
+
+**Duas colunas** (`base.css`). 12 colunas com spans de 3 a 12 davam
+combinações demais para sempre fecharem, e no masonry um card largo não
+encaixa ao lado de um curto. Agora: uma coluna no telefone, duas de 768px
+pra cima, e os `col-*` existentes são MAPEADOS (até 6 = metade, acima de 6 =
+inteira) em vez de reescrever centenas de `span={N}` nas páginas. O tipo
+`BentoSpan` mantém os valores intermediários porque layouts salvos em
+`localStorage` ainda os contêm; `normalizeSpan` traduz na leitura e o
+dropdown de tamanho do Painel virou "Metade"/"Inteira".
+
+Nota de método: as duas verificações que pegaram bug real aqui foram
+MEDIÇÃO (bordas via `getBoundingClientRect`) e leitura do CSS COMPILADO, não
+screenshot. Um detalhe que custou tempo: o minificador reescreve
+`@media (min-width:768px)` como `@media (width>=768px)`, então procurar pela
+forma original no bundle dá falso negativo.

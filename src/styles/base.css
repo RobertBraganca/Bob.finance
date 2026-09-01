@@ -133,8 +133,11 @@ svg {
    Mobile-first: every rule below this point is written for a phone
    screen FIRST, then progressively enhanced upward with `min-width`
    queries — never the other way around. There are two upgrade points:
-     768px  (tablet+)   the sidebar becomes the persistent vertical rail
-     1280px (desktop+)  the bento grid gets its full authored column spans
+     768px  (tablet+)   the sidebar becomes the persistent vertical rail,
+                        and the bento goes from one column to two
+     1280px (desktop+)  only more breathing room; the two columns are the
+                        same (01/09/2026: o bento passou de 12 colunas com
+                        spans autorais para duas, metade ou inteira)
    Below 768px the "sidebar" is a horizontal, scrollable icon strip
    docked above the content — a real nav a thumb can use, not a tall
    list of rows dumped above the page. */
@@ -406,9 +409,18 @@ svg {
    Mobile-first: every span is 12 (one column) by default — the grid
    itself only matters once there is enough width to hold more than
    one card side by side, which starts at the tablet tier below. */
+/* DUAS COLUNAS (01/09/2026, pedido do usuário). Antes eram 12 com spans
+   autorais de 3 a 12: combinações demais para sempre fecharem (linha
+   terminando em 11, card de 8 sem par possível) e, no masonry, um card
+   largo que não encaixa ao lado de um curto. Com dois tamanhos, metade e
+   inteira, qualquer par fecha.
+
+   Os `col-*` das páginas continuam como estão e são MAPEADOS no tier de
+   768px abaixo (até 6 = metade, acima de 6 = inteira), em vez de reescrever
+   centenas de `span={N}`. Aqui na base é uma coluna só: telefone. */
 .bento {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-4);
   /* Cada card tem a altura do próprio conteúdo, nunca a do vizinho mais
      alto da linha. Sem isto o grid usa `stretch` (o default), e como todo
@@ -445,7 +457,7 @@ svg {
 .col-8,
 .col-9,
 .col-12 {
-  grid-column: span 12;
+  grid-column: span 1;
 }
 
 /* ---- Tablet and up (>=768px): the sidebar becomes the persistent
@@ -581,14 +593,27 @@ svg {
     gap: var(--sp-5);
   }
 
-  /* `.col-2` só existe dentro de cards (o Modo mês do Painel, 5 tiles
-     lado a lado). Sem regra própria aqui ele caía no `span 12` da base e
-     virava 5 blocos de largura inteira entre 768 e 1279px, cada um com um
-     rótulo curto e um número — achado da auditoria de 01/09/2026. Em 4
-     colunas eles continuam lendo como uma faixa de indicadores. */
-  .col-2 { grid-column: span 4; }
-  .col-3, .col-4, .col-5 { grid-column: span 6; }
-  .col-6, .col-7, .col-8, .col-9 { grid-column: span 12; }
+  .bento {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Metade contra largura inteira. O corte em 6 mantém a intenção original
+     de cada card: o que era 3/4/5/6 era "cabe ao lado de outro", o que era
+     7/8/9/12 era "precisa da linha toda". */
+  .col-2,
+  .col-3,
+  .col-4,
+  .col-5,
+  .col-6 {
+    grid-column: span 1;
+  }
+
+  .col-7,
+  .col-8,
+  .col-9,
+  .col-12 {
+    grid-column: span 2;
+  }
 }
 
 /* ---- Desktop (>=1280px): the full authored bento composition. ---- */
@@ -600,14 +625,8 @@ svg {
     padding: var(--sp-6) var(--sp-7) var(--sp-9);
   }
 
-  .col-2 { grid-column: span 2; }
-  .col-3 { grid-column: span 3; }
-  .col-4 { grid-column: span 4; }
-  .col-5 { grid-column: span 5; }
-  .col-6 { grid-column: span 6; }
-  .col-7 { grid-column: span 7; }
-  .col-8 { grid-column: span 8; }
-  .col-9 { grid-column: span 9; }
+  /* Nada de span aqui: as duas colunas do tier anterior já valem daqui
+     pra cima. O que muda no desktop é só o respiro da página acima. */
 }
 
 /* ---- Utility ---------------------------------------------------- */

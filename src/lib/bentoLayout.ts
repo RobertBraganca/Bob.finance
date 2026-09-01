@@ -7,8 +7,21 @@ import { useEffect, useState } from 'react'
  * treats "which browser you're on" as the unit of session (no login).
  */
 
+/**
+ * Desde 01/09/2026 o bento tem DUAS colunas, então só existem dois
+ * tamanhos: 6 é meia largura e 12 é a linha inteira. Os valores
+ * intermediários continuam no tipo porque layouts salvos em `localStorage`
+ * antes dessa mudança ainda os contêm — `normalizeSpan` abaixo os traduz na
+ * leitura, e o CSS mapeia qualquer coisa até 6 para metade de qualquer
+ * forma (`base.css`), então um layout antigo nunca quebra a tela.
+ */
 export type BentoSpan = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
-export const BENTO_SPAN_OPTIONS: BentoSpan[] = [3, 4, 5, 6, 7, 8, 9, 12]
+export const BENTO_SPAN_OPTIONS: BentoSpan[] = [6, 12]
+
+export const BENTO_SPAN_LABELS: Record<number, string> = { 6: 'Metade', 12: 'Inteira' }
+
+/** Layout salvo antes das duas colunas: 3/4/5 viram metade, 7/8/9 viram inteira. */
+export const normalizeSpan = (span: number): BentoSpan => (span <= 6 ? 6 : 12)
 
 export type BentoCardId =
   | 'month-mode'
@@ -50,22 +63,18 @@ export type BentoCardConfig = { id: BentoCardId; span: BentoSpan; visible: boole
 /** Matches the order and spans the Home shipped with, before anyone customizes it. */
 export const DEFAULT_BENTO_LAYOUT: BentoCardConfig[] = [
   { id: 'month-mode', span: 12, visible: true },
-  { id: 'hero', span: 4, visible: true },
-  { id: 'income-expense-kpi', span: 4, visible: true },
-  { id: 'accounts', span: 4, visible: true },
-  // 12, não 8: este card fica sozinho na linha (o vizinho seguinte é um
-  // span 12), então um 8 deixava 4 colunas mortas no layout PADRÃO, o que
-  // todo usuário vê antes de personalizar qualquer coisa (auditoria de
-  // layout de 01/09/2026).
-  { id: 'credit-cards', span: 12, visible: true },
+  { id: 'hero', span: 6, visible: true },
+  { id: 'income-expense-kpi', span: 6, visible: true },
+  { id: 'accounts', span: 6, visible: true },
+  { id: 'credit-cards', span: 6, visible: true },
   { id: 'reconciliation', span: 12, visible: true },
   { id: 'pending-income', span: 6, visible: true },
   { id: 'pending-expense', span: 6, visible: true },
   { id: 'income-expense-chart', span: 12, visible: true },
   { id: 'income-by-category', span: 6, visible: true },
   { id: 'expense-by-category', span: 6, visible: true },
-  { id: 'net-flow', span: 7, visible: true },
-  { id: 'top-merchants', span: 5, visible: true },
+  { id: 'net-flow', span: 6, visible: true },
+  { id: 'top-merchants', span: 6, visible: true },
   { id: 'account-flow', span: 12, visible: true },
   { id: 'uncategorized-banner', span: 12, visible: true },
 ]
@@ -106,7 +115,11 @@ function reconcile(stored: BentoCardConfig[]): BentoCardConfig[] {
   return order.map((id) => {
     const fromStorage = byId.get(id)
     const fallback = DEFAULT_BENTO_LAYOUT.find((d) => d.id === id)!
-    return fromStorage ? { ...fallback, ...fromStorage } : fallback
+    if (!fromStorage) return fallback
+    // Layout salvo antes das duas colunas pode trazer 3/4/5/7/8/9: traduz na
+    // leitura para o dropdown de tamanho não mostrar um valor que não existe
+    // mais entre as opções.
+    return { ...fallback, ...fromStorage, span: normalizeSpan(fromStorage.span) }
   })
 }
 
