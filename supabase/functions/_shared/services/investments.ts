@@ -11,6 +11,7 @@ import {
 import { addDays, addMonths, periodBounds, periodOf, periodRange, todayIso } from '../core/dates.ts'
 import { totals } from './analytics.ts'
 import { notesForAssets } from './criteria.ts'
+import type { GoalState } from './goals.ts'
 
 /**
  * Positions are derived from trades, never stored as a running quantity, so
@@ -1277,6 +1278,32 @@ export async function goalProjection(
   const valueAtTarget =
     targetMonth !== null && targetMonth >= 0 ? series[Math.min(targetMonth, series.length - 1)] : null
 
+  /**
+   * Estudo de viabilidade #10, 29/08/2026: cogitou-se reusar `targetState()`
+   * (goals.ts) direto aqui pra unificar o vocabulário de estado entre metas.
+   * Não dá certo — `targetState` compara o valor ATUAL contra 85% do alvo
+   * FINAL, sem levar em conta quanto tempo ainda falta; pra uma meta de anos,
+   * isso marcaria "at_risk" quase o tempo todo, mesmo no ritmo perfeito (só
+   * bateria 85% perto do fim). `onTrack` acima já é o cálculo certo pra este
+   * domínio (usa a trajetória projetada inteira e a data-alvo). O que dá pra
+   * unificar sem regressão é só o VOCABULÁRIO de saída — mesmo union type
+   * `GoalState`, pra badge/cor consistente na UI — nunca a fórmula.
+   */
+  const state: GoalState =
+    goal.targetValueCents <= 0
+      ? 'no_target'
+      : summary.marketValueCents >= goal.targetValueCents
+        ? 'met'
+        : targetMonth === null
+          ? reachedMonth !== null
+            ? 'on_track'
+            : 'at_risk'
+          : targetMonth < 0
+            ? 'missed'
+            : reachedMonth !== null && reachedMonth <= targetMonth
+              ? 'on_track'
+              : 'at_risk'
+
   return {
     goal,
     series,
@@ -1289,6 +1316,7 @@ export async function goalProjection(
     reachedPeriod: reachedMonth === null ? null : addMonths(startPeriod, reachedMonth),
     onTrack:
       targetMonth === null || reachedMonth === null ? null : reachedMonth <= targetMonth,
+    state,
     /** monthly contribution that would hit the target exactly on the date */
     requiredMonthlyCents:
       targetMonth !== null && targetMonth > 0 && goal.targetValueCents > 0

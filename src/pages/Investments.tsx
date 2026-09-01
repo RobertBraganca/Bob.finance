@@ -39,6 +39,7 @@ import {
   useToast,
   type AssumptionBag,
   type IconName,
+  type MeterState,
 } from '../components/ui'
 import { PageHeader } from '../components/shell/Shell'
 import {
@@ -111,6 +112,7 @@ type Projection = {
   reachedMonth: number | null
   reachedPeriod: string | null
   onTrack: boolean | null
+  state: MeterState
   requiredMonthlyCents: number | null
   projectedAtTargetCents: number | null
   contributionShareOfGapBps: number | null
@@ -1882,20 +1884,9 @@ function GoalsEnvironment({
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--on-slab-2)' }}>
                       meta {money(goal.targetValueCents)}
                     </span>
-                    <StatusBadge
-                      state={
-                        data.onTrack === null
-                          ? 'no_target'
-                          : data.onTrack
-                            ? 'on_track'
-                            : 'at_risk'
-                      }
-                    />
+                    <StatusBadge state={data.state} />
                   </div>
-                  <Meter
-                    usedBps={data.progressBps ?? 0}
-                    state={data.onTrack === false ? 'at_risk' : 'on_track'}
-                  />
+                  <Meter usedBps={data.progressBps ?? 0} state={data.state} />
                   <span style={{ fontSize: 'var(--text-xs)', color: 'var(--on-slab-2)' }}>
                     {data.progressBps === null ? '' : `${bps(data.progressBps, 0)} do alvo`}
                   </span>

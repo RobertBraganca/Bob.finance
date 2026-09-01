@@ -538,3 +538,33 @@ condensar se algum dia virar spec):
   parte do commit — precedente novo a lembrar se outra sugestão de
   "substituir" aparecer: o padrão é sinalizar no staging, nunca aplicar
   sozinho, e só agir no commit explícito.
+
+### Segunda leva (30/08/2026): [5] e [10]
+
+- **[5] Recordes do motor financeiro** — implementado
+  (`financialEngineRecords()`), mesmo padrão de loop sequencial dos itens
+  anteriores pro "maior disponível"; "dias desde o último saldo negativo"
+  usa uma window function SQL (soma corrida do saldo de abertura + delta
+  diário), não um loop em código.
+- **[10] Retrofit de `investmentGoals` → vocabulário `GoalState`** —
+  implementado, mas **não** como planejado no estudo original. A ideia era
+  reusar `targetState()` (goals.ts) direto; investigando de novo na hora
+  de implementar, ficou claro que `targetState()` mede "atual vs. 85% do
+  alvo final" sem noção de tempo restante — errado pra uma meta de anos
+  (ficaria "at_risk" quase sempre, mesmo no ritmo certo). Reescrito como
+  uma classificação NOVA e PRÓPRIA pra este domínio (`goalProjection`'s
+  `state`), que usa a trajetória projetada real (`onTrack`/`reachedMonth`
+  já existentes) e só EXPRESSA o resultado no mesmo union type
+  `GoalState`/`MeterState` pra badge/cor consistente — nunca a fórmula de
+  `targetState()`. Lição: "unificar vocabulário de estado entre domínios"
+  e "unificar a fórmula entre domínios" são coisas diferentes; a segunda
+  pode ser um erro mesmo quando a primeira é uma boa ideia. Corrigiu de
+  quebra uma inconsistência real que já existia (Meter mostrava "no
+  ritmo" verde pra meta sem data-alvo, badge ao lado já mostrava "sem
+  meta" — agora os dois usam o mesmo `state`).
+- O motor genérico de milestones completo (unificação AND/OR entre
+  `monthlyGoals`/`investmentGoals`/`targetAllocations`) continua não
+  implementado — o achado acima é mais um motivo pra tratar essa versão
+  ampla com cautela extra: se até um retrofit de DOIS sistemas já
+  escondia uma incompatibilidade de fórmula, um motor genérico de TRÊS
+  provavelmente esconde mais.

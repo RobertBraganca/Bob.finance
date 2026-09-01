@@ -180,6 +180,21 @@ Deliberadamente fora de `DEFAULT_LIQUID_ASSET_CLASSES`
 (`financialHealth.ts`) — contar imóvel como líquido pro Runway seria um bug
 de cálculo real. Ver estudo de viabilidade #12, 29/08/2026.
 
+## Vocabulário de estado unificado (Status: implementado, 30/08/2026)
+`goalProjection` ganha `state: GoalState` (mesmo union type de
+`goals.ts`/`MeterState` do front) — estudo de viabilidade #10, 29/08/2026,
+avaliou reusar `targetState()` (goals.ts) direto e **rejeitou**: aquela
+função compara o valor atual contra 85% do alvo FINAL sem considerar tempo
+restante, o que marcaria "at_risk" quase o tempo todo numa meta de anos,
+mesmo no ritmo perfeito. `onTrack` (a trajetória projetada inteira contra a
+data-alvo) continua sendo o cálculo certo pra este domínio — `state` só
+reexpressa esse MESMO resultado no vocabulário compartilhado (badge/cor
+consistente com Metas do mês), nunca troca a fórmula. Corrigiu de quebra
+uma inconsistência que já existia na UI: o `Meter` da meta de investimento
+mostrava "no ritmo" (verde) mesmo sem data-alvo configurada, enquanto o
+badge ao lado já mostrava "sem meta" corretamente — os dois agora usam o
+mesmo `state`.
+
 ## Fora de escopo
 - Execução de ordem de compra/venda numa corretora — o app registra o que
   já aconteceu, nunca executa.
