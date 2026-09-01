@@ -241,12 +241,18 @@ export function CategoryRing({
                   <span className="truncate">{segment.name}</span>
                   <span className="ranked__share">{(segment.shareBps / 100).toFixed(1)}%</span>
                   <span className="ranked__value">{money(segment.amountCents)}</span>
-                  {canExpand && (
+                  {/* A vaga do chevron existe mesmo quando a linha não
+                      expande: sem ela, uma linha com subcategorias e outra
+                      sem terminavam o valor em posições diferentes na
+                      mesma lista. */}
+                  {canExpand ? (
                     <Icon
                       name="chevronDown"
                       size={13}
                       className={isOpen ? 'ranked__chevron ranked__chevron--open' : 'ranked__chevron'}
                     />
+                  ) : (
+                    <span aria-hidden="true" />
                   )}
                 </button>
                 {canExpand && isOpen && (

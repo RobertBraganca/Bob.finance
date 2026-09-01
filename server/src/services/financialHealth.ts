@@ -6,7 +6,7 @@ import { accountBalances, totals } from './analytics'
 import { listCards } from './creditCards'
 import { debtOverview, debtTrend, listDebts } from './debt'
 import { getPeriodProgress } from './goals'
-import { allocation, positions, reserveStatus } from './investments'
+import { ILLIQUID_ASSET_CLASS, allocation, positions, reserveStatus } from './investments'
 
 /**
  * The financial-health layer: Health Score, Runway, Radar de risco.
@@ -841,7 +841,12 @@ export async function riskRadar(period: string, accountId: number | null = null)
  * ------------------------------------------------------------------ */
 export type NetWorth = {
   balanceCents: number
+  /** TODOS os investimentos, imobilizado incluído — mantido como estava */
   investmentsCents: number
+  /** só a classe Imobilizado (imóvel, veículo, joia) */
+  illiquidCents: number
+  /** saldo em conta + investimentos LÍQUIDOS (tudo menos o imobilizado) */
+  financialCents: number
   debtCents: number
   /** saldo + investimentos − dívida total */
   liquidityCents: number
@@ -856,6 +861,18 @@ export async function netWorth(): Promise<NetWorth> {
   // pergunta é patrimônio, não liquidez de emergência.
   const investmentsCents = holdings.reduce((sum, p) => sum + p.marketValueCents, 0)
 
+  /**
+   * Financeiro x Imobilizado é a divisão que a tela de Patrimônio mostra
+   * (01/09/2026): as duas metades respondem a perguntas diferentes ("de
+   * quanto eu disponho" contra "quanto eu possuo"), e somá-las num número
+   * só esconde que um carro não paga uma conta. O patrimônio líquido
+   * continua sendo a soma dos dois menos a dívida, sem mudança de fórmula.
+   */
+  const illiquidCents = holdings
+    .filter((p) => p.assetClass === ILLIQUID_ASSET_CLASS)
+    .reduce((sum, p) => sum + p.marketValueCents, 0)
+  const financialCents = balanceCents + investmentsCents - illiquidCents
+
   // Dívida TOTAL (saldo corrente de toda dívida ativa), a mesma soma que
   // `debtOverview` publica, lida da mesma origem em vez de recalculada.
   const debtCents = debts.reduce((sum, d) => sum + d.balanceCents, 0)
@@ -863,6 +880,8 @@ export async function netWorth(): Promise<NetWorth> {
   return {
     balanceCents,
     investmentsCents,
+    illiquidCents,
+    financialCents,
     debtCents,
     liquidityCents: balanceCents + investmentsCents - debtCents,
     assumptions: {
@@ -872,6 +891,10 @@ export async function netWorth(): Promise<NetWorth> {
       investimentosCents: investmentsCents,
       ativosSomados: holdings.length,
       investimentosEscopo: 'todos os ativos da carteira, não apenas os marcados como reserva',
+      financeiroCents: financialCents,
+      imobilizadoCents: illiquidCents,
+      divisaoEscopo:
+        'Financeiro é saldo em conta mais os investimentos negociáveis; Imobilizado é a classe de bens físicos, que entra no patrimônio mas fica fora da política de alocação da carteira',
       dividaTotalCents: debtCents,
       dividasAtivas: debts.length,
       dividaEscopo:

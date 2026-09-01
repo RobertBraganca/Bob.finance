@@ -144,7 +144,12 @@ export function DailyPage() {
             </HeroFigure>
           </Slab>
 
-          <Slab span={8} title="Intensidade por dia" subtitle="Gasto de cada dia do mês selecionado">
+          {/* Largura inteira: com span 8 a linha fechava em 11 (8 + o
+              primeiro tile de 3) e sobrava 1 coluna morta, e os outros 3
+              tiles caíam numa linha de 9 com 3 colunas vazias. Agora o
+              gráfico ocupa uma linha e os 4 tiles fecham a seguinte em
+              3+3+3+3 (auditoria de layout de 01/09/2026). */}
+          <Slab span={12} title="Intensidade por dia" subtitle="Gasto de cada dia do mês selecionado">
             <SpendAreaChart days={daily.data?.days ?? []} surface="paper" />
           </Slab>
 

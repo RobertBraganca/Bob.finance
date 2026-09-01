@@ -640,6 +640,8 @@ export async function insightsRoutes(app: FastifyInstance) {
     }
   })
 
+  app.get('/investments/illiquid', async () => investments.illiquidOverview())
+
   app.get('/investments/trades', async (req) => {
     const query = z.object({ assetId: z.coerce.number().int().positive().optional() }).parse(req.query)
     return { trades: await investments.listTrades(query.assetId) }

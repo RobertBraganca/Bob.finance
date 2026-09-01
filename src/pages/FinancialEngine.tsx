@@ -301,8 +301,11 @@ export function FinancialEnginePage() {
               </div>
             </Card>
 
+            {/* 12, não 6: é o último card do bento e não tem par, então um
+                span 6 deixava metade da tela vazia com uma tabela espremida
+                do outro lado (auditoria de layout de 01/09/2026). */}
             <Card
-              span={6}
+              span={12}
               title="Ponto de equilíbrio de faturamento"
               subtitle="O faturamento que cobriria tudo que já está configurado neste mês"
             >
@@ -366,6 +369,10 @@ export function FinancialEnginePage() {
                     </div>
                   )}
 
+                  {/* Unica tabela do app que estava sem wrapper de scroll
+                      (auditoria de 01/09/2026): num card span=6 ela estoura
+                      a largura em telas medias em vez de rolar sozinha. */}
+                  <div className="table-wrap">
                   <table className="table">
                     <thead>
                       <tr>
@@ -393,6 +400,7 @@ export function FinancialEnginePage() {
                       })}
                     </tbody>
                   </table>
+                  </div>
 
                   <div className="kv">
                     <span className="kv__k">Faturado no período</span>

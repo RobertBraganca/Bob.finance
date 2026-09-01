@@ -26,6 +26,10 @@ const GoalsPage = lazy(() => import('./pages/Goals').then((m) => ({ default: m.G
 const DebtPage = lazy(() => import('./pages/Debt').then((m) => ({ default: m.DebtPage })))
 const CreditCardsPage = lazy(() => import('./pages/CreditCards').then((m) => ({ default: m.CreditCardsPage })))
 const InvestmentsPage = lazy(() => import('./pages/Investments').then((m) => ({ default: m.InvestmentsPage })))
+const PatrimonioPage = lazy(() => import('./pages/Patrimonio').then((m) => ({ default: m.PatrimonioPage })))
+const AposentadoriaPage = lazy(() =>
+  import('./pages/Aposentadoria').then((m) => ({ default: m.AposentadoriaPage })),
+)
 const FinancialHealthPage = lazy(() =>
   import('./pages/FinancialHealth').then((m) => ({ default: m.FinancialHealthPage })),
 )
@@ -84,6 +88,8 @@ const FEATURE_BY_PATH: Record<string, string> = {
   '/dividas': 'debt',
   '/cartoes': 'credit-cards',
   '/investimentos': 'investments',
+  '/patrimonio': 'patrimonio',
+  '/aposentadoria': 'aposentadoria',
   '/saude': 'financial-health',
   '/motor': 'financial-engine',
   '/precificacao': 'pricing',
@@ -131,6 +137,8 @@ export function App() {
               <Route path="/dividas" element={<DebtPage />} />
               <Route path="/cartoes" element={<CreditCardsPage />} />
               <Route path="/investimentos" element={<InvestmentsPage />} />
+              <Route path="/patrimonio" element={<PatrimonioPage />} />
+              <Route path="/aposentadoria" element={<AposentadoriaPage />} />
               <Route path="/saude" element={<FinancialHealthPage />} />
               <Route path="/motor" element={<FinancialEnginePage />} />
               <Route path="/precificacao" element={<PricingPage />} />

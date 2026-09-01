@@ -694,3 +694,72 @@ tokens de accent existentes no design system são sutis de propósito
 (pensados pra web, não pra essa comparação lado a lado específica) e podem
 precisar de reforço quando o pedido é para um elemento se diferenciar de
 vizinhos parecidos, não só ganhar uma variação sutil de tom.
+
+## Rodada de correções após reprovação do usuário (01/09/2026)
+
+Usuário reprovou a leva anterior: "não gostei dos novos gráficos, não
+fizeram nenhum sentido e só estão ocupando espaço", o card de imobilizado
+"ficou bem distante do que eu imagino", decumulação "não apareceu para
+visualização", e pediu revisão ampla de design/responsividade citando
+"cards com espaços vazios desnecessários, desalinhamentos em excesso".
+
+- **Revertido** o commit dos dois gráficos (heatmap do Diário e anéis de
+  alocação). Lição: os dois foram construídos a partir de uma referência
+  visual solta, sem uma PERGUNTA que eles respondessem melhor que o que já
+  existia na tela. Um gráfico que duplica a leitura do vizinho é espaço
+  ocupado, não informação — reproduzir a referência não basta.
+- **Imobilizado saiu da política de alocação** (`ILLIQUID_ASSET_CLASS`,
+  `investments.ts`): não entra mais em `allocation()` nem na lista de
+  classes de "Meus ativos". Isto era um BUG real visível num print do
+  usuário — um único bem de R$3.150 aparecia como "64,1% da carteira, meta
+  1,0%, desvio +63,1 p.p.", número sem ação possível (vender nunca é
+  sugerido, `decisions/0011`). Também saiu da base da decumulação em
+  `simulator.ts`, que sacava do patrimônio total e inflava a duração.
+- **Tela nova `/patrimonio`** (`pages/Patrimonio.tsx`): patrimônio líquido
+  dividido em Financeiro x Imobilizado (`netWorth` ganhou `financialCents`
+  e `illiquidCents`), evolução, e a lista de bens em `.asset-row` com
+  cadastro e reavaliação. Endpoint novo `GET /investments/illiquid`.
+- **Tela nova `/aposentadoria`** (`pages/Aposentadoria.tsx`): decumulação
+  deixou de ser só uma aba escondida no modal do Simulador. Reusa o mesmo
+  `POST /simulate/decumulation` e o gráfico virou componente compartilhado
+  (`charts/DecumulationChart`). Margem de segurança é retirada anual x
+  retorno esperado lado a lado, padrão de `decisions/0036`, nunca um
+  veredito — e `decisions/0035` continua valendo, o sistema não calcula
+  "quanto você pode retirar".
+
+### Auditoria de layout: a causa raiz era uma linha de CSS
+
+`.bento` não tinha `align-items`, então o grid usava `stretch` e todo card
+curto esticava até a altura do vizinho mais alto, com o conteúdo no topo e
+o vazio embaixo. **Não era um card mal montado, era o default em toda linha
+do app** — o print do "Health Score 33%" com meia tela vazia era isso.
+`align-items: start` resolve globalmente. Corrigidos junto:
+
+- `.col-2` não tinha regra no tier tablet (768-1279) e virava largura
+  inteira; o Modo mês do Painel quebrava nessa faixa.
+- `.ranked__item` declarava 5 colunas mas `RankedList` passa 4 — o gap da
+  track fantasma desalinhava toda linha em 12px. Agora 4, com o modificador
+  `--toggle` (CategoryRing) pedindo a 5ª para o chevron, que passou a ter
+  vaga reservada mesmo quando a linha não expande.
+- `.ranked__item--child` tinha grid e recuo próprios e nunca alinhava com o
+  pai; o recuo virou espaço dentro da primeira track.
+- Somas de span que deixavam buraco: Daily (`8+3=11`, depois `3+3+3=9`),
+  layout PADRÃO do Painel (`credit-cards` span 8 sozinho), FinancialEngine
+  (último card span 6 sozinho), Modo mês (5 tiles × col-2 = 10 de 12).
+- `FinancialEngine` tinha a única tabela do app sem wrapper de scroll.
+
+Verificação: as mudanças de grid foram MEDIDAS no navegador (bordas direitas
+via `getBoundingClientRect`), não conferidas de olho — pai e filhos do
+ranking alinham em 498px, participações em 390px.
+
+### Fica pendente desta rodada
+
+- Modal de orçamento em Precificação (revisar valores, editar nome do
+  cliente, condições de pagamento parceladas) — pedido no meio da rodada,
+  ainda não implementado; condições de pagamento exigem coluna nova.
+- Itens menores da auditoria não corrigidos: `.stat__label` sem altura
+  mínima (valores de KPI em baselines diferentes quando o rótulo quebra em
+  2 linhas), título/subtítulo de card sem truncate, duas famílias de modal
+  com paddings e breakpoints diferentes (`.modal` vs `DialogContent`, que
+  usa o `sm:` 640px do Tailwind, breakpoint que não existe no design
+  system), 12-15 colunas em tabelas de Investimentos/Pricing.

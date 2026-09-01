@@ -2,7 +2,7 @@ import { addMonths, periodOf, todayIso } from '../core/dates.ts'
 import * as engine from './financialEngine.ts'
 import * as health from './financialHealth.ts'
 import { listDebts, projectPaydown } from './debt.ts'
-import { compoundStep, portfolioSummary } from './investments.ts'
+import { ILLIQUID_ASSET_CLASS, compoundStep, portfolioSummary } from './investments.ts'
 import type { Assumptions } from './financialHealth.ts'
 
 /**
@@ -325,8 +325,19 @@ export async function simulateDecumulation(input: DecumulationInput): Promise<De
   const monthlyReturn = Math.pow(1 + input.expectedReturnBps / 10_000, 1 / 12) - 1
   const startPeriod = periodOf(todayIso())
 
-  const series: DecumulationPoint[] = [{ month: 0, period: startPeriod, valueCents: summary.marketValueCents }]
-  let value = summary.marketValueCents
+  /**
+   * Só a carteira NEGOCIÁVEL sustenta uma retirada mensal — o imobilizado
+   * entra no patrimônio (`financialHealth.netWorth`) mas ninguém saca R$X
+   * por mês de um imóvel sem vendê-lo, e vender não é algo que este produto
+   * simule (`decisions/0011`). Incluí-lo aqui inflaria a base e faria a
+   * simulação dizer que o dinheiro dura muito mais do que duraria.
+   */
+  const startingValueCents = summary.positions
+    .filter((p) => p.assetClass !== ILLIQUID_ASSET_CLASS)
+    .reduce((sum, p) => sum + p.marketValueCents, 0)
+
+  const series: DecumulationPoint[] = [{ month: 0, period: startPeriod, valueCents: startingValueCents }]
+  let value = startingValueCents
   let depletionMonth: number | null = null
 
   for (let month = 1; month <= horizonMonths; month++) {
@@ -341,7 +352,7 @@ export async function simulateDecumulation(input: DecumulationInput): Promise<De
 
   return {
     series,
-    startingValueCents: summary.marketValueCents,
+    startingValueCents,
     monthlyWithdrawalCents: input.monthlyWithdrawalCents,
     expectedReturnBps: input.expectedReturnBps,
     depletionMonth,
@@ -350,7 +361,9 @@ export async function simulateDecumulation(input: DecumulationInput): Promise<De
       formula:
         'projeção mês a mês do valor atual da carteira sob uma retirada mensal fixa, reusando o mesmo passo de composição de goalProjection (investments.ts#compoundStep), com o fluxo mensal invertido (retirada em vez de aporte)',
       tipo: 'decumulação hipotética (retirada mensal simulada)',
-      valorInicialCents: summary.marketValueCents,
+      valorInicialCents: startingValueCents,
+      valorInicialEscopo:
+        'apenas a carteira negociável; o imobilizado fica de fora porque não se saca uma retirada mensal de um bem físico',
       retiradaMensalCents: input.monthlyWithdrawalCents,
       retornoEsperadoAnualBps: input.expectedReturnBps,
       horizonteMeses: horizonMonths,

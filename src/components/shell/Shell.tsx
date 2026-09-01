@@ -35,6 +35,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Acompanhar',
     items: [
       { to: '/', label: 'Visão geral', icon: 'dashboard' },
+      { to: '/patrimonio', label: 'Patrimônio', icon: 'layers' },
       { to: '/diario', label: 'Diário', icon: 'calendar' },
       { to: '/lancamentos', label: 'Lançamentos', icon: 'list' },
       { to: '/dre', label: 'DRE', icon: 'scale' },
@@ -49,6 +50,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/metas', label: 'Metas do mês', icon: 'target' },
       { to: '/dividas', label: 'Endividamento', icon: 'landmark' },
       { to: '/investimentos', label: 'Investimentos', icon: 'trending' },
+      { to: '/aposentadoria', label: 'Aposentadoria', icon: 'clock' },
     ],
   },
 ]

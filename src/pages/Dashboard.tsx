@@ -942,9 +942,19 @@ function MonthModeCard({
         )
       }
     >
-      <div className="bento" style={{ gap: 'var(--sp-4)' }}>
+      {/* São 5 linhas fixas, e 5 não divide 12: num grid de 12 colunas elas
+          ocupavam 10 e deixavam 2 permanentemente vazias à direita. Um grid
+          próprio de faixa distribui as 5 igualmente e quebra sozinho quando
+          não cabem (auditoria de layout de 01/09/2026). */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+          gap: 'var(--sp-4)',
+        }}
+      >
         {lines.map((line) => (
-          <div key={line.key} className="col-2" style={{ minWidth: 0 }}>
+          <div key={line.key} style={{ minWidth: 0 }}>
             <MonthLineTile line={line} />
           </div>
         ))}

@@ -750,16 +750,33 @@
   transform: rotate(180deg);
 }
 
-/* Ativos imobilizados pedem destaque visual próprio dentro da lista de
-   classes (01/09/2026). O tom de `.slab--accent` sozinho (fundo/borda)
-   comparado lado a lado com um `.card` comum ficou perto de imperceptível
-   em modo claro (checado visualmente) — a faixa lateral na cor da marca é
-   o que de fato lê como "este card é diferente dos outros" à distância,
-   sem usar uma cor de status (verde/amarelo/vermelho de veredito). */
-.group-card--highlight {
-  background: var(--slab-accent-bg);
-  border-color: var(--slab-accent-line);
-  border-left: 3px solid var(--brand);
+/* ---- Linha de bem imobilizado (tela de Patrimônio) --------------- *
+   Cada bem é uma faixa própria sobre o fundo do card, não uma linha de
+   tabela: a tabela genérica de ativos carrega colunas que não existem
+   aqui (cotação, % ideal, comprar?), e um bem físico tem exatamente dois
+   dados a mostrar, nome e valor. */
+.asset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  min-width: 0;
+}
+
+.asset-row__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
 }
 
 /* ---- Meters ------------------------------------------------------ */
@@ -1023,9 +1040,16 @@
   flex-direction: column;
 }
 
+/* Quatro colunas porque `RankedList` renderiza quatro filhos (swatch,
+   nome, participação, valor). A quinta track que existia aqui nunca era
+   preenchida por ele, mas o `gap` antes dela era emitido mesmo assim, e
+   toda linha terminava 12px antes da borda do card, desalinhada de
+   qualquer `.kv__v`/`.table__num` vizinho (auditoria de 01/09/2026).
+   Quem tem um quinto filho (o chevron do CategoryRing) pede a track
+   extra pelo modificador `--toggle` abaixo. */
 .ranked__item {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--sp-3);
   padding: 7px 0;
@@ -1065,7 +1089,12 @@
 .ranked__group:last-child {
   border-bottom: 0;
 }
+/* Cinco colunas: as quatro do ranking mais a do chevron. A track do
+   chevron tem largura FIXA e é reservada mesmo quando a linha não
+   expande, senão duas linhas da mesma lista (uma com subcategorias,
+   outra sem) terminavam o valor em x diferentes. */
 .ranked__item--toggle {
+  grid-template-columns: 10px minmax(0, 1fr) auto auto 13px;
   width: 100%;
   background: none;
   border: none;
@@ -1089,19 +1118,29 @@
 .ranked__chevron--open {
   transform: rotate(180deg);
 }
+/* O recuo do filho vive DENTRO da primeira track, não como padding do
+   container: com padding, as colunas de participação e valor do filho
+   ficavam 22px à esquerda das do pai e as duas listas nunca alinhavam
+   verticalmente. Mesma largura total e mesmas tracks à direita (incluindo
+   a do chevron) = colunas alinhadas entre pai e filho. */
 .ranked__children {
   display: flex;
   flex-direction: column;
-  padding: 0 0 8px 22px;
+  padding: 0 0 8px;
 }
 .ranked__item--child {
   display: grid;
-  grid-template-columns: 7px minmax(0, 1fr) auto auto;
+  grid-template-columns: 32px minmax(0, 1fr) auto auto 13px;
   align-items: center;
   gap: var(--sp-3);
   padding: 5px 0;
   font-size: var(--text-xs);
   color: var(--ink-2);
+}
+
+/* o recuo é o espaço à esquerda do swatch, dentro da própria track */
+.ranked__item--child > :first-child {
+  justify-self: end;
 }
 .swatch--sm {
   width: 7px;

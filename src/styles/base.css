@@ -410,6 +410,14 @@ svg {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--sp-4);
+  /* Cada card tem a altura do próprio conteúdo, nunca a do vizinho mais
+     alto da linha. Sem isto o grid usa `stretch` (o default), e como todo
+     `.card`/`.slab` é flex-column com o conteúdo no topo, um card curto ao
+     lado de um gráfico alto virava um retângulo com o dado em cima e um
+     vazio enorme embaixo — a reclamação de "cards com espaços vazios
+     desnecessários" de 01/09/2026 era este default, em toda linha do app,
+     não um card específico mal montado. */
+  align-items: start;
 }
 
 .col-2,
@@ -557,6 +565,12 @@ svg {
     gap: var(--sp-5);
   }
 
+  /* `.col-2` só existe dentro de cards (o Modo mês do Painel, 5 tiles
+     lado a lado). Sem regra própria aqui ele caía no `span 12` da base e
+     virava 5 blocos de largura inteira entre 768 e 1279px, cada um com um
+     rótulo curto e um número — achado da auditoria de 01/09/2026. Em 4
+     colunas eles continuam lendo como uma faixa de indicadores. */
+  .col-2 { grid-column: span 4; }
   .col-3, .col-4, .col-5 { grid-column: span 6; }
   .col-6, .col-7, .col-8, .col-9 { grid-column: span 12; }
 }

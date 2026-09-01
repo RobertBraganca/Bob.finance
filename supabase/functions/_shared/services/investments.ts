@@ -35,6 +35,18 @@ export const ASSET_CLASSES = [
   'illiquid',
 ] as const
 
+/**
+ * Imóvel, veículo, joia: entra no PATRIMÔNIO (`financialHealth.netWorth`)
+ * mas nunca na POLÍTICA DE ALOCAÇÃO da carteira. Rebalancear pressupõe
+ * poder comprar e vender frações a preço de mercado, o que um sofá não
+ * permite — antes de 01/09/2026 a classe entrava em `allocation()` junto
+ * das demais e um único bem de R$3.150 aparecia como "64,1% da carteira,
+ * meta 1,0%, desvio +63,1 p.p.", número real na tela do usuário e sem
+ * significado nenhum (nada a fazer com ele, já que vender não é sugerido
+ * e nunca será, `decisions/0011`).
+ */
+export const ILLIQUID_ASSET_CLASS = 'illiquid'
+
 type AssetClass = (typeof assets.$inferSelect)['assetClass']
 type TradeKind = (typeof assetTrades.$inferSelect)['kind']
 type GoalPurpose = (typeof investmentGoals.$inferSelect)['purpose']
@@ -199,6 +211,57 @@ export async function positions(asOfDate?: string): Promise<Position[]> {
       countsTowardReserve: !!r.countsTowardReserve,
     }
   })
+}
+
+/* ------------------------------------------------------------------ *
+ * Imobilizado — a leitura própria da classe que `allocation()` de
+ * propósito não cobre (ver `ILLIQUID_ASSET_CLASS`). Aqui a pergunta não é
+ * "está dentro da política?" e sim "o que eu tenho e quanto vale", então
+ * a saída é uma lista de bens com participação no próprio imobilizado,
+ * nunca no total da carteira.
+ * ------------------------------------------------------------------ */
+export type IlliquidItem = {
+  assetId: number
+  name: string
+  valueCents: number
+  /** participação DENTRO do imobilizado, não da carteira toda */
+  shareBps: number
+  lastPricedOn: string | null
+}
+
+export type IlliquidOverview = {
+  totalCents: number
+  items: IlliquidItem[]
+  assumptions: Record<string, unknown>
+}
+
+export async function illiquidOverview(): Promise<IlliquidOverview> {
+  const rows = (await positions())
+    .filter((p) => p.assetClass === ILLIQUID_ASSET_CLASS)
+    .sort((a, b) => b.marketValueCents - a.marketValueCents)
+  const totalCents = rows.reduce((s, p) => s + p.marketValueCents, 0)
+
+  return {
+    totalCents,
+    items: rows.map((p) => ({
+      assetId: p.assetId,
+      name: p.name,
+      valueCents: p.marketValueCents,
+      shareBps: totalCents > 0 ? Math.round((p.marketValueCents / totalCents) * 10_000) : 0,
+      lastPricedOn: p.lastPricedOn,
+    })),
+    assumptions: {
+      formula:
+        'soma do valor informado de cada bem da classe Imobilizado, com a participação de cada um dentro do próprio imobilizado',
+      bensSomados: rows.length,
+      valorTotalCents: totalCents,
+      origemDoValor:
+        'último valor informado manualmente por bem (asset_valuations); nenhum bem desta classe tem cotação de mercado automática',
+      semCotacao: rows.filter((p) => p.lastPricedOn === null).length,
+      notaDeEscopo:
+        'esta classe entra no patrimônio líquido mas fica fora da política de alocação da carteira, porque não se rebalanceia um bem físico',
+    },
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -392,7 +455,7 @@ export type AllocationSlice = {
 }
 
 export async function allocation(goalId?: number | null): Promise<AllocationSlice[]> {
-  const rows = await positions()
+  const rows = (await positions()).filter((p) => p.assetClass !== ILLIQUID_ASSET_CLASS)
   const total = rows.reduce((s, p) => s + p.marketValueCents, 0)
 
   const byClass = new Map<string, number>()
@@ -404,6 +467,7 @@ export async function allocation(goalId?: number | null): Promise<AllocationSlic
     .from(targetAllocations)
     .where(goalId ? eq(targetAllocations.goalId, goalId) : sql`goal_id is null`)
   for (const t of targetRows) {
+    if (t.assetClass === ILLIQUID_ASSET_CLASS) continue
     targets.set(t.assetClass, t.targetBps)
   }
 

@@ -1,15 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis } from 'recharts'
 import { api } from '../../lib/api'
 import { bps, money, parseMoneyInput, parsePercentInput, period as fmtPeriod } from '../../lib/format'
-import { themeFor } from '../../lib/chartTheme'
-import { useEffectiveSurface } from '../../lib/theme'
 // Importa do barrel uma vez só. NÃO é reexportado por ele: o barrel
 // importando este arquivo, que importa o barrel de volta, fecharia um ciclo.
 import { Assumptions, type AssumptionBag } from './Assumptions'
 import { Button, EmptyState, Select } from './index'
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from './chart'
+import { DecumulationChart } from '../charts/DecumulationChart'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from './dialog'
 import { Input } from './input'
 import { Tabs, TabsList, TabsTrigger } from './tabs'
@@ -233,7 +230,7 @@ export function SimulatorModal({
           <EmptyState icon="info" title="Não dá para simular isso" body={error} />
         )}
 
-        {decumulation && <DecumulationChart result={decumulation} />}
+        {decumulation && <DecumulationResultView result={decumulation} />}
 
         {result && (
           <div className="stack stack--loose">
@@ -303,20 +300,10 @@ export function SimulatorModal({
   )
 }
 
-const decumulationChartConfig = {
-  valueCents: { label: 'Patrimônio projetado' },
-} satisfies ChartConfig
-
-/**
- * Mesmo padrão de Area Chart - Gradient das demais séries temporais do
- * produto (`SpendAreaChart`, `ScoreHistoryChart`), com o mês de esgotamento
- * marcado por uma `ReferenceLine` quando existir — nunca uma cor de
- * veredito (o esgotamento é um fato calculado, não um alerta de "errou").
- */
-function DecumulationChart({ result }: { result: DecumulationResult }) {
-  const theme = themeFor(useEffectiveSurface('paper'))
-  const gradientId = 'decumulation-area'
-
+/** Resumo + gráfico da simulação de decumulação. O gráfico em si é o
+ * componente compartilhado `charts/DecumulationChart`, o mesmo que a tela
+ * de Aposentadoria usa — uma fórmula, um desenho, dois lugares. */
+function DecumulationResultView({ result }: { result: DecumulationResult }) {
   return (
     <div className="stack stack--loose">
       <hr className="divider" />
@@ -335,55 +322,7 @@ function DecumulationChart({ result }: { result: DecumulationResult }) {
         </span>
       </div>
 
-      <ChartContainer config={decumulationChartConfig} className="aspect-auto w-full" style={{ height: 220 }}>
-        <AreaChart data={result.series} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={theme.primary} stopOpacity={0.8} />
-              <stop offset="95%" stopColor={theme.primary} stopOpacity={0.1} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid vertical={false} stroke={theme.grid} />
-          <XAxis
-            dataKey="period"
-            tickLine={false}
-            axisLine={false}
-            tickMargin={8}
-            minTickGap={40}
-            tick={{ fill: theme.axisText, fontSize: 11 }}
-            tickFormatter={(value: string) => fmtPeriod(value)}
-          />
-          <ChartTooltip
-            cursor={{ stroke: theme.axis, strokeWidth: 1 }}
-            content={
-              <ChartTooltipContent
-                labelFormatter={(value) => fmtPeriod(String(value))}
-                formatter={(value) => (
-                  <div className="flex flex-1 items-center justify-between gap-4">
-                    <span className="text-muted-foreground">Patrimônio</span>
-                    <span className="font-mono font-medium tabular-nums">{money(Number(value))}</span>
-                  </div>
-                )}
-              />
-            }
-          />
-          {result.depletionPeriod !== null && (
-            <ReferenceLine
-              x={result.depletionPeriod}
-              stroke={theme.status.critical}
-              strokeDasharray="4 4"
-              label={{ value: 'esgota aqui', position: 'insideTopRight', fill: theme.status.critical, fontSize: 11 }}
-            />
-          )}
-          <Area
-            dataKey="valueCents"
-            type="natural"
-            fill={`url(#${gradientId})`}
-            fillOpacity={0.4}
-            stroke={theme.primary}
-          />
-        </AreaChart>
-      </ChartContainer>
+      <DecumulationChart series={result.series} depletionPeriod={result.depletionPeriod} surface="paper" />
 
       <Assumptions data={result.assumptions} />
     </div>

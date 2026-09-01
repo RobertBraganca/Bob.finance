@@ -53,7 +53,11 @@ export const DEFAULT_BENTO_LAYOUT: BentoCardConfig[] = [
   { id: 'hero', span: 4, visible: true },
   { id: 'income-expense-kpi', span: 4, visible: true },
   { id: 'accounts', span: 4, visible: true },
-  { id: 'credit-cards', span: 8, visible: true },
+  // 12, não 8: este card fica sozinho na linha (o vizinho seguinte é um
+  // span 12), então um 8 deixava 4 colunas mortas no layout PADRÃO, o que
+  // todo usuário vê antes de personalizar qualquer coisa (auditoria de
+  // layout de 01/09/2026).
+  { id: 'credit-cards', span: 12, visible: true },
   { id: 'reconciliation', span: 12, visible: true },
   { id: 'pending-income', span: 6, visible: true },
   { id: 'pending-expense', span: 6, visible: true },

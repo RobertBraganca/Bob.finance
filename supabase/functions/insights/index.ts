@@ -569,6 +569,8 @@ app.get('/investments', async (c) => {
   })
 })
 
+app.get('/investments/illiquid', async (c) => c.json(await investments.illiquidOverview()))
+
 app.get('/investments/trades', async (c) => {
   const query = z.object({ assetId: z.coerce.number().int().positive().optional() }).parse(c.req.query())
   return c.json({ trades: await investments.listTrades(query.assetId) })
