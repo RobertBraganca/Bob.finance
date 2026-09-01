@@ -426,6 +426,11 @@ export async function insightsRoutes(app: FastifyInstance) {
     return { history: await healthService.healthScoreHistory(query.months, query.accountId ?? null) }
   })
 
+  app.get('/financial-health/net-worth-history', async (req) => {
+    const query = z.object({ months: z.coerce.number().int().min(1).max(36).default(12) }).parse(req.query)
+    return { history: await healthService.netWorthHistory(query.months) }
+  })
+
   app.get('/financial-health/runway', async (req) => {
     const query = z
       .object({ liquidClasses: z.string().optional() })

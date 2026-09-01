@@ -23,6 +23,7 @@ import { Input } from '../components/ui/input'
 import { SimulatorModal } from '../components/ui/SimulatorModal'
 import { PageHeader } from '../components/shell/Shell'
 import { ScoreHistoryChart, type ScorePoint } from '../components/charts/ScoreHistoryChart'
+import { NetWorthHistoryChart, type NetWorthPoint } from '../components/charts/NetWorthHistoryChart'
 
 /**
  * Saúde financeira: Health Score, Runway, Radar de risco.
@@ -170,6 +171,12 @@ export function FinancialHealthPage() {
     enabled: meta.isSuccess,
   })
 
+  const netWorthHistory = useQuery({
+    queryKey: ['financial-health-net-worth-history'],
+    queryFn: () => api.get<{ history: NetWorthPoint[] }>('/financial-health/net-worth-history', { months: 12 }),
+    enabled: meta.isSuccess,
+  })
+
   const data = score.data
   const hasLedger = (meta.data?.ledger.count ?? 0) > 0
 
@@ -295,6 +302,14 @@ export function FinancialHealthPage() {
                   <Assumptions data={netWorth.data.assumptions} />
                 </>
               )}
+            </Card>
+
+            <Card
+              span={12}
+              title="Evolução do patrimônio líquido"
+              subtitle="Últimos 12 meses, recalculado a cada mês — nunca um número guardado"
+            >
+              <NetWorthHistoryChart points={netWorthHistory.data?.history ?? []} />
             </Card>
 
             <Card

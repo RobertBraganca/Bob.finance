@@ -127,6 +127,20 @@ pelo mesmo risco de travamento de pooler já documentado em
 um buraco na linha do gráfico (`ScoreHistoryChart`), nunca um zero. Ver
 estudo de viabilidade #3, 29/08/2026.
 
+## Histórico de patrimônio líquido (Status: implementado, 31/08/2026)
+`GET /financial-health/net-worth-history` — série dos últimos N meses, mesmo
+padrão de `score-history`: cada ponto reconstitui saldo em conta, investimentos
+e dívida naquela data e soma (`financialHealth.ts#netWorthHistory`), nunca um
+valor persistido. O ponto em aberto do estudo #8 ("`positions()` suporta corte
+de data?") foi resolvido estendendo `investments.positions(asOfDate?)` e
+`analytics.accountBalances(asOfDate?)` com um parâmetro opcional — omitido,
+comportamento idêntico a antes — em vez de criar uma segunda função paralela
+"posições/saldos no passado". O lado da dívida reusa `debt.debtTrend()`
+diretamente (já é uma série histórica de verdade, um ponto por
+`debt_snapshots.as_of`), com forward-fill até a data de corte de cada mês.
+Sequencial de propósito, mesmo risco de pooler das demais séries desta área.
+Ver estudo de viabilidade #8, 29/08/2026.
+
 ## Casos de borda
 - Nenhum dado suficiente para nenhum dos 5 indicadores do Health Score (app
   recém-instalado): estado explícito de "sem dado suficiente ainda", nunca

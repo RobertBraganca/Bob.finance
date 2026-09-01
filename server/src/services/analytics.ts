@@ -507,7 +507,14 @@ export async function topMerchants(range: Range, limit = 8) {
  * Account balances, derived from the opening balance plus every
  * transaction — never stored, so it can never drift.
  * ------------------------------------------------------------------ */
-export async function accountBalances() {
+/**
+ * `asOfDate` opcional reconstitui o saldo como ele estava naquela data
+ * (lançamentos depois dela não contam) — omitido, comportamento idêntico a
+ * antes. Mesmo motivo de `investments.positions(asOfDate)`: série
+ * histórica de patrimônio líquido, nunca uma segunda função paralela.
+ */
+export async function accountBalances(asOfDate?: string) {
+  const cutoff = asOfDate ? sql`and t.posted_on <= ${asOfDate}` : sql``
   return db.execute<{
     id: number
     name: string
@@ -526,7 +533,7 @@ export async function accountBalances() {
       count(case when t.pending = false then t.id else null end) as "transactionCount",
       max(case when t.pending = false then t.posted_on else null end) as "lastPostedOn"
     from accounts a
-    left join transactions t on t.account_id = a.id
+    left join transactions t on t.account_id = a.id ${cutoff}
     where a.archived = false
     group by a.id
     order by a.name

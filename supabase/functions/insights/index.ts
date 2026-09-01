@@ -404,6 +404,11 @@ app.get('/financial-health/score-history', async (c) => {
   return c.json({ history: await healthService.healthScoreHistory(query.months, query.accountId ?? null) })
 })
 
+app.get('/financial-health/net-worth-history', async (c) => {
+  const query = z.object({ months: z.coerce.number().int().min(1).max(36).default(12) }).parse(c.req.query())
+  return c.json({ history: await healthService.netWorthHistory(query.months) })
+})
+
 app.get('/financial-health/runway', async (c) => {
   const query = z.object({ liquidClasses: z.string().optional() }).parse(c.req.query())
   const liquidClasses = query.liquidClasses

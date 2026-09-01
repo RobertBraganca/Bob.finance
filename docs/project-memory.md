@@ -568,3 +568,20 @@ condensar se algum dia virar spec):
   ampla com cautela extra: se até um retrofit de DOIS sistemas já
   escondia uma incompatibilidade de fórmula, um motor genérico de TRÊS
   provavelmente esconde mais.
+
+### Terceira leva (31/08/2026): [8]
+
+- **[8] Patrimônio líquido histórico** — implementado
+  (`financialHealth.ts#netWorthHistory`, `GET
+  /financial-health/net-worth-history`). O ponto em aberto do estudo original
+  ("`positions()` suporta corte de data?") foi resolvido estendendo
+  `investments.positions(asOfDate?)` e `analytics.accountBalances(asOfDate?)`
+  com um parâmetro opcional (fragmento SQL condicional no join/subquery de
+  cotação; omitido, comportamento idêntico a antes) — mesmo espírito de
+  não criar uma segunda função paralela "posições no passado", igual ao
+  precedente de `possibleManualMatchId` do item [15]. Lado da dívida reusa
+  `debt.debtTrend()` direto (já é histórico de verdade), com forward-fill até
+  a data de corte de cada mês. Mesmo padrão sequencial (nunca `Promise.all`)
+  das demais séries desta leva. UI: `NetWorthHistoryChart`, card "Evolução do
+  patrimônio líquido" logo abaixo de "Patrimônio consolidado" em
+  `FinancialHealth.tsx`.

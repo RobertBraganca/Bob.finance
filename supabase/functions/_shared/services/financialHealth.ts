@@ -4,7 +4,7 @@ import { financialHealthSettings } from '../db/schema.ts'
 import { addDays, addMonths, periodBounds, periodRange, todayIso } from '../core/dates.ts'
 import { accountBalances, totals } from './analytics.ts'
 import { listCards } from './creditCards.ts'
-import { debtOverview, listDebts } from './debt.ts'
+import { debtOverview, debtTrend, listDebts } from './debt.ts'
 import { getPeriodProgress } from './goals.ts'
 import { allocation, positions, reserveStatus } from './investments.ts'
 
@@ -896,4 +896,36 @@ export async function netWorth(): Promise<NetWorth> {
       origem: 'services/analytics (saldos), services/investments (posições), services/debt (dívidas)',
     },
   }
+}
+
+/**
+ * Série histórica de patrimônio líquido — estudo de viabilidade #8,
+ * 29/08/2026. O ponto em aberto do estudo (positions() suporta corte de
+ * data?) foi resolvido estendendo `positions`/`accountBalances` com um
+ * parâmetro `asOfDate` opcional (default preserva o comportamento de
+ * sempre) — nenhuma segunda função paralela pra "posições no passado".
+ * Lado da dívida reusa `debtTrend()`, que já é histórico de verdade
+ * (`debt_snapshots`); "como estava a dívida no fim deste mês" é o ponto de
+ * `debtTrend()` mais recente com `asOf` até o fim do mês, forward-fill
+ * igual o próprio `debtTrend()` já faz internamente entre contas.
+ * Sequencial de propósito (mesmo risco de pooler já documentado em
+ * `goalHistory`/`healthScoreHistory`).
+ */
+export async function netWorthHistory(months = 12): Promise<Array<{ period: string; netWorthCents: number }>> {
+  const currentPeriod = todayIso().slice(0, 7)
+  const periods = periodRange(addMonths(currentPeriod, -(months - 1)), currentPeriod)
+  const debtSeries = await debtTrend()
+
+  const out: Array<{ period: string; netWorthCents: number }> = []
+  for (const period of periods) {
+    const asOfDate = periodBounds(period).end
+    const balances = await accountBalances(asOfDate)
+    const holdings = await positions(asOfDate)
+    const balanceCents = balances.reduce((sum, a) => sum + a.balanceCents, 0)
+    const investmentsCents = holdings.reduce((sum, p) => sum + p.marketValueCents, 0)
+    const debtPoint = [...debtSeries].reverse().find((p) => p.asOf <= asOfDate)
+    const debtCents = debtPoint?.balanceCents ?? 0
+    out.push({ period, netWorthCents: balanceCents + investmentsCents - debtCents })
+  }
+  return out
 }

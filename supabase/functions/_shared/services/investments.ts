@@ -110,7 +110,20 @@ export type Position = {
   countsTowardReserve: boolean
 }
 
-export async function positions(): Promise<Position[]> {
+/**
+ * `asOfDate` (`YYYY-MM-DD`) é opcional e reconstitui a carteira como ela
+ * estava naquela data — trades depois dela não contam, e a cotação usada é
+ * a última CONHECIDA até aquela data, não a mais recente de hoje. Omitido
+ * (o caso de toda leitura de produção existente), comportamento idêntico a
+ * antes: nenhum filtro de data entra na query. Existe pra série histórica
+ * de patrimônio líquido (`netWorthHistory`, `financialHealth.ts`, estudo de
+ * viabilidade #8, 29/08/2026) — nunca uma segunda função paralela pra
+ * "posições no passado".
+ */
+export async function positions(asOfDate?: string): Promise<Position[]> {
+  const tradeCutoff = asOfDate ? sql`and t.traded_on <= ${asOfDate}` : sql``
+  const valuationCutoff = asOfDate ? sql`and v.as_of <= ${asOfDate}` : sql``
+
   const rows = await db.execute<{
     assetId: number
     name: string
@@ -141,11 +154,11 @@ export async function positions(): Promise<Position[]> {
       coalesce(sum(t.fees_cents), 0) as "feesCents",
       coalesce(sum(case when t.kind = 'dividend' then round(t.quantity * t.unit_price_cents) else 0 end), 0) as "dividendsCents",
       (select v.unit_price_cents from asset_valuations v
-        where v.asset_id = a.id order by v.as_of desc limit 1) as "lastUnitPriceCents",
+        where v.asset_id = a.id ${valuationCutoff} order by v.as_of desc limit 1) as "lastUnitPriceCents",
       (select v.as_of from asset_valuations v
-        where v.asset_id = a.id order by v.as_of desc limit 1) as "lastPricedOn"
+        where v.asset_id = a.id ${valuationCutoff} order by v.as_of desc limit 1) as "lastPricedOn"
     from assets a
-    left join asset_trades t on t.asset_id = a.id
+    left join asset_trades t on t.asset_id = a.id ${tradeCutoff}
     where a.archived = false
     group by a.id
     order by a.name
