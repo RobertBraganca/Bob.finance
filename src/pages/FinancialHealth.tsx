@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/
 import { Input } from '../components/ui/input'
 import { SimulatorModal } from '../components/ui/SimulatorModal'
 import { PageHeader } from '../components/shell/Shell'
+import { ScoreHistoryChart, type ScorePoint } from '../components/charts/ScoreHistoryChart'
 
 /**
  * Saúde financeira: Health Score, Runway, Radar de risco.
@@ -163,6 +164,12 @@ export function FinancialHealthPage() {
     enabled: meta.isSuccess,
   })
 
+  const scoreHistory = useQuery({
+    queryKey: ['financial-health-score-history'],
+    queryFn: () => api.get<{ history: ScorePoint[] }>('/financial-health/score-history', { months: 12 }),
+    enabled: meta.isSuccess,
+  })
+
   const data = score.data
   const hasLedger = (meta.data?.ledger.count ?? 0) > 0
 
@@ -236,6 +243,14 @@ export function FinancialHealthPage() {
                 ))}
               </div>
               <Assumptions data={data.assumptions} label="Como compomos o score" />
+            </Card>
+
+            <Card
+              span={12}
+              title="Evolução do Health Score"
+              subtitle="Últimos 12 meses, recalculado a cada mês — nunca um número guardado"
+            >
+              <ScoreHistoryChart points={scoreHistory.data?.history ?? []} />
             </Card>
 
             {/*

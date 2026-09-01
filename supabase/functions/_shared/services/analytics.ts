@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
-import { addMonths, dayRange, periodBounds, periodOf, periodRange } from '../core/dates.ts'
+import { addDays, addMonths, dayRange, periodBounds, periodOf, periodRange, todayIso } from '../core/dates.ts'
 
 /**
  * Every number on every dashboard is produced here, by aggregating the
@@ -340,6 +340,36 @@ export async function dailySeries(range: Range): Promise<DailyPoint[]> {
     expenseCents: byDay.get(day)?.expense ?? 0,
     transactionCount: byDay.get(day)?.count ?? 0,
   }))
+}
+
+/**
+ * Dias seguidos com lançamento registrado no Diário — puramente derivado
+ * (dias distintos de `transactions.source = 'daily'`, nenhuma tabela nova,
+ * estudo de viabilidade #1 de 29/08/2026). Hoje ainda "conta" mesmo sem
+ * lançamento — a sequência só quebra de fato à meia-noite, senão o
+ * contador cairia pra zero toda manhã antes do usuário abrir o app.
+ */
+export async function dailyStreak(): Promise<{ days: number; lastEntryOn: string | null }> {
+  const rows = await db.execute<{ day: string }>(sql`
+    select distinct posted_on as day
+    from transactions
+    where source = 'daily'
+    order by day desc
+    limit 400
+  `)
+  const days = new Set(rows.map((r) => r.day))
+  const today = todayIso()
+
+  let cursor = today
+  if (!days.has(cursor)) cursor = addDays(cursor, -1)
+
+  let streak = 0
+  while (days.has(cursor)) {
+    streak++
+    cursor = addDays(cursor, -1)
+  }
+
+  return { days: streak, lastEntryOn: rows[0]?.day ?? null }
 }
 
 /* ------------------------------------------------------------------ *

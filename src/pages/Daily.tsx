@@ -33,6 +33,7 @@ type DailyResponse = {
   range: { from: string; to: string }
   period: string
   days: Array<{ day: string; expenseCents: number; transactionCount: number }>
+  streak: { days: number; lastEntryOn: string | null }
   pace: {
     daysElapsed: number
     daysTotal: number
@@ -184,6 +185,23 @@ export function DailyPage() {
               value={busiest ? moneyCompact(busiest.expenseCents) : '-'}
               foot={busiest ? fmtDate(busiest.day) : 'sem gastos'}
             />
+          </Card>
+          <Card span={12}>
+            <div className="row row--between" style={{ alignItems: 'center' }}>
+              <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+                <Icon name="check" size={16} />
+                <span style={{ fontSize: 'var(--text-sm)' }}>
+                  {daily.data?.streak.days
+                    ? `${daily.data.streak.days} dia${daily.data.streak.days > 1 ? 's' : ''} seguido${daily.data.streak.days > 1 ? 's' : ''} com lançamento no Diário`
+                    : 'Nenhum lançamento no Diário hoje ainda'}
+                </span>
+              </span>
+              {daily.data?.streak.lastEntryOn && (
+                <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                  Último em {fmtDate(daily.data.streak.lastEntryOn)}
+                </span>
+              )}
+            </div>
           </Card>
           <Card span={12}>
             <StatTile

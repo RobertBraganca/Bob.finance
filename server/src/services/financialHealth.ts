@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { financialHealthSettings } from '../db/schema'
-import { addDays, addMonths, periodBounds, todayIso } from '../core/dates'
+import { addDays, addMonths, periodBounds, periodRange, todayIso } from '../core/dates'
 import { accountBalances, totals } from './analytics'
 import { listCards } from './creditCards'
 import { debtOverview, listDebts } from './debt'
@@ -436,6 +436,35 @@ export async function healthScore(period: string, accountId: number | null = nul
       ...(scoreBps === null ? { semDado: 'nenhum indicador tem dado suficiente no período' } : {}),
     },
   }
+}
+
+/**
+ * Série histórica do Health Score — estudo de viabilidade #3 de 29/08/2026.
+ * Nunca persiste nada: chama `healthScore(period)` sem alterá-la, uma vez
+ * por mês, exatamente como `goalHistory` já faz em `goals.ts`. Um "snapshot"
+ * gravado ficaria defasado se uma transação de um mês antigo fosse corrigida
+ * depois — recalcular sempre evita esse problema por completo (mesmo
+ * espírito de "derivar, nunca guardar" do PRD, seção 4).
+ *
+ * Sequencial de propósito, não Promise.all: `healthScore` já dispara várias
+ * queries internas (`gatherScoreInputs` cruza saldo, dívida, gasto, reserva
+ * e alocação); rodar N meses ao mesmo tempo arrisca o mesmo travamento de
+ * pooler de transação já documentado em `goalHistory`/`homeBanners` sob
+ * Edge Functions.
+ */
+export async function healthScoreHistory(
+  months = 12,
+  accountId: number | null = null,
+): Promise<Array<{ period: string; scoreBps: number | null }>> {
+  const currentPeriod = todayIso().slice(0, 7)
+  const periods = periodRange(addMonths(currentPeriod, -(months - 1)), currentPeriod)
+
+  const out: Array<{ period: string; scoreBps: number | null }> = []
+  for (const period of periods) {
+    const { scoreBps } = await healthScore(period, accountId)
+    out.push({ period, scoreBps })
+  }
+  return out
 }
 
 /* ------------------------------------------------------------------ *

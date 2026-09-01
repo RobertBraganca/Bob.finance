@@ -162,6 +162,7 @@ app.get('/analytics/daily', async (c) => {
           : null,
     },
     receivableCents: await analytics.receivable(range),
+    streak: await analytics.dailyStreak(),
   })
 })
 
@@ -394,6 +395,13 @@ const healthQuery = z.object({
 app.get('/financial-health/score', async (c) => {
   const query = healthQuery.parse(c.req.query())
   return c.json(await healthService.healthScore(await resolvePeriod(query.period), query.accountId ?? null))
+})
+
+app.get('/financial-health/score-history', async (c) => {
+  const query = z
+    .object({ months: z.coerce.number().int().min(1).max(36).default(12), accountId: z.coerce.number().int().positive().optional() })
+    .parse(c.req.query())
+  return c.json({ history: await healthService.healthScoreHistory(query.months, query.accountId ?? null) })
 })
 
 app.get('/financial-health/runway', async (c) => {

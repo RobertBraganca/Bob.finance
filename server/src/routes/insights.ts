@@ -152,6 +152,7 @@ export async function insightsRoutes(app: FastifyInstance) {
             : null,
       },
       receivableCents: await analytics.receivable(range),
+      streak: await analytics.dailyStreak(),
     }
   })
 
@@ -416,6 +417,13 @@ export async function insightsRoutes(app: FastifyInstance) {
   app.get('/financial-health/score', async (req) => {
     const query = healthQuery.parse(req.query)
     return healthService.healthScore(await resolvePeriod(query.period), query.accountId ?? null)
+  })
+
+  app.get('/financial-health/score-history', async (req) => {
+    const query = z
+      .object({ months: z.coerce.number().int().min(1).max(36).default(12), accountId: z.coerce.number().int().positive().optional() })
+      .parse(req.query)
+    return { history: await healthService.healthScoreHistory(query.months, query.accountId ?? null) }
   })
 
   app.get('/financial-health/runway', async (req) => {
