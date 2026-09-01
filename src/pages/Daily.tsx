@@ -28,7 +28,6 @@ import {
 import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
 import { SpendAreaChart } from '../components/charts/SpendAreaChart'
-import { DailyHeatmap } from '../components/charts/DailyHeatmap'
 
 type DailyResponse = {
   range: { from: string; to: string }
@@ -147,10 +146,6 @@ export function DailyPage() {
 
           <Slab span={8} title="Intensidade por dia" subtitle="Gasto de cada dia do mês selecionado">
             <SpendAreaChart days={daily.data?.days ?? []} surface="paper" />
-          </Slab>
-
-          <Slab span={12} title="Termômetro de gastos" subtitle="A mesma série acima, por dia da semana — em que dia o gasto costuma pesar mais">
-            <DailyHeatmap days={daily.data?.days ?? []} surface="paper" />
           </Slab>
 
           <Card span={3}>

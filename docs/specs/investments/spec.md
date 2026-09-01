@@ -160,20 +160,6 @@ seria necessário aportar nesta classe para alcançar a meta configurada"),
 nunca no imperativo. Uma classe já na meta ou acima simplesmente não
 aparece na lista — silêncio, não "reduzir zero". Ver `decisions/0011`.
 
-**Progresso da alocação em anéis (Status: implementado, 01/09/2026).**
-`AllocationRings` (`InvestmentCharts.tsx`), pedido do usuário com
-referência visual de "Ring Chart - Thick Rings" de uma biblioteca externa
-(Bklit UI — instalável, mas com dependências novas fora do padrão do app,
-`@visx/*` + `motion`; construído em vez disso com a MESMA técnica de anel
-de progresso que `CategoryRing` já usa, Recharts puro, sem dependência
-nova). Não é o mesmo dado de `AssetClassRing` (participação no todo, um
-anel só) nem duplica `AllocationChart` (a mesma comparação atual×meta, em
-barra) — é uma terceira leitura visual do mesmo par atual/meta por classe,
-em anéis concêntricos independentes (cada anel preenchido pela fração de
-`actualBps` sobre `targetBps`, nunca somando 100% entre si, ao contrário
-de `AssetClassRing`). Capado em 4 anéis — mesma capacidade da paleta
-categórica do app (`theme.series`), evita dois anéis reusarem a mesma cor.
-
 ## Casos de borda
 - Carteira vazia: tela de "cadastre o primeiro ativo", nunca um dashboard
   zerado.

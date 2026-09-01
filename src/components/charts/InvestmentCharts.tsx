@@ -5,8 +5,6 @@ import {
   Cell,
   Line,
   LineChart,
-  Pie,
-  PieChart,
   Rectangle,
   ReferenceLine,
   ResponsiveContainer,
@@ -484,125 +482,6 @@ export function AssetClassRing({
       paddingAngle={5}
       cornerRadius={6}
     />
-  )
-}
-
-/* ================================================================== *
- * Progresso por classe — anéis concêntricos ("Ring Chart - Thick
- * Rings", pedido do usuário em 01/09/2026, referência visual externa).
- * Cada anel é uma classe COM meta definida, preenchido pela fração de
- * `actualBps` sobre `targetBps` — não participação no todo (isso já é
- * `AssetClassRing`, um anel só, ao lado). Mesma técnica de anel de
- * progresso do Recharts que `CategoryRing` usa (Pie de 2 fatias, arco
- * cheio + trilho), só que N Pies concêntricos, um por classe, em vez de
- * um só Pie fatiado. Máximo 4 anéis: é a capacidade real da paleta
- * categórica do app (`theme.series`, 4 cores) — um 5º anel repetiria
- * cor de outro já mostrado, confundindo dois anéis como se fossem a
- * mesma classe.
- * ================================================================== */
-const RING_STROKE = 16
-const RING_GAP = 6
-const MAX_RINGS = 4
-
-export function AllocationRings({
-  slices,
-  surface = 'paper',
-  size = 220,
-}: {
-  slices: AllocationSlice[]
-  surface?: Surface
-  size?: number
-}) {
-  const theme = themeFor(useEffectiveSurface(surface))
-  const withTarget = [...slices]
-    .filter((s) => s.targetBps !== null && s.targetBps > 0)
-    .sort((a, b) => (b.targetBps ?? 0) - (a.targetBps ?? 0))
-    .slice(0, MAX_RINGS)
-  const hasData = withTarget.length > 0
-
-  const RingTip = makeTooltip<AllocationSlice>((slice) => ({
-    title: slice.label,
-    rows: [
-      { label: 'Atual', value: bps(slice.actualBps), color: seriesColor(theme, slice.assetClass) },
-      { label: 'Meta', value: slice.targetBps === null ? '-' : bps(slice.targetBps) },
-      { label: 'Desvio', value: slice.driftBps === null ? '-' : signedPoints(slice.driftBps) },
-    ],
-  }))
-
-  return (
-    <ChartFrame
-      legend={withTarget.map((s) => ({ label: s.label, color: seriesColor(theme, s.assetClass), shape: 'block' }))}
-      isEmpty={!hasData}
-      emptyTitle="Nenhuma meta de alocação definida"
-      emptyBody="Defina uma meta por classe (botão acima) para ver o progresso em anéis."
-      table={{
-        caption: 'Progresso da alocação por classe',
-        rows: withTarget,
-        columns: [
-          { header: 'Classe', value: (row) => row.label },
-          { header: 'Atual', value: (row) => bps(row.actualBps), align: 'right' },
-          { header: 'Meta', value: (row) => (row.targetBps === null ? '-' : bps(row.targetBps)), align: 'right' },
-        ],
-      }}
-    >
-      <div style={{ position: 'relative' }}>
-        <ResponsiveContainer width="100%" height={size}>
-          <PieChart>
-            {withTarget.map((slice, index) => {
-              const outerRadius = Math.max(0, size / 2 - index * (RING_STROKE + RING_GAP))
-              const innerRadius = Math.max(0, outerRadius - RING_STROKE)
-              const color = seriesColor(theme, slice.assetClass)
-              const progress = slice.targetBps ? Math.min(1, Math.max(0, slice.actualBps / slice.targetBps)) : 0
-              const data = [
-                { part: 'filled' as const, value: progress, ...slice },
-                { part: 'track' as const, value: 1 - progress, ...slice },
-              ]
-              return (
-                <Pie
-                  key={slice.assetClass}
-                  data={data}
-                  dataKey="value"
-                  nameKey="part"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={innerRadius}
-                  outerRadius={outerRadius}
-                  startAngle={90}
-                  endAngle={-270}
-                  stroke="none"
-                  isAnimationActive={false}
-                >
-                  <Cell fill={color} />
-                  <Cell fill={theme.grid} />
-                </Pie>
-              )
-            })}
-            <Tooltip content={<RingTip />} />
-          </PieChart>
-        </ResponsiveContainer>
-
-        {/* O centro de um anel é o único lugar onde um resumo cabe sem
-            competir com nenhuma fatia — descritivo (contagem), nunca um
-            veredito de "no alvo"/"fora do alvo". */}
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'grid',
-            placeItems: 'center',
-            pointerEvents: 'none',
-            textAlign: 'center',
-          }}
-        >
-          <div>
-            <div className="stat__label">Classes</div>
-            <div className="numeral" style={{ fontSize: 'var(--text-lg)' }}>
-              {withTarget.length}
-            </div>
-          </div>
-        </div>
-      </div>
-    </ChartFrame>
   )
 }
 

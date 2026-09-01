@@ -44,7 +44,6 @@ import {
 import { PageHeader } from '../components/shell/Shell'
 import {
   AllocationChart,
-  AllocationRings,
   AllocationVsTargetChart,
   AssetClassRing,
   GoalProjectionChart,
@@ -575,14 +574,6 @@ function PortfolioTab({
         }
       >
         <AllocationChart slices={data.allocation} surface="paper" />
-      </Card>
-
-      <Card
-        span={5}
-        title="Progresso da alocação"
-        subtitle="Cada anel é uma classe, preenchido pelo quanto já cobre da meta"
-      >
-        <AllocationRings slices={data.allocation} surface="paper" size={220} />
       </Card>
 
       <BelowTargetCard allocation={data.allocation} onOpenAlloc={onOpenAlloc} />
