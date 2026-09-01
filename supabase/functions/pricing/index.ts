@@ -137,10 +137,19 @@ app.post('/simulate', async (c) => {
   return c.json(await pricing.simulate(body))
 })
 
+/** Condições comerciais: aceitas na criação e na edição, e (ao contrário
+ * dos campos de cálculo) também depois da aprovação — não mexem em preço. */
+const commercialTerms = {
+  installments: z.number().int().min(1).max(60).optional(),
+  paymentTerms: z.string().max(500).nullable().optional(),
+}
+
 app.get('/quotes', async (c) => c.json({ quotes: await pricing.listQuotes() }))
 
 app.post('/quotes', async (c) => {
-  const body = simulateBody.extend({ clientLabel: z.string().min(1).max(120) }).parse(await c.req.json())
+  const body = simulateBody
+    .extend({ clientLabel: z.string().min(1).max(120), ...commercialTerms })
+    .parse(await c.req.json())
   return c.json(await pricing.saveQuote(body))
 })
 
@@ -159,7 +168,7 @@ app.patch('/quotes/:id', async (c) => {
   const body = simulateBody
     .omit({ period: true })
     .partial()
-    .extend({ clientLabel: z.string().min(1).max(120).optional() })
+    .extend({ clientLabel: z.string().min(1).max(120).optional(), ...commercialTerms })
     .parse(await c.req.json())
   const quote = await pricing.updateQuote(id, body)
   if (!quote) return c.json({ error: 'cotação não encontrada' }, 404)

@@ -916,6 +916,14 @@ export const projectQuotes = pgTable(
     premiumPriceCents: int('premium_price_cents').notNull(),
     /** what was actually negotiated at approval — null until approved; approveQuote defaults it to recommendedPriceCents when the user doesn't override it, never silently different from what the ledger transaction actually used */
     actualPriceCents: int('actual_price_cents'),
+    /**
+     * Condições comerciais, não insumo de cálculo: mudar parcelamento ou
+     * a nota de condição não recomputa nenhum dos preços congelados, então
+     * seguem editáveis mesmo depois da aprovação (`decisions/0021` trava
+     * só os campos que mudariam o preço).
+     */
+    installments: int('installments').notNull().default(1),
+    paymentTerms: text('payment_terms'),
     status: quoteStatusEnum('status').notNull().default('draft'),
     createdAt: text('created_at').notNull().default(now),
     /** Last edit, distinct from createdAt — decisions/0021, an edit recomputes the frozen numbers. */

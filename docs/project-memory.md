@@ -752,11 +752,17 @@ Verificação: as mudanças de grid foram MEDIDAS no navegador (bordas direitas
 via `getBoundingClientRect`), não conferidas de olho — pai e filhos do
 ranking alinham em 498px, participações em 390px.
 
-### Fica pendente desta rodada
+### Modal de orçamento em Precificação (feito na sequência)
 
-- Modal de orçamento em Precificação (revisar valores, editar nome do
-  cliente, condições de pagamento parceladas) — pedido no meio da rodada,
-  ainda não implementado; condições de pagamento exigem coluna nova.
+`project_quotes` ganhou `installments` e `payment_terms` (migração
+`20260901120000`). Encaixaram na categoria que o serviço já tinha para
+`clientLabel`: campo COMERCIAL, fora de `CALCULATION_FIELDS`, logo não
+recomputa preço e segue editável depois da aprovação — o `decisions/0021`
+só trava o que mudaria o valor já lançado no ledger. O modal de edição
+virou revisão do orçamento (números congelados no topo, depois cliente e
+condições, depois os campos de cálculo); numa cotação aprovada o
+"Recalcular" some e o patch manda só o comercial. Valor da parcela é
+derivado na leitura, nunca gravado.
 - Itens menores da auditoria não corrigidos: `.stat__label` sem altura
   mínima (valores de KPI em baselines diferentes quando o rótulo quebra em
   2 linhas), título/subtítulo de card sem truncate, duas famílias de modal

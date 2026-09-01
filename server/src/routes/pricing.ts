@@ -27,6 +27,13 @@ const simulateBody = z.object({
   period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
 })
 
+/** Condições comerciais: aceitas na criação e na edição, e (ao contrário
+ * dos campos de cálculo) também depois da aprovação — não mexem em preço. */
+const commercialTerms = {
+  installments: z.number().int().min(1).max(60).optional(),
+  paymentTerms: z.string().max(500).nullable().optional(),
+}
+
 export async function pricingRoutes(app: FastifyInstance) {
   /* ---------------------------------------------------------------- *
    * Settings
@@ -116,7 +123,9 @@ export async function pricingRoutes(app: FastifyInstance) {
   app.get('/pricing/quotes', async () => ({ quotes: await pricing.listQuotes() }))
 
   app.post('/pricing/quotes', async (req, reply) => {
-    const body = simulateBody.extend({ clientLabel: z.string().min(1).max(120) }).parse(req.body)
+    const body = simulateBody
+      .extend({ clientLabel: z.string().min(1).max(120), ...commercialTerms })
+      .parse(req.body)
     try {
       return await pricing.saveQuote(body)
     } catch (error) {
@@ -140,7 +149,7 @@ export async function pricingRoutes(app: FastifyInstance) {
     const body = simulateBody
       .omit({ period: true })
       .partial()
-      .extend({ clientLabel: z.string().min(1).max(120).optional() })
+      .extend({ clientLabel: z.string().min(1).max(120).optional(), ...commercialTerms })
       .parse(req.body)
     try {
       const quote = await pricing.updateQuote(id, body)

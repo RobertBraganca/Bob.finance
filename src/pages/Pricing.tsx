@@ -98,6 +98,8 @@ type Quote = {
   recommendedPriceCents: number
   premiumPriceCents: number
   actualPriceCents: number | null
+  installments: number
+  paymentTerms: string | null
   status: QuoteStatus
   createdAt: string
   updatedAt: string
@@ -543,7 +545,19 @@ function QuotesTab() {
               <tbody>
                 {rows.map((quote) => (
                   <tr key={quote.id}>
-                    <td>{quote.clientLabel}</td>
+                    <td>
+                      {quote.clientLabel}
+                      {(quote.installments > 1 || quote.paymentTerms) && (
+                        <div className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                          {quote.installments > 1 &&
+                            `${quote.installments}x de ${money(
+                              Math.round((quote.actualPriceCents ?? quote.recommendedPriceCents) / quote.installments),
+                            )}`}
+                          {quote.installments > 1 && quote.paymentTerms ? ' · ' : ''}
+                          {quote.paymentTerms}
+                        </div>
+                      )}
+                    </td>
                     <td className="muted">{fmtDate(quote.createdAt.slice(0, 10))}</td>
                     <td className="table__num">{quote.estimatedHours.toLocaleString('pt-BR')}</td>
                     <td className="table__num">{money(quote.hourlyBaseCents)}</td>
@@ -715,6 +729,9 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
   const toast = useToast()
   const queryClient = useQueryClient()
 
+  const [clientLabel, setClientLabel] = useState(quote.clientLabel)
+  const [installments, setInstallments] = useState(String(quote.installments))
+  const [paymentTerms, setPaymentTerms] = useState(quote.paymentTerms ?? '')
   const [hours, setHours] = useState(String(quote.estimatedHours).replace('.', ','))
   const [margin, setMargin] = useState(quote.extraMarginBps ? bpsToInput(quote.extraMarginBps) : '')
   const [selected, setSelected] = useState<Record<string, number | null>>({
@@ -727,6 +744,16 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
     quote.directCosts.map((c) => ({ label: c.label, value: centsToInput(c.amountCents) })),
   )
   const [preview, setPreview] = useState<Simulation | null>(null)
+
+  const isApproved = quote.status === 'approved'
+
+  /** Campos comerciais: nunca recomputam preço, então vão no patch mesmo
+   *  numa cotação já aprovada (ver `updateQuote` em services/pricing.ts). */
+  const commercialBody = () => ({
+    clientLabel: clientLabel.trim(),
+    installments: Math.max(1, Number(installments) || 1),
+    paymentTerms: paymentTerms.trim() === '' ? null : paymentTerms.trim(),
+  })
 
   const body = () => ({
     estimatedHours: Number(hours.replace(',', '.')),
@@ -747,7 +774,14 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
   })
 
   const save = useMutation({
-    mutationFn: () => api.patch(`/pricing/quotes/${quote.id}`, body()),
+    // Aprovada: só o comercial vai junto. Mandar os campos de cálculo aqui
+    // seria recusado com 422 pelo servidor, e com razão — o preço já virou
+    // lançamento no ledger (`decisions/0021`).
+    mutationFn: () =>
+      api.patch(
+        `/pricing/quotes/${quote.id}`,
+        isApproved ? commercialBody() : { ...body(), ...commercialBody() },
+      ),
     onSuccess: () => {
       toast('Cotação atualizada')
       queryClient.invalidateQueries({ queryKey: ['pricing-quotes'] })
@@ -757,27 +791,32 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
   })
 
   const hoursValid = Number.isFinite(Number(hours.replace(',', '.'))) && Number(hours.replace(',', '.')) > 0
+  const canSave = clientLabel.trim().length > 0 && (isApproved || hoursValid)
+  const referencePriceCents = quote.actualPriceCents ?? quote.recommendedPriceCents
+  const parcels = Math.max(1, Number(installments) || 1)
 
   return (
     <Modal
-      title={`Editar cotação: ${quote.clientLabel}`}
+      title={`Orçamento: ${quote.clientLabel}`}
       onClose={onClose}
       wide
       footer={
         <>
           <Button onClick={onClose}>Cancelar</Button>
-          <Button
-            variant="ghost"
-            icon="sparkle"
-            disabled={!hoursValid || recalc.isPending}
-            onClick={() => recalc.mutate()}
-          >
-            Recalcular
-          </Button>
+          {!isApproved && (
+            <Button
+              variant="ghost"
+              icon="sparkle"
+              disabled={!hoursValid || recalc.isPending}
+              onClick={() => recalc.mutate()}
+            >
+              Recalcular
+            </Button>
+          )}
           <Button
             variant="primary"
             icon="check"
-            disabled={!hoursValid || save.isPending}
+            disabled={!canSave || save.isPending}
             onClick={() => save.mutate()}
           >
             Salvar
@@ -786,6 +825,60 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
       }
     >
       <div className="stack stack--loose">
+        {/* O orçamento CALCULADO, congelado no momento em que foi salvo:
+            é o que o cliente recebeu, e é o que esta tela existe pra
+            revisar antes de mexer em qualquer coisa. */}
+        <div className="kv">
+          <span className="kv__k">Hora base</span>
+          <span className="kv__v">{money(quote.hourlyBaseCents)}</span>
+          <span className="kv__k">Mínimo</span>
+          <span className="kv__v">{money(quote.minimumPriceCents)}</span>
+          <span className="kv__k">Recomendado</span>
+          <span className="kv__v">{money(quote.recommendedPriceCents)}</span>
+          <span className="kv__k">Premium</span>
+          <span className="kv__v">{money(quote.premiumPriceCents)}</span>
+          {quote.actualPriceCents !== null && (
+            <>
+              <span className="kv__k">Fechado por</span>
+              <span className="kv__v">{money(quote.actualPriceCents)}</span>
+            </>
+          )}
+        </div>
+
+        <hr className="divider" />
+
+        <div className="field">
+          <label className="field__label">Cliente ou projeto</label>
+          <TextInput value={clientLabel} onChange={setClientLabel} />
+        </div>
+
+        <div className="row row--wrap" style={{ gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
+          <div className="field" style={{ width: 140 }}>
+            <label className="field__label">Parcelas</label>
+            <TextInput value={installments} onChange={setInstallments} numeral />
+            <span className="field__hint">
+              {parcels > 1
+                ? `${parcels}x de ${money(Math.round(referencePriceCents / parcels))}`
+                : 'à vista'}
+              {' sobre '}
+              {quote.actualPriceCents === null ? 'o recomendado' : 'o valor fechado'}
+            </span>
+          </div>
+          <div className="field" style={{ minWidth: 260, flex: 1 }}>
+            <label className="field__label">Condição de pagamento</label>
+            <TextInput
+              value={paymentTerms}
+              onChange={setPaymentTerms}
+              placeholder="50% na aprovação, 50% na entrega"
+            />
+            <span className="field__hint">
+              Texto livre: entra no orçamento como condição combinada, não altera nenhum preço.
+            </span>
+          </div>
+        </div>
+
+        <hr className="divider" />
+
         {quote.status === 'approved' && (
           <p className="chart__note">
             Esta cotação já foi aprovada e gerou um lançamento de receita: mudar horas, custos ou

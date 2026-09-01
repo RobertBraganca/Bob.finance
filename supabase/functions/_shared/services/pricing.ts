@@ -352,6 +352,9 @@ export type QuoteRow = {
   recommendedPriceCents: number
   premiumPriceCents: number
   actualPriceCents: number | null
+  /** condição comercial, não insumo de preço: 1 = à vista */
+  installments: number
+  paymentTerms: string | null
   status: QuoteStatus
   createdAt: string
   updatedAt: string
@@ -368,7 +371,9 @@ const toQuoteRow = (row: typeof projectQuotes.$inferSelect): QuoteRow => ({
  * a client must not change because the user edited their monthly costs the
  * week after (spec, "números congelados").
  */
-export async function saveQuote(input: SimulateInput & { clientLabel: string }): Promise<QuoteRow> {
+export async function saveQuote(
+  input: SimulateInput & { clientLabel: string; installments?: number; paymentTerms?: string | null },
+): Promise<QuoteRow> {
   const result = await simulate(input)
   const row = (
     await db
@@ -382,6 +387,8 @@ export async function saveQuote(input: SimulateInput & { clientLabel: string }):
         clientSizeOptionId: input.clientSizeOptionId ?? null,
         usageRightsOptionId: input.usageRightsOptionId ?? null,
         extraMarginBps: input.extraMarginBps ?? 0,
+        installments: input.installments ?? 1,
+        paymentTerms: input.paymentTerms ?? null,
         hourlyBaseCents: result.hourlyBaseCents,
         minimumPriceCents: result.minimumPriceCents,
         recommendedPriceCents: result.recommendedPriceCents,
@@ -402,7 +409,17 @@ export async function getQuote(id: number): Promise<QuoteRow | null> {
   return row ? toQuoteRow(row) : null
 }
 
-export type QuoteEdit = Partial<SimulateInput> & { clientLabel?: string }
+/**
+ * `clientLabel`, `installments` e `paymentTerms` são campos COMERCIAIS:
+ * nenhum deles entra em `simulate()`, então nenhum recomputa os preços
+ * congelados e todos continuam editáveis depois da aprovação. Só os
+ * `CALCULATION_FIELDS` abaixo é que ficam travados nesse ponto.
+ */
+export type QuoteEdit = Partial<SimulateInput> & {
+  clientLabel?: string
+  installments?: number
+  paymentTerms?: string | null
+}
 
 const CALCULATION_FIELDS = [
   'estimatedHours',
@@ -438,6 +455,8 @@ export async function updateQuote(id: number, patch: QuoteEdit): Promise<QuoteRo
 
   const updateValues: Record<string, unknown> = {}
   if (patch.clientLabel !== undefined) updateValues.clientLabel = patch.clientLabel
+  if (patch.installments !== undefined) updateValues.installments = patch.installments
+  if (patch.paymentTerms !== undefined) updateValues.paymentTerms = patch.paymentTerms
 
   if (touchesCalculation) {
     const mergedInput: SimulateInput = {

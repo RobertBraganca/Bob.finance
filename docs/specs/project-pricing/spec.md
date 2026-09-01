@@ -239,3 +239,20 @@ com os valores salvos; salvar chama `PATCH` em vez de `POST`.
 - Editar uma cotação `approved` tentando mudar horas/custos/multiplicador:
   bloqueado com `PricingError`, mensagem explicando o motivo — mesmo
   tratamento de "aprovar duas vezes".
+
+## Condições de pagamento e revisão do orçamento (Status: implementado, 01/09/2026)
+`project_quotes` ganhou `installments` (int, default 1) e `payment_terms`
+(texto livre). Os dois são campos COMERCIAIS, na mesma categoria de
+`clientLabel`: não entram em `simulate()`, não recomputam nenhum preço
+congelado e, por isso, continuam editáveis mesmo depois da aprovação —
+ao contrário de horas, custos e multiplicadores, que o `decisions/0021`
+trava assim que a cotação vira lançamento no ledger.
+
+O modal de edição virou uma tela de revisão do orçamento: mostra primeiro
+os números congelados (hora base, mínimo, recomendado, premium e, quando
+existe, o valor fechado), depois cliente, parcelamento e condição, e só
+então os campos de cálculo. O valor da parcela é derivado na hora
+(`valor fechado ?? recomendado` ÷ parcelas), nunca gravado — dividir na
+leitura evita que uma renegociação do preço deixe uma parcela guardada
+desatualizada. Numa cotação aprovada o botão "Recalcular" some e o patch
+envia só os campos comerciais.
