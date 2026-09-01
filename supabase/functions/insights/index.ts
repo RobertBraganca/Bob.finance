@@ -457,6 +457,12 @@ app.get('/financial-engine/available', async (c) => {
   return c.json(await engineService.availableForAllocation(await resolvePeriod(query.period)))
 })
 
+/** Recordes observacionais — estudo de viabilidade #5, 29/08/2026. */
+app.get('/financial-engine/records', async (c) => {
+  const query = z.object({ months: z.coerce.number().int().min(1).max(60).default(24) }).parse(c.req.query())
+  return c.json(await engineService.financialEngineRecords(query.months))
+})
+
 app.get('/financial-engine/break-even', async (c) => {
   const query = z
     .object({

@@ -52,6 +52,12 @@ type Destination = {
   assumptions: AssumptionBag
 }
 
+type FinancialEngineRecords = {
+  highestAvailable: { periodo: string; valorCents: number } | null
+  daysSinceNegativeBalance: number | null
+  lastNegativeOn: string | null
+}
+
 type Available = {
   period: string
   availableCents: number
@@ -126,6 +132,12 @@ export function FinancialEnginePage() {
     queryFn: () => api.get<BreakEven>('/financial-engine/break-even', { period: resolvedPeriod }),
     enabled: resolvedPeriod !== null,
     placeholderData: (previous) => previous,
+  })
+
+  const records = useQuery({
+    queryKey: ['engine-records'],
+    queryFn: () => api.get<FinancialEngineRecords>('/financial-engine/records', { months: 24 }),
+    enabled: meta.isSuccess,
   })
 
   const hasLedger = (meta.data?.ledger.count ?? 0) > 0
@@ -219,6 +231,26 @@ export function FinancialEnginePage() {
                 </span>
               </div>
               <Assumptions data={available.data.assumptions} />
+            </Card>
+
+            <Card span={6} title="Recordes" subtitle="Últimos 24 meses observados">
+              <div className="stack stack--loose">
+                <StatTile
+                  label="Maior disponível já registrado"
+                  value={records.data?.highestAvailable ? moneyCompact(records.data.highestAvailable.valorCents) : '-'}
+                  foot={records.data?.highestAvailable ? periodLong(records.data.highestAvailable.periodo) : undefined}
+                />
+                <StatTile
+                  label="Dias desde o último saldo negativo"
+                  value={
+                    records.data?.daysSinceNegativeBalance !== null &&
+                    records.data?.daysSinceNegativeBalance !== undefined
+                      ? String(records.data.daysSinceNegativeBalance)
+                      : 'nunca ficou negativo'
+                  }
+                  foot={records.data?.lastNegativeOn ? `último em ${records.data.lastNegativeOn}` : undefined}
+                />
+              </div>
             </Card>
 
             <Card

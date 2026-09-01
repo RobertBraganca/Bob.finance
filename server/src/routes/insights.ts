@@ -502,6 +502,12 @@ export async function insightsRoutes(app: FastifyInstance) {
     return engineService.availableForAllocation(await resolvePeriod(query.period))
   })
 
+  /** Recordes observacionais — estudo de viabilidade #5, 29/08/2026. */
+  app.get('/financial-engine/records', async (req) => {
+    const query = z.object({ months: z.coerce.number().int().min(1).max(60).default(24) }).parse(req.query)
+    return engineService.financialEngineRecords(query.months)
+  })
+
   app.get('/financial-engine/break-even', async (req) => {
     const query = z
       .object({

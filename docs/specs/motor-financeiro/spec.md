@@ -89,6 +89,17 @@ realizado no período.
   parcial exibido com o mesmo aviso de "sem categoria"/pendência que o resto
   do app já usa, nunca escondido como se fosse definitivo.
 
+## Recordes observacionais (Status: implementado, 30/08/2026)
+`GET /financial-engine/records` (estudo de viabilidade #5, 29/08/2026):
+"maior disponível já registrado" reusa `availableForAllocation(period)` sem
+alterá-la, em loop sequencial sobre os últimos 24 meses (mesmo padrão de
+`goalHistory`/`healthScoreHistory`, nenhuma tabela nova). "Dias desde o
+último saldo negativo" é derivação diferente — soma corrida (SQL window
+function) do saldo de abertura de todas as contas mais os lançamentos
+confirmados dia a dia, uma query só, sem precisar materializar série em
+código. Puramente Observação: nunca "cuidado, seu saldo está baixo", só o
+fato histórico.
+
 ## Fora de escopo
 - Qualquer recomendação de quanto ou onde alocar o disponível, ou de como
   atingir o ponto de equilíbrio, isso é o limite deste motor, ver

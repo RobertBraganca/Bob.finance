@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
 import { financialEngineSettings } from '../db/schema.ts'
-import { periodBounds, todayIso } from '../core/dates.ts'
+import { addMonths, periodBounds, periodRange, todayIso } from '../core/dates.ts'
 import { accountBalances, totals } from './analytics.ts'
 import { listPending } from './cashFlow.ts'
 import { listCards } from './creditCards.ts'
@@ -351,6 +351,67 @@ export async function availableForAllocation(
         : {}),
     },
   }
+}
+
+/**
+ * Recordes observacionais do motor financeiro — estudo de viabilidade #5,
+ * 29/08/2026. Nenhuma tabela nova: "maior disponível" reusa
+ * `availableForAllocation(period)` sem alterá-la, num loop sequencial
+ * (mesmo padrão de `goalHistory`/`healthScoreHistory` — nunca `Promise.all`
+ * entre períodos, cada `availableForAllocation` já faz seu próprio fan-out
+ * interno). "Dias desde o último saldo negativo" é uma derivação diferente
+ * (saldo consolidado dia a dia, não "disponível"): soma corrida do saldo de
+ * abertura de todas as contas mais os lançamentos confirmados até cada dia,
+ * uma única query com janela SQL, sem precisar materializar uma linha por
+ * dia em código.
+ */
+export type FinancialEngineRecords = {
+  highestAvailable: { periodo: string; valorCents: number } | null
+  daysSinceNegativeBalance: number | null
+  /** null quando o saldo NUNCA ficou negativo no histórico observado */
+  lastNegativeOn: string | null
+}
+
+export async function financialEngineRecords(months = 24): Promise<FinancialEngineRecords> {
+  const currentPeriod = todayIso().slice(0, 7)
+  const periods = periodRange(addMonths(currentPeriod, -(months - 1)), currentPeriod)
+
+  let highestAvailable: { periodo: string; valorCents: number } | null = null
+  for (const period of periods) {
+    const { availableCents } = await availableForAllocation(period)
+    if (highestAvailable === null || availableCents > highestAvailable.valorCents) {
+      highestAvailable = { periodo: period, valorCents: availableCents }
+    }
+  }
+
+  const openingTotal = (
+    await db.execute<{ total: number }>(sql`select coalesce(sum(opening_balance_cents), 0) as total from accounts where archived = false`)
+  )[0]?.total ?? 0
+
+  const rows = await db.execute<{ day: string; runningCents: number }>(sql`
+    select
+      day,
+      ${openingTotal} + sum(daily_delta) over (order by day) as "runningCents"
+    from (
+      select posted_on as day, sum(amount_cents) as daily_delta
+      from transactions
+      where pending = false
+      group by posted_on
+    ) x
+    order by day
+  `)
+
+  let lastNegativeOn: string | null = null
+  for (const row of rows) {
+    if (row.runningCents < 0) lastNegativeOn = row.day
+  }
+
+  const daysSinceNegativeBalance =
+    lastNegativeOn === null
+      ? null
+      : Math.round((Date.parse(todayIso()) - Date.parse(lastNegativeOn)) / 86_400_000)
+
+  return { highestAvailable, daysSinceNegativeBalance, lastNegativeOn }
 }
 
 /* ------------------------------------------------------------------ *
