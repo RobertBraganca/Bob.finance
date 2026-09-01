@@ -94,6 +94,13 @@ export const assetClassKindEnum = pgEnum('asset_class_kind', [
   'cash',
   'pension',
   'other',
+  // Imobilizado (imóvel, veículo, joia): sem cotação de mercado, valor
+  // sempre declarado manualmente pelo usuário — já era o caminho padrão
+  // de `asset_valuations` pra qualquer classe fora de stocks/fii (ver
+  // estudo de viabilidade #12, 29/08/2026); ganha classe própria (não
+  // "other") pra ter linha visível própria em alocação/Meus ativos, mesmo
+  // motivo de `treasury` ter saído de `fixed_income`.
+  'illiquid',
 ])
 export const forecastKindEnum = pgEnum('forecast_kind', ['recurring', 'installment', 'single'])
 export const tradeKindEnum = pgEnum('trade_kind', ['buy', 'sell', 'dividend'])
@@ -299,6 +306,21 @@ export const stagedTransactions = pgTable(
     include: boolean('include').notNull().default(true),
     parseError: text('parse_error'),
     rawLine: text('raw_line'),
+    /**
+     * Sugestão (nunca certeza) de que esta linha do CSV é o mesmo evento de
+     * uma transação manual/Diário JÁ confirmada no ledger — estudo de
+     * viabilidade #15, 29/08/2026. Diferente de `duplicateOf` (hash exato,
+     * mesma descrição): aqui a descrição nunca bate (texto livre do usuário
+     * vs. texto do banco), então o critério é conta+valor+janela de ±15
+     * dias, igual `reconciliationCandidates` já usa. FK de verdade (ao
+     * contrário de `duplicateTxnId`) porque só aponta pra transação já
+     * commitada, nunca uma irmã do mesmo lote ainda não inserida.
+     */
+    possibleManualMatchId: int('possible_manual_match_id').references(() => transactions.id, {
+      onDelete: 'set null',
+    }),
+    /** o usuário confirmou: ao commitar, este CSV substitui o lançamento manual acima (que é excluído). Nunca automático — começa sempre false. */
+    replaceManualMatch: boolean('replace_manual_match').notNull().default(false),
   },
   (t) => [
     index('staged_batch_idx').on(t.batchId),

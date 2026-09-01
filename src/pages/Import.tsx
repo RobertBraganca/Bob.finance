@@ -44,6 +44,10 @@ type StagedRow = {
   rawCategory: string | null
   duplicateOf: 'none' | 'in_batch' | 'in_ledger'
   duplicateTxnId: number | null
+  possibleManualMatchId: number | null
+  replaceManualMatch: boolean
+  manualMatchDescription: string | null
+  manualMatchPostedOn: string | null
   suggestedCategoryId: number | null
   suggestionSource: string
   suggestionDetail: string | null
@@ -472,8 +476,9 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
   })
 
   const patch = useMutation({
-    mutationFn: (patches: Array<{ id: number; categoryId?: number | null; include?: boolean }>) =>
-      api.patch<BatchView>(`/imports/${batchId}/rows`, { patches }),
+    mutationFn: (
+      patches: Array<{ id: number; categoryId?: number | null; include?: boolean; replaceManualMatch?: boolean }>,
+    ) => api.patch<BatchView>(`/imports/${batchId}/rows`, { patches }),
     onSuccess: (data) => queryClient.setQueryData(['imports', batchId], data),
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
   })
@@ -618,6 +623,25 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
                           {row.duplicateOf === 'in_ledger'
                             ? 'já existe no ledger'
                             : 'repetida dentro deste arquivo'}
+                        </div>
+                      )}
+                      {row.possibleManualMatchId !== null && (
+                        <div className="field__hint" style={{ color: 'var(--status-warning)' }}>
+                          <label className="row" style={{ gap: 'var(--sp-1)', alignItems: 'center' }}>
+                            <input
+                              type="checkbox"
+                              className="checkbox"
+                              checked={row.replaceManualMatch}
+                              onChange={(event) =>
+                                patch.mutate([{ id: row.id, replaceManualMatch: event.target.checked }])
+                              }
+                            />
+                            <span>
+                              possível mesmo evento de "{row.manualMatchDescription}"
+                              {row.manualMatchPostedOn ? `, ${fmtDate(row.manualMatchPostedOn)}` : ''} — marcar
+                              pra substituir o lançamento manual
+                            </span>
+                          </label>
                         </div>
                       )}
                       {row.suggestionDetail && row.categoryId === row.suggestedCategoryId && (

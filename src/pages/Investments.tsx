@@ -387,6 +387,7 @@ const ASSET_CLASS_ICON: Record<string, IconName> = {
   cash: 'banknote',
   pension: 'clock',
   other: 'dots',
+  illiquid: 'wallet',
 }
 
 function PortfolioTab({

@@ -180,6 +180,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
             id: z.number().int().positive(),
             categoryId: z.number().int().positive().nullable().optional(),
             include: z.boolean().optional(),
+            replaceManualMatch: z.boolean().optional(),
           }),
         ),
       })

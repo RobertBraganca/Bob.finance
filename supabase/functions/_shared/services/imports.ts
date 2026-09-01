@@ -12,6 +12,7 @@ import { detectProfile } from '../csv/detect.ts'
 import { parseCsvWithProfile } from '../csv/parse.ts'
 import { decodeBuffer, sniffEncoding, type ResolvedProfile } from '../csv/profile.ts'
 import { directionOf } from '../core/normalize.ts'
+import { addDays } from '../core/dates.ts'
 import { loadCategorizer } from './categorization.ts'
 
 /* ------------------------------------------------------------------ *
@@ -100,6 +101,28 @@ export async function stageImport(input: StageInput) {
   const seenInBatch = new Set<string>()
   let duplicateCount = 0
 
+  // Candidatos a "mesmo evento, lançado manualmente antes do CSV chegar" —
+  // estudo de viabilidade #15. Nunca compara descrição (texto livre do
+  // usuário nunca bate com o texto do banco): mesma janela de conta+valor
+  // exato+±15 dias que `reconciliationCandidates` já usa em cashFlow.ts,
+  // só que aqui o lado "confirmado" é o de origem manual/Diário, não uma
+  // pendência.
+  const manualCandidates = await db
+    .select({
+      id: transactions.id,
+      postedOn: transactions.postedOn,
+      amountCents: transactions.amountCents,
+      description: transactions.description,
+    })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.accountId, input.accountId),
+        eq(transactions.pending, false),
+        inArray(transactions.source, ['manual', 'daily']),
+      ),
+    )
+
   const batch = (
     await db
       .insert(importBatches)
@@ -132,6 +155,18 @@ export async function stageImport(input: StageInput) {
       }
       if (duplicateOf !== 'none') duplicateCount++
 
+      // Só procura match manual quando não é já um duplicado certo — a
+      // mesma linha nunca precisa dos dois avisos.
+      let possibleManualMatchId: number | null = null
+      if (duplicateOf === 'none' && row.postedOn && row.amountCents !== null) {
+        const windowStart = addDays(row.postedOn, -15)
+        const windowEnd = addDays(row.postedOn, 15)
+        const hit = manualCandidates.find(
+          (m) => m.amountCents === row.amountCents && m.postedOn >= windowStart && m.postedOn <= windowEnd,
+        )
+        if (hit) possibleManualMatchId = hit.id
+      }
+
       const suggestion =
         row.parseError === null && row.amountCents !== null
           ? categorizer.suggest({
@@ -154,6 +189,7 @@ export async function stageImport(input: StageInput) {
         dedupeHash: row.dedupeHash,
         duplicateOf,
         duplicateTxnId,
+        possibleManualMatchId,
         suggestedCategoryId: suggestion.categoryId,
         suggestionSource: suggestion.source,
         suggestionDetail: suggestion.detail,
@@ -200,6 +236,10 @@ export async function getBatch(batchId: number) {
       rawCategory: stagedTransactions.rawCategory,
       duplicateOf: stagedTransactions.duplicateOf,
       duplicateTxnId: stagedTransactions.duplicateTxnId,
+      possibleManualMatchId: stagedTransactions.possibleManualMatchId,
+      replaceManualMatch: stagedTransactions.replaceManualMatch,
+      manualMatchDescription: transactions.description,
+      manualMatchPostedOn: transactions.postedOn,
       suggestedCategoryId: stagedTransactions.suggestedCategoryId,
       suggestionSource: stagedTransactions.suggestionSource,
       suggestionDetail: stagedTransactions.suggestionDetail,
@@ -209,6 +249,7 @@ export async function getBatch(batchId: number) {
       rawLine: stagedTransactions.rawLine,
     })
     .from(stagedTransactions)
+    .leftJoin(transactions, eq(transactions.id, stagedTransactions.possibleManualMatchId))
     .where(eq(stagedTransactions.batchId, batchId))
     .orderBy(stagedTransactions.rowIndex)
 
@@ -234,6 +275,8 @@ export type StagedPatch = {
   id: number
   categoryId?: number | null
   include?: boolean
+  /** confirma a sugestão de match manual (estudo #15): este CSV substitui o lançamento manual apontado por `possibleManualMatchId`, que é excluído no commit. Nunca automático — só muda se o usuário marcar. */
+  replaceManualMatch?: boolean
 }
 
 export async function patchStagedRows(batchId: number, patches: StagedPatch[]) {
@@ -242,6 +285,7 @@ export async function patchStagedRows(batchId: number, patches: StagedPatch[]) {
       const set: Record<string, unknown> = {}
       if (patch.categoryId !== undefined) set.categoryId = patch.categoryId
       if (patch.include !== undefined) set.include = patch.include
+      if (patch.replaceManualMatch !== undefined) set.replaceManualMatch = patch.replaceManualMatch
       if (Object.keys(set).length === 0) continue
       await tx
         .update(stagedTransactions)
@@ -311,6 +355,14 @@ export async function commitImport(batchId: number) {
 
       if (ruleId !== null) ruleHits.set(ruleId, (ruleHits.get(ruleId) ?? 0) + 1)
       committed++
+
+      // Usuário confirmou (estudo #15): este CSV é o mesmo evento de um
+      // lançamento manual já no ledger — a real vem do banco, então o
+      // manual sai, não as duas ao mesmo tempo. Nunca acontece sem o
+      // usuário ter marcado `replaceManualMatch` explicitamente na revisão.
+      if (row.replaceManualMatch && row.possibleManualMatchId !== null) {
+        await tx.delete(transactions).where(eq(transactions.id, row.possibleManualMatchId))
+      }
     }
 
     for (const [ruleId, hits] of ruleHits) {

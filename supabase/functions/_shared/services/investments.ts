@@ -31,6 +31,7 @@ export const ASSET_CLASSES = [
   'cash',
   'pension',
   'other',
+  'illiquid',
 ] as const
 
 type AssetClass = (typeof assets.$inferSelect)['assetClass']
@@ -55,6 +56,7 @@ export const ASSET_CLASS_LABELS: Record<string, string> = {
   cash: 'Caixa',
   pension: 'Previdência',
   other: 'Outros',
+  illiquid: 'Imobilizado',
 }
 
 /**
