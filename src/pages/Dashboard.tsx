@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { forwardBoundsFor, useAccounts, useMeta, useRange, type Account } from '../lib/store'
 import { AccountModal, BalanceCheckModal } from './Settings'
+import { SimulatorModal } from '../components/ui/SimulatorModal'
 import {
   bps,
   centsToInput,
@@ -164,6 +165,7 @@ export function Dashboard() {
   const [customizing, setCustomizing] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [balanceCheckAccount, setBalanceCheckAccount] = useState<Account | null>(null)
+  const [simulating, setSimulating] = useState(false)
 
   const dashboard = useQuery({
     queryKey: ['dashboard', range.from, range.to, range.accountId, range.preset],
@@ -468,6 +470,9 @@ export function Dashboard() {
         actions={
           <div className="row" style={{ gap: 'var(--sp-2)' }}>
             <RangeFilter />
+            <Button variant="ghost" size="sm" icon="sparkle" onClick={() => setSimulating(true)}>
+              Simular
+            </Button>
             <Button variant="ghost" size="sm" icon="settings" onClick={() => setCustomizing(true)}>
               Personalizar
             </Button>
@@ -489,6 +494,7 @@ export function Dashboard() {
       {balanceCheckAccount && (
         <BalanceCheckModal account={balanceCheckAccount} onClose={() => setBalanceCheckAccount(null)} />
       )}
+      {simulating && <SimulatorModal onClose={() => setSimulating(false)} />}
     </>
   )
 }
