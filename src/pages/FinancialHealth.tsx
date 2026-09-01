@@ -5,6 +5,7 @@ import { useMeta } from '../lib/store'
 import { bps, bpsToInput, money, parsePercentInput, periodLong, points } from '../lib/format'
 import {
   Assumptions,
+  Bento,
   Button,
   Card,
   EmptyState,
@@ -257,7 +258,7 @@ export function FinancialHealthPage() {
             <SkeletonLines lines={4} />
           </Card>
         ) : (
-          <div className="bento">
+          <Bento>
             <Slab span={4} accent>
               <HeroFigure
                 label="Health Score do mês"
@@ -452,7 +453,7 @@ export function FinancialHealthPage() {
                 </div>
               )}
             </Card>
-          </div>
+          </Bento>
         )}
       </div>
 

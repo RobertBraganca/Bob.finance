@@ -5,6 +5,7 @@ import { useMeta } from '../lib/store'
 import { bps, money, moneyCompact, parseMoneyInput, parsePercentInput, period as fmtPeriod } from '../lib/format'
 import {
   Assumptions,
+  Bento,
   Button,
   Card,
   EmptyState,
@@ -109,7 +110,7 @@ export function AposentadoriaPage() {
       />
 
       <div className="page">
-        <div className="bento">
+        <Bento>
           <Card span={12} title="Premissas" subtitle="Todos os números abaixo são seus; o sistema só calcula a consequência">
             <div className="row row--wrap" style={{ gap: 'var(--sp-4)', alignItems: 'flex-end' }}>
               <div className="field" style={{ minWidth: 160, flex: '1 1 160px' }}>
@@ -299,7 +300,7 @@ export function AposentadoriaPage() {
               </Card>
             </>
           )}
-        </div>
+        </Bento>
       </div>
     </>
   )

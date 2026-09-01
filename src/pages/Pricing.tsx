@@ -14,6 +14,7 @@ import {
 } from '../lib/format'
 import {
   Assumptions,
+  Bento,
   Button,
   Card,
   EmptyState,
@@ -285,7 +286,7 @@ function SimulateTab() {
   const hoursValid = Number.isFinite(Number(hours.replace(',', '.'))) && Number(hours.replace(',', '.')) > 0
 
   return (
-    <div className="bento">
+    <Bento>
       <Card span={7} title="Projeto a simular">
         <div className="stack stack--loose">
           <QuoteFormFields
@@ -409,7 +410,7 @@ function SimulateTab() {
           }}
         />
       )}
-    </div>
+    </Bento>
   )
 }
 
@@ -511,7 +512,7 @@ function QuotesTab() {
   const rows = quotes.data?.quotes ?? []
 
   return (
-    <div className="bento">
+    <Bento>
       <Card span={12} flush title="Cotações salvas" subtitle="Números congelados no momento de cada simulação">
         {quotes.isError ? (
           <EmptyState
@@ -625,7 +626,7 @@ function QuotesTab() {
 
       {approving && <ApproveQuoteModal quote={approving} onClose={() => setApproving(null)} />}
       {editing && <EditQuoteModal quote={editing} onClose={() => setEditing(null)} />}
-    </div>
+    </Bento>
   )
 }
 
@@ -1046,7 +1047,7 @@ function ParamsTab() {
   const all = multipliers.data?.multipliers ?? []
 
   return (
-    <div className="bento">
+    <Bento>
       <Card span={5} title="Sua capacidade no mês" subtitle="A base que transforma custo mensal em valor-hora">
         {!current ? (
           <SkeletonLines lines={5} />
@@ -1156,7 +1157,7 @@ function ParamsTab() {
           onClose={() => setEditing(null)}
         />
       )}
-    </div>
+    </Bento>
   )
 }
 

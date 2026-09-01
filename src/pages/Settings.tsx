@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { useAccounts, useCategoryIndex, useMeta, type Account } from '../lib/store'
 import { centsToInput, money, parseMoneyInput } from '../lib/format'
 import {
+  Bento,
   Button,
   Card,
   CategorySelect,
@@ -85,7 +86,7 @@ export function SettingsPage() {
       />
 
       <div className="page">
-        <div className="bento">
+        <Bento>
           <Slab span={4}>
             <StatTile label="Contas ativas" value={accounts.data?.accounts.length ?? 0} large />
           </Slab>
@@ -222,7 +223,7 @@ export function SettingsPage() {
               </div>
             )}
           </Card>
-        </div>
+        </Bento>
       </div>
 
       {accountModal !== null && (

@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { useMeta, useRange } from '../lib/store'
 import { bps, money, moneyCompact } from '../lib/format'
 import {
+  Bento,
   Button,
   Card,
   CategorySelect,
@@ -172,7 +173,7 @@ export function DrePage() {
             />
           </Card>
         ) : (
-          <div className="bento">
+          <Bento>
             <FormalDreCard data={formalDre.data} isError={formalDre.isError} accountLabel={pj.name} />
             {reconciliation && <ReconciliationSlab data={reconciliation} pjLabel={pj.name} pfLabel={pf.name} />}
             <DreColumn
@@ -184,7 +185,7 @@ export function DrePage() {
               proLaboreCents={reconciliation ? Math.max(0, reconciliation.netToPfCents) : 0}
             />
             <DreColumn accountId={pf.id} accountLabel={pf.name} from={range.from} to={range.to} />
-          </div>
+          </Bento>
         )}
       </div>
     </>

@@ -17,6 +17,7 @@ import {
   periodLong as fmtPeriodLong,
 } from '../lib/format'
 import {
+  Bento,
   Button,
   Card,
   EmptyState,
@@ -176,7 +177,7 @@ export function DebtPage() {
             <SkeletonLines lines={3} />
           </Card>
         ) : data.debts.length === 0 ? (
-          <div className="bento">
+          <Bento>
             <Slab span={12} accent>
               <div className="stack" style={{ maxWidth: '62ch' }}>
                 <span className="stat__label">Nenhuma dívida cadastrada</span>
@@ -195,9 +196,9 @@ export function DebtPage() {
                 </div>
               </div>
             </Slab>
-          </div>
+          </Bento>
         ) : (
-          <div className="bento">
+          <Bento>
             <Slab span={4} accent>
               <HeroFigure label="Dívida total" value={moneyCompact(data.totalCents)}>
                 <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
@@ -421,7 +422,7 @@ export function DebtPage() {
                 </table>
               </div>
             </Card>
-          </div>
+          </Bento>
         )}
       </div>
 

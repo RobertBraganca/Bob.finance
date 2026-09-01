@@ -420,6 +420,22 @@ svg {
   align-items: start;
 }
 
+/* Empacotamento masonry (componente `ui/Bento.tsx`, que mede a altura de
+   cada filho e escreve `grid-row: span <px>`). Só `align-items: start`
+   resolvia o vazio dentro do card mas deixava o vazio na página, embaixo
+   dele; aqui o card seguinte sobe e ocupa o buraco.
+
+   `row-gap` fica em 0 de propósito: com linhas implícitas de 1px ele seria
+   somado a CADA uma das centenas delas. O respiro vertical entra no próprio
+   span (altura + gap), calculado no componente a partir do `column-gap`
+   abaixo — assim o espaçamento continua vindo do mesmo token, sem um
+   segundo número solto no JS. Um `margin-bottom` no filho não serve: margem
+   não conta para a área do grid, e os cards empilhados encostavam. */
+.bento--masonry {
+  grid-auto-rows: 1px;
+  row-gap: 0;
+}
+
 .col-2,
 .col-3,
 .col-4,

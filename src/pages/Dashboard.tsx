@@ -24,6 +24,7 @@ import {
   type BentoSpan,
 } from '../lib/bentoLayout'
 import {
+  Bento,
   Button,
   Card,
   capUsageState,
@@ -482,11 +483,11 @@ export function Dashboard() {
 
       <div className="page" style={{ opacity: dashboard.isFetching ? 0.72 : 1, transition: 'opacity 120ms' }}>
         <HomeBanners />
-        <div className="bento">
+        <Bento>
           {bento.layout
             .filter((c) => isVisible(c.id))
             .map((c) => <Fragment key={c.id}>{cardsById[c.id]}</Fragment>)}
-        </div>
+        </Bento>
       </div>
 
       {customizing && <BentoSettingsModal bento={bento} onClose={() => setCustomizing(false)} />}
@@ -1739,7 +1740,7 @@ function FirstRun() {
     <>
       <PageHeader title="Visão geral" subtitle="Nenhum dado importado ainda" />
       <div className="page">
-        <div className="bento">
+        <Bento>
           <Slab span={12} accent>
             <div className="stack" style={{ maxWidth: '62ch' }}>
               <span className="stat__label">Primeiro passo</span>
@@ -1793,7 +1794,7 @@ function FirstRun() {
               </p>
             </Card>
           ))}
-        </div>
+        </Bento>
       </div>
     </>
   )

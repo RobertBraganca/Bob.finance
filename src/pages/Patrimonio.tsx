@@ -5,6 +5,7 @@ import { useMeta } from '../lib/store'
 import { bps, centsToInput, date as fmtDate, money, moneyCompact, parseMoneyInput } from '../lib/format'
 import {
   Assumptions,
+  Bento,
   Button,
   Card,
   EmptyState,
@@ -92,7 +93,7 @@ export function PatrimonioPage() {
       />
 
       <div className="page">
-        <div className="bento">
+        <Bento>
           <Slab span={5} accent>
             <HeroFigure label="Patrimônio líquido" value={nw ? moneyCompact(netWorthCents) : '-'}>
               <div className="stack stack--tight" style={{ marginTop: 'var(--sp-4)' }}>
@@ -193,7 +194,7 @@ export function PatrimonioPage() {
               </>
             )}
           </Card>
-        </div>
+        </Bento>
       </div>
 
       {adding && <AddAssetModal onClose={() => setAdding(false)} />}

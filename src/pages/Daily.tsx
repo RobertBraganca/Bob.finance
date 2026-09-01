@@ -11,6 +11,7 @@ import {
   periodLong,
 } from '../lib/format'
 import {
+  Bento,
   Button,
   Card,
   CategorySelect,
@@ -105,7 +106,7 @@ export function DailyPage() {
       />
 
       <div className="page">
-        <div className="bento">
+        <Bento>
           <QuickAdd today={today} />
 
           <Slab span={4} accent>
@@ -217,7 +218,7 @@ export function DailyPage() {
           </Card>
 
           <RecentDaily period={period} />
-        </div>
+        </Bento>
       </div>
     </>
   )

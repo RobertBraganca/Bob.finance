@@ -6,6 +6,7 @@ import { telemetry } from '../lib/telemetry'
 import { forwardBoundsFor, useAccounts, useCategoryIndex, useRange } from '../lib/store'
 import { centsToInput, date as fmtDate, money, parseMoneyInput } from '../lib/format'
 import {
+  Bento,
   Button,
   Card,
   CategorySelect,
@@ -314,7 +315,7 @@ export function TransactionsPage() {
       />
 
       <div className="page">
-        <div className="bento">
+        <Bento>
           <Slab span={3}>
             <StatTile label="Entradas no filtro" value={money(query.data?.inflowCents ?? 0)} large />
           </Slab>
@@ -527,7 +528,7 @@ export function TransactionsPage() {
               </>
             )}
           </Card>
-        </div>
+        </Bento>
       </div>
 
       {bulkOpen && (

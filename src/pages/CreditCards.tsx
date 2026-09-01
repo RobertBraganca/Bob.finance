@@ -5,6 +5,7 @@ import { telemetry } from '../lib/telemetry'
 import { useAccounts } from '../lib/store'
 import { bps, centsToInput, money, moneyCompact, date as fmtDate, parseMoneyInput } from '../lib/format'
 import {
+  Bento,
   Button,
   Card,
   capUsageState,
@@ -69,7 +70,7 @@ export function CreditCardsPage() {
             <SkeletonLines lines={3} />
           </Card>
         ) : data.length === 0 ? (
-          <div className="bento">
+          <Bento>
             <Slab span={12} accent>
               <div className="stack" style={{ maxWidth: '62ch' }}>
                 <span className="stat__label">Nenhum cartão cadastrado</span>
@@ -87,9 +88,9 @@ export function CreditCardsPage() {
                 </div>
               </div>
             </Slab>
-          </div>
+          </Bento>
         ) : (
-          <div className="bento">
+          <Bento>
             <Slab span={4} accent>
               <HeroFigure label="Limite disponível" value={moneyCompact(totalAvailableCents)}>
                 <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
@@ -161,7 +162,7 @@ export function CreditCardsPage() {
                 </table>
               </div>
             </Card>
-          </div>
+          </Bento>
         )}
       </div>
 

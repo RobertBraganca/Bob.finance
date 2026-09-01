@@ -18,6 +18,7 @@ import { Skeleton } from './skeleton'
 import { subscribeToast } from '../../lib/toastBus'
 
 export { Icon, CategorySelect, FilterSelect, Assumptions }
+export { Bento } from './Bento'
 export type { IconName }
 export type { AssumptionBag } from './Assumptions'
 

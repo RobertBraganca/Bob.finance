@@ -13,6 +13,7 @@ import {
 } from '../lib/format'
 import {
   Assumptions,
+  Bento,
   Button,
   Card,
   EmptyState,
@@ -192,7 +193,7 @@ export function FinancialEnginePage() {
             <EmptyState title="Calculando…" />
           </Card>
         ) : (
-          <div className="bento">
+          <Bento>
             <Slab span={4} accent>
               <HeroFigure
                 label="Disponível para alocação"
@@ -424,7 +425,7 @@ export function FinancialEnginePage() {
                 </div>
               )}
             </Card>
-          </div>
+          </Bento>
         )}
       </div>
 

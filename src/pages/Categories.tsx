@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useCategories, type CategoryNode } from '../lib/store'
 import {
+  Bento,
   Button,
   Card,
   CategorySelect,
@@ -176,7 +177,7 @@ function CategoryTree() {
         </Button>
       </div>
 
-      <div className="bento">
+      <Bento>
         {grouped.map((group) =>
           group.nodes.length === 0 ? null : (
             <Card key={group.kind} span={6} title={KIND_LABEL[group.kind]}>
@@ -227,7 +228,7 @@ function CategoryTree() {
             </Card>
           ),
         )}
-      </div>
+      </Bento>
 
       {editing && <CategoryModal node={editing} onClose={() => setEditing(null)} />}
       {addingUnder !== null && (
@@ -432,7 +433,7 @@ function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
 
   return (
     <>
-      <div className="bento">
+      <Bento>
         <Slab span={4}>
           <StatTile label="Regras ativas" value={rules.filter((r) => r.active).length} large />
         </Slab>
@@ -518,7 +519,7 @@ function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
             </div>
           )}
         </Card>
-      </div>
+      </Bento>
 
       {creating && (
         <Dialog open onOpenChange={(open) => !open && setCreating(false)}>

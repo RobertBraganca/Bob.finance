@@ -19,6 +19,7 @@ import {
 } from '../lib/format'
 import {
   Assumptions,
+  Bento,
   Button,
   Card,
   EmptyState,
@@ -178,7 +179,7 @@ export function InvestmentsPage() {
             <SkeletonLines lines={4} />
           </Card>
         ) : data.assetCount === 0 ? (
-          <div className="bento">
+          <Bento>
             <Slab span={12} accent>
               <div className="stack" style={{ maxWidth: '62ch' }}>
                 <span className="stat__label">Carteira vazia</span>
@@ -198,7 +199,7 @@ export function InvestmentsPage() {
                 </div>
               </div>
             </Slab>
-          </div>
+          </Bento>
         ) : tab === 'portfolio' ? (
           <PortfolioTab
             data={data}
@@ -474,7 +475,7 @@ function PortfolioTab({
   }, [data.positions, data.allocation])
 
   return (
-    <div className="bento">
+    <Bento>
       <Card span={12} muted>
         <div className="row row--wrap row--between">
           <div className="row row--wrap">
@@ -627,7 +628,7 @@ function PortfolioTab({
           ))}
         </div>
       </Card>
-    </div>
+    </Bento>
   )
 }
 
@@ -1307,7 +1308,7 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
     .filter((t) => kindFilter === null || t.kind === kindFilter)
 
   return (
-    <div className="bento">
+    <Bento>
       <Slab span={12}>
         <AllocationVsTargetChart slices={allocation} />
       </Slab>
@@ -1399,7 +1400,7 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
       </Card>
 
       {editingTrade && <EditTradeModal trade={editingTrade} onClose={() => setEditingTrade(null)} />}
-    </div>
+    </Bento>
   )
 }
 
@@ -1717,7 +1718,7 @@ function ProfitabilityTab() {
   )
 
   return (
-    <div className="bento">
+    <Bento>
       <Card span={12} muted>
         <div className="row row--wrap row--between">
           <span className="field__label" style={{ margin: 0 }}>Comparar com</span>
@@ -1784,7 +1785,7 @@ function ProfitabilityTab() {
           </table>
         </div>
       </Card>
-    </div>
+    </Bento>
   )
 }
 
@@ -1811,7 +1812,7 @@ function GoalsEnvironment({
 
   if (goals.length === 0) {
     return (
-      <div className="bento">
+      <Bento>
         <Slab span={12} accent>
           <div className="stack" style={{ maxWidth: '60ch' }}>
             <span className="stat__label">Nenhuma meta de investimento</span>
@@ -1832,7 +1833,7 @@ function GoalsEnvironment({
         {editing !== null && (
           <GoalModal goal={null} goalPurposes={goalPurposes} onClose={() => setEditing(null)} />
         )}
-      </div>
+      </Bento>
     )
   }
 
@@ -1841,7 +1842,7 @@ function GoalsEnvironment({
 
   return (
     <>
-      <div className="bento">
+      <Bento>
         <Card span={12} muted>
           <div className="row row--between row--wrap">
             <div className="row row--wrap">
@@ -1954,7 +1955,7 @@ function GoalsEnvironment({
             </Card>
           </>
         )}
-      </div>
+      </Bento>
 
       {editing !== null && (
         <GoalModal
@@ -2834,7 +2835,7 @@ function ContributionPlanner({ goals }: { goals: Goal[] }) {
   })
 
   return (
-    <div className="bento">
+    <Bento>
       <Card span={12} title="Quanto você quer aportar agora?" subtitle="O sistema nunca sugere vender, só direciona o dinheiro novo">
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-end' }}>
           <div className="field" style={{ width: 220 }}>
@@ -2975,7 +2976,7 @@ function ContributionPlanner({ goals }: { goals: Goal[] }) {
       {contributingReserve !== null && (
         <ReserveContributeModal initialAmountCents={contributingReserve} onClose={() => setContributingReserve(null)} />
       )}
-    </div>
+    </Bento>
   )
 }
 

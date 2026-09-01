@@ -5,6 +5,7 @@ import { telemetry } from '../lib/telemetry'
 import { useAccounts } from '../lib/store'
 import { date as fmtDate, money } from '../lib/format'
 import {
+  Bento,
   Button,
   Card,
   CategorySelect,
@@ -196,7 +197,7 @@ export function ImportPage() {
       />
 
       <div className="page">
-        <div className="bento">
+        <Bento>
           <Card span={7} title="Enviar extratos" subtitle="Vários arquivos e vários bancos de uma vez">
             <div
               className="dropzone"
@@ -434,7 +435,7 @@ export function ImportPage() {
               </div>
             )}
           </Card>
-        </div>
+        </Bento>
       </div>
 
       {activeBatchId !== null && (

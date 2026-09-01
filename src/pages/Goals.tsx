@@ -15,6 +15,7 @@ import {
   periodLong,
 } from '../lib/format'
 import {
+  Bento,
   Button,
   Card,
   EmptyState,
@@ -158,7 +159,7 @@ export function GoalsPage() {
             <SkeletonLines lines={3} />
           </Card>
         ) : !hasAnyTarget ? (
-          <div className="bento">
+          <Bento>
             <Slab span={12} accent>
               <div className="stack" style={{ maxWidth: '60ch' }}>
                 <span className="stat__label">Nenhuma meta para {periodLong(period)}</span>
@@ -187,9 +188,9 @@ export function GoalsPage() {
                 foot={`taxa de poupança ${bps(data.actual.savingsRateBps)}`}
               />
             </Card>
-          </div>
+          </Bento>
         ) : (
-          <div className="bento">
+          <Bento>
             <Slab span={4} accent>
               <HeroFigure
                 label="Sobrou no mês"
@@ -358,7 +359,7 @@ export function GoalsPage() {
                 ))}
               </div>
             </Card>
-          </div>
+          </Bento>
         )}
       </div>
 
