@@ -268,6 +268,13 @@ export type ManualEntry = {
   source?: 'manual' | 'daily' | 'adjustment'
   /** the approved quote this revenue came from, if any */
   sourceQuoteId?: number | null
+  /**
+   * Parcela ainda a receber/pagar. Segue `decisions/0003`: uma pendência é
+   * uma linha REAL em `transactions` com `pending = true`, nunca uma tabela
+   * de previsão à parte — toda agregação já filtra `pending = false` por
+   * padrão, então ela não infla nenhum fechado.
+   */
+  pending?: boolean
 }
 
 /** Quick-add path used by both the daily tracker and the manual entry form. */
@@ -295,6 +302,7 @@ export async function createTransaction(entry: ManualEntry) {
         categorizedBy: entry.categoryId ? 'manual' : 'none',
         dedupeHash: hash,
         sourceQuoteId: entry.sourceQuoteId ?? null,
+        pending: entry.pending ?? false,
       })
       .returning()
   )[0]!

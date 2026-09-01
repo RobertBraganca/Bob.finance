@@ -120,3 +120,17 @@ export function dayRange(from: string, to: string): string[] {
 export function addDays(iso: string, days: number): string {
   return new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10)
 }
+
+/**
+ * `iso` (uma DATA, não um período) deslocada por `n` meses, com o dia
+ * preso ao fim do mês quando ele não existe no destino: 31/01 + 1 mês é
+ * 28/02, não 03/03. `addMonths` acima faz o mesmo para `YYYY-MM`, onde a
+ * questão do dia nem existe — são funções irmãs, não duplicadas.
+ */
+export function addMonthsToDate(iso: string, n: number): string {
+  const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
+  const total = y * 12 + (m - 1) + n
+  const year = Math.floor(total / 12)
+  const month = (total % 12) + 1
+  return `${pad4(year)}-${pad2(month)}-${pad2(Math.min(d, daysInMonth(year, month)))}`
+}

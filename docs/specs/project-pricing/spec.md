@@ -256,3 +256,25 @@ então os campos de cálculo. O valor da parcela é derivado na hora
 leitura evita que uma renegociação do preço deixe uma parcela guardada
 desatualizada. Numa cotação aprovada o botão "Recalcular" some e o patch
 envia só os campos comerciais.
+
+## Aprovação de cotação parcelada (Status: implementado, 01/09/2026)
+Antes, aprovar criava UMA transação com o valor cheio, mesmo numa cotação
+com parcelamento configurado. Agora a aprovação gera **uma linha por
+parcela**:
+
+- **1ª parcela**: real (`pending = false`), na data de recebimento informada
+  (padrão: o dia da aprovação).
+- **2ª em diante**: pendências, ou seja linhas reais em `transactions` com
+  `pending = true` — o mecanismo do `decisions/0003`, não uma tabela de
+  previsão à parte. Aparecem em "A receber" e no fluxo de caixa sem inflar
+  nenhum mês já fechado, e cada uma é conciliável e editável sozinha.
+
+A data da 2ª parcela é pedida no modal de aprovação (obrigatória quando há
+parcelamento); da 3ª em diante o vencimento anda de mês em mês a partir
+dela, com o dia preso ao fim do mês quando não existe no destino (31/01 +
+1 mês = 28/02, via `addMonthsToDate` em `core/dates.ts`). O modal mostra o
+cronograma completo (data e valor de cada parcela) antes de confirmar.
+
+O rateio (`splitInstallments`) joga o resto da divisão na ÚLTIMA parcela,
+então a soma bate exatamente com o valor fechado: R$ 100,00 em 3x é
+33,33 + 33,33 + 33,34, nunca 33,33 × 3 com um centavo sumido.

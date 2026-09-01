@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useAccounts } from '../lib/store'
@@ -634,6 +634,21 @@ function QuotesTab() {
  * data escolhidas aqui — a mesma conversão simples que `specs/project-pricing`
  * documenta, sem depender de `specs/client-projects` existir.
  */
+/**
+ * Soma meses a uma DATA (`YYYY-MM-DD`) prendendo o dia ao fim do mês:
+ * 31/01 + 1 mês é 28/02. Espelha `addMonthsToDate` do servidor
+ * (`core/dates.ts`), que é quem de fato grava as parcelas — aqui só
+ * serve para prever o cronograma na tela antes de confirmar.
+ */
+function addMonthsToDateInput(iso: string, n: number): string {
+  const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
+  const total = y * 12 + (m - 1) + n
+  const year = Math.floor(total / 12)
+  const month = (total % 12) + 1
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(Math.min(d, lastDay)).padStart(2, '0')}`
+}
+
 function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void }) {
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -646,6 +661,25 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
   const actualPriceCents = parseMoneyInput(actualPrice)
   const actualDiffersFromRecommended = actualPriceCents !== null && actualPriceCents !== quote.recommendedPriceCents
 
+  const count = Math.max(1, quote.installments)
+  const isInstalment = count > 1
+  /** Padrão: um mês depois do recebimento da primeira, editável. */
+  const [secondInstallmentOn, setSecondInstallmentOn] = useState(() =>
+    addMonthsToDateInput(new Date().toISOString().slice(0, 10), 1),
+  )
+
+  /** O mesmo rateio do servidor (`splitInstallments`), só para PREVER na
+   *  tela o que vai ser criado — a divisão que vale é a de lá. */
+  const schedule =
+    actualPriceCents === null || actualPriceCents <= 0
+      ? []
+      : Array.from({ length: count }, (_, i) => {
+          const base = Math.floor(actualPriceCents / count)
+          const amountCents = i === count - 1 ? actualPriceCents - base * (count - 1) : base
+          const on = i === 0 ? paidOn : addMonthsToDateInput(secondInstallmentOn, i - 1)
+          return { i, amountCents, on }
+        })
+
   const approve = useMutation({
     mutationFn: () => {
       if (accountId === null) throw new Error('escolha a conta')
@@ -654,11 +688,16 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
         accountId,
         paidOn,
         actualPriceCents,
+        ...(isInstalment ? { secondInstallmentOn } : {}),
       })
     },
     onSuccess: () => {
       telemetry.action('pricing', 'quote_approved')
-      toast('Cotação aprovada: lançamento de receita criado')
+      toast(
+        isInstalment
+          ? `Cotação aprovada: ${count} parcelas criadas, a primeira recebida e as demais como pendências`
+          : 'Cotação aprovada: lançamento de receita criado',
+      )
       queryClient.invalidateQueries()
       onClose()
     },
@@ -687,8 +726,10 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
     >
       <div className="stack">
         <p className="chart__note">
-          Cria um lançamento de receita com o valor fechado abaixo (recomendado:{' '}
-          {money(quote.recommendedPriceCents)}) e move o status desta cotação para "Aprovada".
+          {isInstalment
+            ? `Esta cotação está parcelada em ${count}x: cria uma linha por parcela, a primeira já recebida e as seguintes como pendências em Lançamentos.`
+            : 'Cria um lançamento de receita com o valor fechado abaixo e move o status desta cotação para "Aprovada".'}{' '}
+          Recomendado: {money(quote.recommendedPriceCents)}.
         </p>
         <div className="field">
           <label className="field__label">Valor fechado (R$)</label>
@@ -710,9 +751,38 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
           />
         </div>
         <div className="field">
-          <label className="field__label">Data do recebimento</label>
+          <label className="field__label">
+            {isInstalment ? 'Data da 1ª parcela (recebida)' : 'Data do recebimento'}
+          </label>
           <TextInput value={paidOn} onChange={setPaidOn} type="date" />
         </div>
+
+        {isInstalment && (
+          <>
+            <div className="field">
+              <label className="field__label">Data da 2ª parcela</label>
+              <TextInput value={secondInstallmentOn} onChange={setSecondInstallmentOn} type="date" />
+              {count > 2 && (
+                <span className="field__hint">
+                  Da 3ª em diante o vencimento anda de mês em mês a partir desta data. Cada parcela
+                  vira uma linha própria e pode ser ajustada depois em Lançamentos.
+                </span>
+              )}
+            </div>
+
+            <div className="kv">
+              {schedule.map((p) => (
+                <Fragment key={p.i}>
+                  <span className="kv__k">
+                    {p.i + 1}ª parcela · {fmtDate(p.on)}
+                    {p.i > 0 ? ' (pendente)' : ''}
+                  </span>
+                  <span className="kv__v">{money(p.amountCents)}</span>
+                </Fragment>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   )

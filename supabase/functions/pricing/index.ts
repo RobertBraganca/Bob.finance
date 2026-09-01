@@ -195,6 +195,7 @@ app.post('/quotes/:id/approve', async (c) => {
       accountId: z.number().int().positive(),
       paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       actualPriceCents: z.number().int().positive().optional(),
+      secondInstallmentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     })
     .parse(await c.req.json())
   return c.json(await pricing.approveQuote(id, body))

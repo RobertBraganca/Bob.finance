@@ -1,7 +1,7 @@
 import { asc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { pricingMultiplierOptions, pricingSettings, projectQuotes } from '../db/schema'
-import { periodOf, todayIso } from '../core/dates'
+import { addMonthsToDate, periodOf, todayIso } from '../core/dates'
 import * as financialEngine from './financialEngine'
 import { createTransaction } from './transactions'
 import type { Assumptions } from './financialHealth'
@@ -520,10 +520,33 @@ export async function setQuoteStatus(id: number, status: QuoteStatus): Promise<Q
  * solto que discorda do lançamento) — coerente com a mesma regra que já
  * bloqueia editar horas/multiplicadores depois de aprovada.
  */
-export async function approveQuote(
-  id: number,
-  input: { accountId: number; paidOn: string; actualPriceCents?: number },
-): Promise<QuoteRow> {
+/**
+ * Divide um total em `count` parcelas inteiras em centavos. A ÚLTIMA
+ * absorve o resto da divisão, então a soma das parcelas é exatamente o
+ * total — nunca um centavo a mais ou a menos escondido no arredondamento
+ * (R$ 674,94 em 3x vira 224,98 + 224,98 + 224,98; R$ 100,00 em 3x vira
+ * 33,33 + 33,33 + 33,34).
+ */
+export function splitInstallments(totalCents: number, count: number): number[] {
+  const base = Math.floor(totalCents / count)
+  const parts = Array.from({ length: count }, () => base)
+  parts[count - 1] = totalCents - base * (count - 1)
+  return parts
+}
+
+export type ApproveInput = {
+  accountId: number
+  paidOn: string
+  actualPriceCents?: number
+  /**
+   * Data da SEGUNDA parcela. Da terceira em diante o vencimento anda de
+   * mês em mês a partir dela — a convenção "1 + N mensais". Obrigatória
+   * quando a cotação tem parcelamento; ignorada quando é à vista.
+   */
+  secondInstallmentOn?: string
+}
+
+export async function approveQuote(id: number, input: ApproveInput): Promise<QuoteRow> {
   const quote = await getQuote(id)
   if (!quote) throw new PricingError('cotação não encontrada')
   if (quote.status === 'approved') throw new PricingError('esta cotação já foi aprovada')
@@ -531,14 +554,39 @@ export async function approveQuote(
   const actualPriceCents = input.actualPriceCents ?? quote.recommendedPriceCents
   if (actualPriceCents <= 0) throw new PricingError('valor fechado precisa ser maior que zero')
 
-  await createTransaction({
-    accountId: input.accountId,
-    postedOn: input.paidOn,
-    description: `Projeto: ${quote.clientLabel}`,
-    amountCents: Math.abs(actualPriceCents),
-    source: 'manual',
-    sourceQuoteId: id,
-  })
+  const count = Math.max(1, quote.installments)
+  if (count > 1 && !input.secondInstallmentOn) {
+    throw new PricingError(
+      `esta cotação está parcelada em ${count}x: informe a data da segunda parcela para as futuras entrarem em Lançamentos com o vencimento certo`,
+    )
+  }
+
+  /**
+   * Parcelado gera UMA linha por parcela, não uma linha com o valor cheio
+   * (pedido do usuário, 01/09/2026: "hoje a transação está entrando com
+   * valor cheio"). A primeira é real e já recebida (dia da aprovação); as
+   * seguintes são pendências — linhas reais com `pending = true`, o
+   * mecanismo do `decisions/0003` — então aparecem em "A receber" e no
+   * fluxo de caixa sem inflar nenhum mês já fechado, e cada uma pode ser
+   * conciliada ou editada individualmente depois.
+   */
+  const amounts = splitInstallments(Math.abs(actualPriceCents), count)
+  for (const [index, amountCents] of amounts.entries()) {
+    const postedOn =
+      index === 0 ? input.paidOn : addMonthsToDate(input.secondInstallmentOn!, index - 1)
+    await createTransaction({
+      accountId: input.accountId,
+      postedOn,
+      description:
+        count > 1
+          ? `Projeto: ${quote.clientLabel} (${index + 1}/${count})`
+          : `Projeto: ${quote.clientLabel}`,
+      amountCents,
+      source: 'manual',
+      sourceQuoteId: id,
+      pending: index > 0,
+    })
+  }
 
   const row = (
     await db
