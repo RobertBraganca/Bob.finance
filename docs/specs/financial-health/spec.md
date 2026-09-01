@@ -141,6 +141,22 @@ diretamente (já é uma série histórica de verdade, um ponto por
 Sequencial de propósito, mesmo risco de pooler das demais séries desta área.
 Ver estudo de viabilidade #8, 29/08/2026.
 
+## Checklist de fechamento mensal (Status: implementado, 31/08/2026)
+`GET/POST /financial-health/closing-checklist?period=YYYY-MM` —
+`monthlyClosing.ts#closingChecklist`. Não existia precedente de "revisado"
+em nenhuma área do app (achado do estudo de viabilidade #7). A solução: três
+itens 100% derivados, recomputados a cada leitura, nunca guardados —
+"transações do mês categorizadas" (`analytics.totals().uncategorizedCount`),
+"fila de conciliação zerada" (`cashFlow.reconciliationCandidates()`
+filtrado pela data da pendência dentro do período) e "Diário com pelo menos
+um registro no mês" (contagem de dias distintos com `source = 'daily'`) — e
+um único item MANUAL, "DRE do mês revisada", que é o único estado que este
+recurso persiste (`monthly_closing_reviews`, existência de linha = revisado,
+mesmo padrão de `skipped_occurrences`: chave em `period`, sem FK). Isso
+preserva "derivar, nunca guardar" para tudo que é derivável, e só grava o
+que é genuinamente um julgamento humano sobre algo que nenhuma query
+resolve sozinha.
+
 ## Casos de borda
 - Nenhum dado suficiente para nenhum dos 5 indicadores do Health Score (app
   recém-instalado): estado explícito de "sem dado suficiente ainda", nunca

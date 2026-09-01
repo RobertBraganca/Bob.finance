@@ -585,3 +585,25 @@ condensar se algum dia virar spec):
   das demais séries desta leva. UI: `NetWorthHistoryChart`, card "Evolução do
   patrimônio líquido" logo abaixo de "Patrimônio consolidado" em
   `FinancialHealth.tsx`.
+
+### Quarta leva (31/08/2026): [7]
+
+- **[7] Checklist de fechamento mensal** — implementado
+  (`monthlyClosing.ts#closingChecklist`, `GET/POST
+  /financial-health/closing-checklist`). O estudo original apontou que não
+  existe precedente de "revisado" em nenhuma área do app — decisão tomada
+  na hora de implementar (sem novo round de perguntas, autorização já dada
+  para prosseguir com #7 e #8): dividir os itens em DERIVADOS (nunca
+  guardados — categorização, conciliação, Diário, cada um recomputado do
+  período pedido) e UM item MANUAL ("DRE do mês revisada"), que é o único
+  julgamento humano real e o único que persiste algo
+  (`monthly_closing_reviews`, existência de linha por período = revisado,
+  mesmo padrão de `skipped_occurrences`: chave em `period`, sem FK,
+  `on conflict do nothing` no insert). UI: card "Checklist de fechamento
+  mensal" em `FinancialHealth.tsx`, logo após "Composição do score" —
+  cada item derivado mostra um detalhe textual (`"3 sem categoria"` etc.),
+  o item manual vira um botão "Marcar como revisada"/"Desmarcar revisão".
+  Precisou de uma tabela nova (única desta leva de #7/#8) — migração
+  `20260831000000_add_monthly_closing_reviews.sql`, aplicada e registrada
+  em `schema_migrations` do jeito manual já documentado nesta sessão
+  (`supabase db push` não conecta neste ambiente).

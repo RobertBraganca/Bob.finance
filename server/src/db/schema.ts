@@ -662,6 +662,22 @@ export const skippedOccurrences = pgTable(
   ],
 )
 
+/**
+ * "Revisei a DRE deste mês" — o único estado do checklist de fechamento
+ * mensal (estudo de viabilidade #7, 29/08/2026) que não é derivado de
+ * outra tabela. Existência de uma linha para o período = revisado.
+ */
+export const monthlyClosingReviews = pgTable(
+  'monthly_closing_reviews',
+  {
+    id: id(),
+    /** YYYY-MM */
+    period: text('period').notNull(),
+    reviewedAt: text('reviewed_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('monthly_closing_reviews_period_uq').on(t.period)],
+)
+
 /** Contributions and withdrawals — the "contributed capital" line. */
 export const assetTrades = pgTable(
   'asset_trades',

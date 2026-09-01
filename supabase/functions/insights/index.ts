@@ -15,6 +15,7 @@ import * as engineService from '../_shared/services/financialEngine.ts'
 import * as healthService from '../_shared/services/financialHealth.ts'
 import * as goalsService from '../_shared/services/goals.ts'
 import * as investments from '../_shared/services/investments.ts'
+import * as monthlyClosingService from '../_shared/services/monthlyClosing.ts'
 import * as quotesService from '../_shared/services/quotes.ts'
 import { ledgerBounds } from '../_shared/services/transactions.ts'
 import { accountFlows } from '../_shared/services/transfers.ts'
@@ -407,6 +408,19 @@ app.get('/financial-health/score-history', async (c) => {
 app.get('/financial-health/net-worth-history', async (c) => {
   const query = z.object({ months: z.coerce.number().int().min(1).max(36).default(12) }).parse(c.req.query())
   return c.json({ history: await healthService.netWorthHistory(query.months) })
+})
+
+app.get('/financial-health/closing-checklist', async (c) => {
+  const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) }).parse(c.req.query())
+  return c.json(await monthlyClosingService.closingChecklist(query.period))
+})
+
+app.post('/financial-health/closing-checklist', async (c) => {
+  const body = z
+    .object({ period: z.string().regex(/^\d{4}-\d{2}$/), reviewed: z.boolean() })
+    .parse(await c.req.json())
+  await monthlyClosingService.setClosingReview(body.period, body.reviewed)
+  return c.json(await monthlyClosingService.closingChecklist(body.period))
 })
 
 app.get('/financial-health/runway', async (c) => {

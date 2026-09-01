@@ -86,6 +86,20 @@ type NetWorth = {
   assumptions: AssumptionBag
 }
 
+type ClosingChecklistItem = {
+  key: string
+  label: string
+  kind: 'auto' | 'manual'
+  done: boolean
+  detail: string
+}
+
+type ClosingChecklist = {
+  period: string
+  items: ClosingChecklistItem[]
+  reviewedAt: string | null
+}
+
 type RiskRule = {
   key: string
   label: string
@@ -177,6 +191,24 @@ export function FinancialHealthPage() {
     enabled: meta.isSuccess,
   })
 
+  const closingChecklist = useQuery({
+    queryKey: ['financial-health-closing-checklist', resolvedPeriod],
+    queryFn: () => api.get<ClosingChecklist>('/financial-health/closing-checklist', { period: resolvedPeriod }),
+    enabled: resolvedPeriod !== null,
+    placeholderData: (previous) => previous,
+  })
+
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const toggleReview = useMutation({
+    mutationFn: (reviewed: boolean) =>
+      api.post<ClosingChecklist>('/financial-health/closing-checklist', { period: resolvedPeriod, reviewed }),
+    onSuccess: (result) => {
+      queryClient.setQueryData(['financial-health-closing-checklist', resolvedPeriod], result)
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao atualizar checklist', 'error'),
+  })
+
   const data = score.data
   const hasLedger = (meta.data?.ledger.count ?? 0) > 0
 
@@ -250,6 +282,43 @@ export function FinancialHealthPage() {
                 ))}
               </div>
               <Assumptions data={data.assumptions} label="Como compomos o score" />
+            </Card>
+
+            <Card
+              span={12}
+              title="Checklist de fechamento mensal"
+              subtitle="O que falta olhar antes de considerar o mês fechado"
+            >
+              {!closingChecklist.data ? (
+                <SkeletonLines lines={4} />
+              ) : (
+                <div className="stack stack--tight">
+                  {closingChecklist.data.items.map((item) => (
+                    <div key={item.key} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
+                      <span className="row" style={{ gap: 'var(--sp-2)' }}>
+                        <span style={{ color: item.done ? 'var(--status-good)' : 'var(--neutral-mark)', display: 'grid' }}>
+                          <Icon name={item.done ? 'check' : 'clock'} size={14} strokeWidth={2.4} />
+                        </span>
+                        <span>{item.label}</span>
+                      </span>
+                      {item.kind === 'manual' ? (
+                        <Button
+                          size="sm"
+                          variant={item.done ? 'quiet' : 'primary'}
+                          icon={item.done ? 'x' : 'check'}
+                          onClick={() => toggleReview.mutate(!item.done)}
+                        >
+                          {item.done ? 'Desmarcar revisão' : 'Marcar como revisada'}
+                        </Button>
+                      ) : (
+                        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                          {item.detail}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
 
             <Card

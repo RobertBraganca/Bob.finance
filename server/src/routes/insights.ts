@@ -12,6 +12,7 @@ import * as engineService from '../services/financialEngine'
 import * as healthService from '../services/financialHealth'
 import * as goalsService from '../services/goals'
 import * as investments from '../services/investments'
+import * as monthlyClosingService from '../services/monthlyClosing'
 import * as quotesService from '../services/quotes'
 import { ledgerBounds } from '../services/transactions'
 import { accountFlows } from '../services/transfers'
@@ -429,6 +430,19 @@ export async function insightsRoutes(app: FastifyInstance) {
   app.get('/financial-health/net-worth-history', async (req) => {
     const query = z.object({ months: z.coerce.number().int().min(1).max(36).default(12) }).parse(req.query)
     return { history: await healthService.netWorthHistory(query.months) }
+  })
+
+  app.get('/financial-health/closing-checklist', async (req) => {
+    const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query)
+    return monthlyClosingService.closingChecklist(query.period)
+  })
+
+  app.post('/financial-health/closing-checklist', async (req) => {
+    const body = z
+      .object({ period: z.string().regex(/^\d{4}-\d{2}$/), reviewed: z.boolean() })
+      .parse(req.body)
+    await monthlyClosingService.setClosingReview(body.period, body.reviewed)
+    return monthlyClosingService.closingChecklist(body.period)
   })
 
   app.get('/financial-health/runway', async (req) => {
