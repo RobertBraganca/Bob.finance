@@ -63,7 +63,12 @@
   --surface-hover: #f4f4f5;
 
   --line: #e4e4e7;
-  --line-strong: #a1a1aa;
+  /* #A1A1AA dava 2,46:1 sobre --surface, abaixo dos 3:1 que a WCAG 2.2
+     exige de BORDA DE CAMPO DE FORMULÁRIO (1.4.11 cita o caso
+     nominalmente). #8A8A93 é um passo dentro do mesmo cinza da rampa,
+     não uma cor nova: 3,28:1 sobre #FAFAFA e 3,42:1 sobre #FFFFFF
+     (auditoria de 01/09/2026). */
+  --line-strong: #8a8a93;
   --hairline: rgba(9, 9, 11, 0.08);
 
   --ink-1: #09090b;
@@ -227,6 +232,31 @@
 
   --sidebar-w: 232px;
   --topbar-h: 64px;
+  /* Teto do conteúdo rolável dentro de um card, para um bloco alto não
+     esticar a linha do grid inteira (ver `.card > .table-wrap`). */
+  --card-content-cap: 420px;
+
+  /* ---- Camadas -----------------------------------------------------
+     Antes disto havia oito valores soltos (1, 20, 40, 45, 46, 60, 80,
+     90) sem nome, e dois empates de verdade: .popover-panel empatava
+     com .sidebar (quem pintava por cima dependia da ordem do DOM) e o
+     painel da memória de cálculo empatava com o .topbar. Os números
+     abaixo são os MESMOS de antes — só ganharam nome e resolveram os
+     dois empates (01/09/2026).
+
+     A ordem é a única coisa que importa aqui:
+       célula < sticky < popover em fluxo < gaveta < modal < toast < flutuante
+     "Flutuante" é o topo porque dropdown e popover em portal abrem de
+     DENTRO de um modal e precisam limpá-lo. */
+  --z-cell: 1;
+  --z-sticky: 20;
+  --z-inline-popover: 30;
+  --z-drawer: 40;
+  --z-drawer-backdrop: 45;
+  --z-drawer-nav: 46;
+  --z-overlay: 60;
+  --z-toast: 80;
+  --z-floating: 90;
 }
 
 /* Anything inside an ink card re-points the generic text/line tokens at
@@ -237,7 +267,9 @@
   --surface-muted: var(--slab);
   --surface-hover: #161616;
   --line: var(--slab-line);
-  --line-strong: #3f3f46;
+  /* Mesmo motivo do claro, e aqui era pior: #3F3F46 dava 1,82:1 sobre
+     #101010. #666670 dá 3,35:1, e 3,19:1 no pior fundo (#161616). */
+  --line-strong: #666670;
   --hairline: var(--slab-hairline);
   --ink-1: var(--on-slab-1);
   --ink-2: var(--on-slab-2);
@@ -292,7 +324,9 @@
   --surface-muted: var(--slab);
   --surface-hover: #161616;
   --line: var(--slab-line);
-  --line-strong: #3f3f46;
+  /* Mesmo motivo do claro, e aqui era pior: #3F3F46 dava 1,82:1 sobre
+     #101010. #666670 dá 3,35:1, e 3,19:1 no pior fundo (#161616). */
+  --line-strong: #666670;
   --hairline: var(--slab-hairline);
   --ink-1: var(--on-slab-1);
   --ink-2: var(--on-slab-2);

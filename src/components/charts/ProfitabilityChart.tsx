@@ -208,7 +208,7 @@ export function ProfitabilityChart({
       }}
       note="Índices via ETF que replica cada um (IBOV≈BOVA11, IFIX≈XFIX11, SMLL≈SMAL11, IDIV≈DIVO11) só cobrem os últimos meses no plano gratuito da BRAPI: o histórico completo se acumula a cada atualização. CDI e IPCA vêm completos desde já (Banco Central)."
     >
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
           <CartesianGrid {...gridProps(theme)} />
           <XAxis dataKey="period" tickFormatter={fmtPeriod} {...axisProps(theme)} />

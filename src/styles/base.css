@@ -153,7 +153,7 @@ svg {
 .sidebar {
   position: sticky;
   top: 0;
-  z-index: 40;
+  z-index: var(--z-drawer);
   display: flex;
   flex-direction: column;
   background: var(--paper);
@@ -185,7 +185,7 @@ svg {
 .sidebar__backdrop {
   position: fixed;
   inset: 0;
-  z-index: 45;
+  z-index: var(--z-drawer-backdrop);
   background: rgba(17, 18, 20, 0.42);
 }
 
@@ -248,7 +248,7 @@ svg {
      Without this the backdrop rendered ON TOP of the open drawer: every
      tap just looked like it closed the menu instead of following the
      link, because the backdrop (not the link) was catching the click. */
-  z-index: 46;
+  z-index: var(--z-drawer-nav);
   padding: var(--sp-3);
   background: var(--paper);
   border-bottom: 1px solid var(--line);
@@ -329,7 +329,11 @@ svg {
 .sidebar__foot--desktop {
   font-size: var(--text-2xs);
   font-weight: 400;
-  color: var(--ink-4);
+  /* --ink-4 dava 2,56:1 no claro: texto corrido, precisa de 4,5:1. --ink-2
+     é o único passo da rampa que passa nos DOIS temas (7,73:1 no claro,
+     7,81:1 no escuro) — --ink-3 passaria no claro (4,83) e falharia no
+     escuro (4,14). */
+  color: var(--ink-2);
   line-height: 1.5;
 }
 
@@ -364,7 +368,7 @@ svg {
 .topbar {
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: var(--z-sticky);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -422,30 +426,14 @@ svg {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-4);
-  /* Cada card tem a altura do próprio conteúdo, nunca a do vizinho mais
-     alto da linha. Sem isto o grid usa `stretch` (o default), e como todo
-     `.card`/`.slab` é flex-column com o conteúdo no topo, um card curto ao
-     lado de um gráfico alto virava um retângulo com o dado em cima e um
-     vazio enorme embaixo — a reclamação de "cards com espaços vazios
-     desnecessários" de 01/09/2026 era este default, em toda linha do app,
-     não um card específico mal montado. */
-  align-items: start;
-}
-
-/* Empacotamento masonry (componente `ui/Bento.tsx`, que mede a altura de
-   cada filho e escreve `grid-row: span <px>`). Só `align-items: start`
-   resolvia o vazio dentro do card mas deixava o vazio na página, embaixo
-   dele; aqui o card seguinte sobe e ocupa o buraco.
-
-   `row-gap` fica em 0 de propósito: com linhas implícitas de 1px ele seria
-   somado a CADA uma das centenas delas. O respiro vertical entra no próprio
-   span (altura + gap), calculado no componente a partir do `column-gap`
-   abaixo — assim o espaçamento continua vindo do mesmo token, sem um
-   segundo número solto no JS. Um `margin-bottom` no filho não serve: margem
-   não conta para a área do grid, e os cards empilhados encostavam. */
-.bento--masonry {
-  grid-auto-rows: 1px;
-  row-gap: 0;
+  /* `stretch` (o default do grid) é deliberado desde 01/09/2026: cards
+     na mesma linha têm a MESMA altura, que é o que faz a tela ser
+     escaneável. Isto só é aceitável porque o conteúdo agora estica junto
+     — `.chart` e `.card__fill` em components.css. Sem essa segunda
+     metade, `stretch` devolve o card com o dado grudado no topo e um
+     vazio embaixo, que foi a reclamação original. As duas mudanças andam
+     juntas; nunca ligue uma sem a outra. */
+  align-items: stretch;
 }
 
 .col-2,

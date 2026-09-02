@@ -224,7 +224,7 @@ export function HeroFigure({
   children?: ReactNode
 }) {
   return (
-    <div className="stack stack--tight">
+    <div className="stack stack--tight hero-figure__block">
       <span className="stat__label">{label}</span>
       <span className="hero-figure">{value}</span>
       {delta !== undefined && (

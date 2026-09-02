@@ -59,7 +59,7 @@ export function NetFlowChart({
         ],
       }}
     >
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <AreaChart data={data} margin={{ top: 14, right: 46, bottom: 4, left: 0 }}>
           <defs>
             <linearGradient id={`netflow-${surface}`} x1="0" y1="0" x2="0" y2="1">

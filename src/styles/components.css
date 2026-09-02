@@ -64,6 +64,61 @@
   color: var(--on-accent-1);
 }
 
+/* ---- O que estica dentro do card ------------------------------------
+   Metade do layout "linha alinhada + conteúdo elástico" (ver Bento.tsx).
+   A linha do grid dá a altura; um destes decide quem ocupa a sobra. Sem
+   nenhum deles, o card estica e o conteúdo fica no topo com vazio embaixo
+   — que é exatamente o que não se quer. */
+.card__fill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Número/KPI: centraliza na vertical em vez de flutuar no topo. */
+.card__fill--center { justify-content: center; }
+
+/* Lista de N itens fixos: os itens se distribuem na altura disponível. */
+.card__fill--spread { justify-content: space-between; }
+
+/* Lista longa e variável: rola por dentro em vez de definir a altura da
+   linha inteira para os dois cards. */
+.card__fill--scroll { overflow-y: auto; }
+
+/* Um número hero grudado no topo de um card alto parece card inacabado;
+   centrado, parece decisão. Só isto: nenhum outro bloco centraliza por
+   padrão, porque uma LISTA centralizada se desgruda do próprio título. */
+.hero-figure__block { justify-content: center; }
+
+/* Padrão declarativo: estes são os blocos de conteúdo que os cards usam
+   (95 `.stack`, 23 `.kv`, 22 `.table-wrap`), e é neles que a folga da
+   linha vai parar. Assim um card comum entra no modo elástico sem nada no
+   call site; `.card__fill--center`/`--spread` ficam para afinar caso a
+   caso.
+
+   `min-height: 0` em todos porque sem isso um filho de flex não encolhe
+   abaixo do próprio conteúdo, e `overflow` nunca chega a rolar. */
+.card > .stack,
+.card > .kv,
+.card > .ranked,
+.card > .table-wrap,
+.slab > .stack,
+.slab > .kv {
+  flex: 1;
+  min-height: 0;
+}
+
+/* A contrapartida de "linha alinhada": uma tabela de 40 linhas não pode
+   definir a altura da linha do grid para o card vizinho também. Ela rola
+   por dentro. Medido em 01/09/2026: sem isto, 40 linhas levavam o card a
+   948px e o gráfico ao lado a 840px de altura — tão ruim quanto o vazio
+   que estávamos tirando. `.table-wrap` já tem `overflow-x: auto`, e pela
+   spec o eixo Y vira `auto` junto, então só falta o teto. */
+.card > .table-wrap {
+  max-height: var(--card-content-cap);
+}
+
 .card__head,
 .slab__head {
   display: flex;
@@ -162,7 +217,10 @@
 .sparkline {
   width: 100%;
   height: 28px;
-  color: var(--ink-4);
+  /* 3:1 por 1.4.11: a tendência só existe neste desenho — o tile mostra
+     apenas o total do período, não a série. --ink-4 dava 2,56:1; --ink-3
+     dá 4,83:1 no claro e 4,14:1 no escuro. */
+  color: var(--ink-3);
   overflow: visible;
 }
 
@@ -520,7 +578,10 @@
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  z-index: 40;
+  /* Sobe de 40 para o topo da escala: em 40 empatava com .sidebar, e um
+     popover aberto DENTRO de um modal (seletor de período, faixa de datas)
+     ficava sob ele. */
+  z-index: var(--z-floating);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
@@ -554,7 +615,7 @@
      precisa ficar ACIMA de `.overlay` (60) e `.toasts` (80), senão um
      Select aberto dentro de um Modal renderizava atrás do próprio backdrop
      do modal. */
-  z-index: 90;
+  z-index: var(--z-floating);
   max-width: min(360px, 90vw);
   max-height: 320px;
   overflow-y: auto;
@@ -753,7 +814,7 @@
 .table thead th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-cell);
   background: var(--surface-muted);
   text-align: left;
   font-size: var(--text-2xs);
@@ -975,11 +1036,24 @@
 }
 
 /* ---- Chart frame ------------------------------------------------- */
+/* O gráfico é o principal beneficiário do conteúdo elástico: mais altura
+   é mais resolução vertical, não espaço morto. Como todo gráfico do app
+   passa por `ChartFrame`, que renderiza este `.chart`, um card com
+   gráfico entra no modo elástico sem precisar de nada no call site. */
 .chart {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
   min-width: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+/* A área de plotagem do Recharts. O `minHeight` de cada gráfico virou o
+   piso (nunca colapsa); daqui para cima ele cresce com a linha. */
+.chart__plot {
+  flex: 1;
+  min-height: 0;
 }
 
 .chart__legend {
@@ -1060,7 +1134,7 @@
 .overlay {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: var(--z-overlay);
   background: rgba(17, 18, 20, 0.42);
   backdrop-filter: blur(3px);
   display: grid;
@@ -1091,7 +1165,7 @@
   position: fixed;
   bottom: var(--sp-5);
   right: var(--sp-5);
-  z-index: 80;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -1342,7 +1416,9 @@
   position: absolute;
   top: calc(100% + var(--sp-2));
   left: 0;
-  z-index: 20;
+  /* Em 20 empatava com o .topbar, que é sticky: um ⓘ aberto logo abaixo
+     da barra podia ser pintado por baixo dela. */
+  z-index: var(--z-inline-popover);
   width: max-content;
   max-width: min(340px, calc(100vw - var(--sp-8)));
   border: 1px solid var(--line);

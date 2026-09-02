@@ -80,7 +80,7 @@ export function PortfolioPerformanceChart({
       }}
       note="A distância entre as duas linhas é o ganho real: o que a carteira rendeu além do que foi depositado."
     >
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <LineChart data={data} margin={{ top: 12, right: 12, bottom: 4, left: 0 }}>
           <CartesianGrid {...gridProps(theme)} />
           <XAxis dataKey="period" tickFormatter={fmtPeriod} minTickGap={36} {...axisProps(theme)} />
@@ -237,7 +237,7 @@ export function AllocationChart({
         ],
       }}
     >
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <BarChart
           data={slices}
           layout="vertical"
@@ -313,7 +313,7 @@ export function AllocationVsTargetChart({
       }}
       note="Mesmo número do card 'Alocação por classe', uma segunda leitura visual, lado a lado por classe."
     >
-      <ResponsiveContainer width="100%" height={280}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={280}>
         <BarChart data={slices} margin={{ top: 12, right: 12, bottom: 24, left: 0 }}>
           <CartesianGrid {...gridProps(theme)} />
           <XAxis dataKey="label" interval={0} angle={-20} textAnchor="end" height={56} {...axisProps(theme)} />
@@ -421,7 +421,7 @@ export function PortfolioEvolutionChart({
         below what was put in, so this is the normal case here, not a
         defensive branch.
       */}
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <BarChart data={data} stackOffset="sign" margin={{ top: 12, right: 12, bottom: 4, left: 0 }}>
           <CartesianGrid {...gridProps(theme)} />
           <XAxis dataKey="period" tickFormatter={fmtPeriod} minTickGap={36} {...axisProps(theme)} />
@@ -539,7 +539,7 @@ export function GoalProjectionChart({
       }}
       note="Projeção determinística com retorno esperado constante: uma referência de planejamento, não uma previsão de mercado."
     >
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <LineChart data={data} margin={{ top: 16, right: 12, bottom: 4, left: 0 }}>
           <CartesianGrid {...gridProps(theme)} />
           <XAxis dataKey="period" tickFormatter={fmtPeriod} minTickGap={44} {...axisProps(theme)} />

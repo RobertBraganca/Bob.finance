@@ -88,7 +88,7 @@ export function DebtProjectionChart({
       }}
       note="Projeção com juros compostos sobre o saldo, pagamentos programados e o extra direcionado à dívida mais cara (avalanche)."
     >
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <LineChart data={data} margin={{ top: 12, right: 12, bottom: 4, left: 0 }}>
           <CartesianGrid {...gridProps(theme)} />
           <XAxis

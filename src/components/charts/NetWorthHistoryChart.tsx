@@ -35,7 +35,7 @@ export function NetWorthHistoryChart({ points, surface = 'paper' }: { points: Ne
         ],
       }}
     >
-      <ResponsiveContainer width="100%" height={200}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={200}>
         <LineChart data={points} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
           <CartesianGrid {...gridProps(theme)} />
           <XAxis dataKey="period" tickFormatter={(p: string) => fmtPeriod(p)} {...axisProps(theme)} />

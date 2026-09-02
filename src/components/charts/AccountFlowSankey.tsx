@@ -104,7 +104,7 @@ export function AccountFlowSankey({
           : `${money(totals.internalCents)} pareados em ${totals.internalCount} transferências.`
       }
     >
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <Sankey
           data={data}
           nameKey="name"

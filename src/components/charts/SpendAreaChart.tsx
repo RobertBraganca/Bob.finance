@@ -48,7 +48,7 @@ export function SpendAreaChart({
         ],
       }}
     >
-      <ChartContainer config={chartConfig} className="aspect-auto w-full" style={{ height }}>
+      <ChartContainer config={chartConfig} className="aspect-auto w-full chart__plot" style={{ minHeight: height }}>
         <AreaChart data={days} margin={{ left: 12, right: 12 }}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">

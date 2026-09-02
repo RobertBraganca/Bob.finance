@@ -78,7 +78,7 @@ export function IncomeExpenseChart({
     >
       {/* Height includes the x-axis band, so the axis labels are never
           clipped into a nested scrollbar. */}
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <BarChart data={data} margin={{ top: 18, right: 8, bottom: 4, left: 0 }} barGap={MARK.surfaceGap}>
           <CartesianGrid {...gridProps(theme)} />
           <XAxis dataKey="period" tickFormatter={fmtAxis} {...axisProps(theme)} />

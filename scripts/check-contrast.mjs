@@ -15,6 +15,30 @@ const pairs = [
   ['ink-2 on surface','#52525b', '#ffffff', 4.5],
   ['ink-2 on paper',  '#52525b', '#fafafa', 4.5],
   ['ink-3 (muted)',   '#71717a', '#ffffff', 3.0],
+  // Adicionados na auditoria de 01/09/2026, todos medidos como FALHA antes
+  // da correção. Ficam aqui para que baixar o tom de volta quebre o script
+  // em vez de passar calado.
+  //
+  // Borda de CAMPO DE FORMULÁRIO: 1.4.11 cita o caso nominalmente, então
+  // são 3:1 contra o fundo do campo, nos dois temas. Era #a1a1aa (2,46:1)
+  // no claro e #3f3f46 (1,82:1) no escuro.
+  ['line-strong (borda de campo, claro)', '#8a8a93', '#fafafa', 3.0],
+  ['line-strong (borda de campo, escuro)', '#666670', '#101010', 3.0],
+  ['line-strong (borda sobre hover escuro)', '#666670', '#161616', 3.0],
+  // Rodapé da sidebar: TEXTO de 11px, 4,5:1. Era --ink-4 (2,56:1). --ink-3
+  // resolveria o claro e falharia o escuro (4,14), daí --ink-2.
+  ['ink-2 (rodape sidebar, claro)', '#52525b', '#ffffff', 4.5],
+  ['ink-2 (rodape sidebar, escuro)', '#a1a1aa', '#080808', 4.5],
+  // Sparkline do KPI: objeto gráfico ESSENCIAL (a tendência não existe em
+  // texto no tile), 3:1. Era --ink-4, 2,56:1.
+  ['ink-3 (sparkline, claro)', '#71717a', '#ffffff', 3.0],
+  ['ink-3 (sparkline, escuro)', '#71717a', '#080808', 3.0],
+  // Texto do badge sobre o próprio fundo do badge, os 3 estados.
+  ['badge positivo', '#14682a', '#e8f7ec', 4.5],
+  ['badge atencao', '#7a5b00', '#fdf3e0', 4.5],
+  ['badge critico', '#cc0000', '#ffecec', 4.5],
+  // Indicador de foco: :focus-visible desenha outline de 2px em --brand.
+  ['anel de foco', '#ff0000', '#ffffff', 3.0],
   ['on-slab-1',       '#ffffff', '#080808', 4.5],
   ['on-slab-2',       '#a1a1aa', '#080808', 4.5],
   ['on-slab-3 muted', '#71717a', '#080808', 3.0],

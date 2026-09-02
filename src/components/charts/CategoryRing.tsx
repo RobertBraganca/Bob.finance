@@ -139,7 +139,7 @@ export function CategoryRing({
       }}
     >
       <div style={{ position: 'relative' }}>
-        <ResponsiveContainer width="100%" height={height}>
+        <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
           <PieChart>
             <Pie
               data={segments}
