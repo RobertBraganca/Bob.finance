@@ -120,6 +120,16 @@ export async function pricingRoutes(app: FastifyInstance) {
     }
   })
 
+  /**
+   * Os tres graficos da pagina Precificacao num pedido so: rosca por
+   * status, enviado x aprovado por mes, e o funil. Antes de /quotes/:id
+   * na ordem de registro para "analytics" nao ser lido como um id.
+   */
+  app.get('/pricing/quotes/analytics', async (req) => {
+    const query = z.object({ monthsBack: z.coerce.number().int().min(1).max(60).default(12) }).parse(req.query)
+    return pricing.quoteAnalytics(query.monthsBack)
+  })
+
   app.get('/pricing/quotes', async () => ({ quotes: await pricing.listQuotes() }))
 
   app.post('/pricing/quotes', async (req, reply) => {

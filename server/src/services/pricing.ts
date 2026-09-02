@@ -1,7 +1,7 @@
 import { asc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { pricingMultiplierOptions, pricingSettings, projectQuotes } from '../db/schema'
-import { addMonthsToDate, periodOf, todayIso } from '../core/dates'
+import { addMonths, addMonthsToDate, periodOf, periodRange, todayIso } from '../core/dates'
 import * as financialEngine from './financialEngine'
 import { createTransaction } from './transactions'
 import type { Assumptions } from './financialHealth'
@@ -626,4 +626,169 @@ export async function averageRecentQuoteCents(n = 5): Promise<{ averageCents: nu
   if (recent.length === 0) return { averageCents: null, sampleSize: 0 }
   const total = recent.reduce((sum, q) => sum + q.recommendedPriceCents, 0)
   return { averageCents: Math.round(total / recent.length), sampleSize: recent.length }
+}
+
+/* ------------------------------------------------------------------ *
+ * Analitico de cotacoes — o que os graficos da pagina Precificacao
+ * consomem.
+ * ------------------------------------------------------------------ */
+
+export type QuoteStatusSlice = {
+  status: QuoteStatus
+  count: number
+  /** soma do preco recomendado, o unico valor que TODA cotacao tem */
+  recommendedCents: number
+  /** soma do valor fechado, so existe em aprovada */
+  actualCents: number
+  shareBps: number
+}
+
+export type QuotePeriodPoint = {
+  period: string
+  /** cotacoes que sairam do rascunho, a valor recomendado */
+  sentCents: number
+  sentCount: number
+  /** cotacoes aprovadas, a valor efetivamente fechado */
+  approvedCents: number
+  approvedCount: number
+  /** aprovado sobre enviado, em bps; null quando nada foi enviado */
+  conversionBps: number | null
+}
+
+export type QuoteFunnelStage = {
+  key: string
+  label: string
+  count: number
+  /** sobre o total de cotacoes criadas */
+  shareBps: number
+  /** quantas se perderam entre a etapa anterior e esta */
+  dropFromPreviousCount: number
+}
+
+export type QuoteAnalytics = {
+  byStatus: QuoteStatusSlice[]
+  byPeriod: QuotePeriodPoint[]
+  funnel: QuoteFunnelStage[]
+  totalCount: number
+  assumptions: Record<string, unknown>
+}
+
+/**
+ * Tres leituras da mesma tabela de cotacoes, num pedido so.
+ *
+ * O FUNIL merece explicacao, porque ele infere. Uma cotacao guarda o
+ * status ATUAL, nao o historico de transicoes — nao existe log de
+ * mudanca de etapa. Entao "chegou ate a etapa N" e derivado por
+ * implicacao: para estar aprovada, ela precisou ter sido enviada e
+ * analisada. A implicacao e segura para o fluxo em frente e esta
+ * declarada em `assumptions`; o que ela NAO consegue dizer e quantas
+ * voltaram atras (needs_changes e um retorno, nao uma etapa).
+ *
+ * O agrupamento por PERIODO usa `createdAt`, e isso e uma limitacao
+ * real: nao existe coluna de data de aprovacao. `updatedAt` muda a cada
+ * edicao (decisions/0021) e o `paidOn` fica na transacao, nao aqui.
+ * Entao uma cotacao aprovada aparece no mes em que foi CRIADA, nao no
+ * mes em que fechou. Para janelas mensais isso costuma coincidir; para
+ * um ciclo de venda longo, nao. Declarado tambem (02/09/2026).
+ */
+export async function quoteAnalytics(monthsBack = 12): Promise<QuoteAnalytics> {
+  const rows = await db
+    .select({
+      status: projectQuotes.status,
+      createdAt: projectQuotes.createdAt,
+      recommendedPriceCents: projectQuotes.recommendedPriceCents,
+      actualPriceCents: projectQuotes.actualPriceCents,
+    })
+    .from(projectQuotes)
+
+  const totalCount = rows.length
+
+  // ---- 1. Rosca por status ----
+  const STATUSES: QuoteStatus[] = [
+    'draft',
+    'sent',
+    'in_review',
+    'needs_changes',
+    'rejected',
+    'approved',
+  ]
+  const byStatus: QuoteStatusSlice[] = STATUSES.map((status) => {
+    const own = rows.filter((r) => r.status === status)
+    return {
+      status,
+      count: own.length,
+      recommendedCents: own.reduce((sum, r) => sum + r.recommendedPriceCents, 0),
+      actualCents: own.reduce((sum, r) => sum + (r.actualPriceCents ?? 0), 0),
+      shareBps: totalCount > 0 ? Math.round((own.length / totalCount) * 10_000) : 0,
+    }
+  }).filter((slice) => slice.count > 0)
+
+  // ---- 2. Enviado x aprovado por mes ----
+  const current = todayIso().slice(0, 7)
+  const first = addMonths(current, -(monthsBack - 1))
+  const byPeriod: QuotePeriodPoint[] = periodRange(first, current).map((period) => {
+    const own = rows.filter((r) => r.createdAt.slice(0, 7) === period)
+    const saiuDoRascunho = own.filter((r) => r.status !== 'draft')
+    const aprovadas = own.filter((r) => r.status === 'approved')
+    const sentCents = saiuDoRascunho.reduce((sum, r) => sum + r.recommendedPriceCents, 0)
+    const approvedCents = aprovadas.reduce(
+      (sum, r) => sum + (r.actualPriceCents ?? r.recommendedPriceCents),
+      0,
+    )
+    return {
+      period,
+      sentCents,
+      sentCount: saiuDoRascunho.length,
+      approvedCents,
+      approvedCount: aprovadas.length,
+      conversionBps: sentCents > 0 ? Math.round((approvedCents / sentCents) * 10_000) : null,
+    }
+  })
+
+  // ---- 3. Funil cumulativo ----
+  const naoRascunho = rows.filter((r) => r.status !== 'draft')
+  const analisadas = rows.filter((r) =>
+    (['in_review', 'needs_changes', 'rejected', 'approved'] as QuoteStatus[]).includes(r.status),
+  )
+  const aprovadasTotal = rows.filter((r) => r.status === 'approved')
+  const etapas: Array<{ key: string; label: string; count: number }> = [
+    { key: 'created', label: 'Criadas', count: totalCount },
+    { key: 'sent', label: 'Enviadas', count: naoRascunho.length },
+    { key: 'reviewed', label: 'Em análise ou além', count: analisadas.length },
+    { key: 'approved', label: 'Aprovadas', count: aprovadasTotal.length },
+  ]
+  const funnel: QuoteFunnelStage[] = etapas.map((e, i) => ({
+    ...e,
+    shareBps: totalCount > 0 ? Math.round((e.count / totalCount) * 10_000) : 0,
+    dropFromPreviousCount: i === 0 ? 0 : Math.max(0, etapas[i - 1]!.count - e.count),
+  }))
+
+  const rejeitadas = rows.filter((r) => r.status === 'rejected').length
+
+  return {
+    byStatus,
+    byPeriod,
+    funnel,
+    totalCount,
+    assumptions: {
+      formula:
+        'contagem e soma de valores da tabela de cotacoes, agrupadas por status, por mes de criacao e por etapa acumulada do funil',
+      cotacoesConsideradas: totalCount,
+      janela: `${monthsBack} meses, de ${first} a ${current}`,
+      valorEnviado:
+        'preco RECOMENDADO das cotacoes que sairam do rascunho — e o unico valor que toda cotacao tem, independente de status',
+      valorAprovado:
+        'valor efetivamente FECHADO (actual_price_cents), caindo para o recomendado quando a aprovacao nao registrou um valor proprio',
+      funilEInferido:
+        'a cotacao guarda o status ATUAL, nao o historico de transicoes: nao existe log de mudanca de etapa. "Chegou ate a etapa N" e derivado por implicacao (para estar aprovada, foi enviada e analisada). A implicacao vale para frente; o que o funil NAO diz e quantas voltaram atras, porque "Em ajuste" e um retorno, nao uma etapa',
+      limiteDeDataDeAprovacao:
+        'nao existe coluna de data de aprovacao. Uma cotacao aprovada e contada no mes em que foi CRIADA, nao no mes em que fechou — updatedAt muda a cada edicao (decisions/0021) e o paidOn fica na transacao. Para ciclo de venda curto isso coincide; para longo, nao',
+      reprovadas: rejeitadas,
+      notaDeVolume:
+        totalCount < 10
+          ? 'volume baixo: com menos de dez cotacoes, proporcao e taxa de conversao oscilam muito a cada nova cotacao e nao devem ser lidas como tendencia'
+          : 'volume suficiente para ler proporcao entre status',
+      origem: 'tabela project_quotes, sem cache nem tabela derivada',
+    },
+  }
 }

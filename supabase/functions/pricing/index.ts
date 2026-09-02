@@ -144,6 +144,13 @@ const commercialTerms = {
   paymentTerms: z.string().max(500).nullable().optional(),
 }
 
+// Os tres graficos da pagina Precificacao num pedido so. Antes de
+// /quotes/:id para "analytics" nao ser lido como um id.
+app.get('/quotes/analytics', async (c) => {
+  const query = z.object({ monthsBack: z.coerce.number().int().min(1).max(60).default(12) }).parse(c.req.query())
+  return c.json(await pricing.quoteAnalytics(query.monthsBack))
+})
+
 app.get('/quotes', async (c) => c.json({ quotes: await pricing.listQuotes() }))
 
 app.post('/quotes', async (c) => {
