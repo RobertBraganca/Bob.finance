@@ -138,7 +138,7 @@ export function PatrimonioPage() {
                   {illiquid.data.items.map((item) => (
                     <div key={item.assetId} className="asset-row">
                       <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0 }}>
-                        <span className="asset-row__icon">
+                        <span className="icon-chip">
                           <Icon name="landmark" size={16} />
                         </span>
                         <span className="stack" style={{ gap: 0, minWidth: 0 }}>

@@ -482,7 +482,7 @@ function IndicatorRow({ indicator }: { indicator: ScoredIndicator }) {
         </span>
       </div>
       <Meter usedBps={indicator.scoreBps ?? 0} state={scoreIndicatorState(indicator.scoreBps)} />
-      <Assumptions data={indicator.assumptions} />
+      <Assumptions data={indicator.assumptions} compact />
     </div>
   )
 }
@@ -552,7 +552,7 @@ function RiskRow({ rule }: { rule: RiskRule }) {
           {distanceLabel(rule)} do limite configurado, para o lado favorável.
         </span>
       )}
-      <Assumptions data={rule.assumptions} />
+      <Assumptions data={rule.assumptions} compact />
     </div>
   )
 }

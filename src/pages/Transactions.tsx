@@ -437,7 +437,7 @@ export function TransactionsPage() {
                         <th>Descrição</th>
                         <th style={{ width: 190 }}>Categoria</th>
                         <th style={{ width: 130 }}>Conta</th>
-                        <th style={{ textAlign: 'right', width: 128 }}>Valor</th>
+                        <th className="table__num" style={{ width: 128 }}>Valor</th>
                         <th style={{ width: 40 }} />
                       </tr>
                     </thead>

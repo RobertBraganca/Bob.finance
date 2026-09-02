@@ -705,9 +705,14 @@
   white-space: nowrap;
 }
 
+/* Separação por ESPAÇO, não por borda (revisão de 01/09/2026): a linha
+   cheia em `--line` desenhava uma grade em cima de tabelas que já têm
+   muitas colunas. O respiro vertical sobe (9 -> 12px) e o que sobra é um
+   fio de `--hairline`, quatro vezes mais fraco, só para o olho não perder
+   a linha em tabelas largas com scroll horizontal. */
 .table tbody td {
-  padding: 9px var(--sp-4);
-  border-bottom: 1px solid var(--line);
+  padding: 12px var(--sp-4);
+  border-bottom: 1px solid var(--hairline);
   vertical-align: middle;
 }
 
@@ -721,6 +726,13 @@
 
 .table tbody tr[data-selected='true'] td {
   background: var(--brand-wash);
+}
+
+/* Existia só como `style={{ textAlign: 'center' }}` repetido célula a
+   célula; virou classe para o cabeçalho e a coluna nunca discordarem. */
+.table__center {
+  text-align: center;
+  white-space: nowrap;
 }
 
 .table__num {
@@ -805,17 +817,28 @@
   min-width: 0;
 }
 
-.asset-row__icon {
+/* Ícone de conteúdo (lista, linha de bem, cabeçalho de grupo) vive num
+   chip de fundo suave, nunca solto sobre o card — regra de ícones da
+   revisão de 01/09/2026. Ícone de botão e de navegação ficam de fora: já
+   têm o próprio alvo. */
+.icon-chip {
   display: grid;
   place-items: center;
   width: 32px;
   height: 32px;
   flex: none;
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  border: 1px solid var(--hairline);
   color: var(--ink-2);
 }
+
+.icon-chip--sm {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+}
+
 
 /* ---- Meters ------------------------------------------------------ */
 .meter {
@@ -1237,6 +1260,17 @@
   margin-top: var(--sp-2);
   border-top: 1px solid var(--line);
   padding-top: var(--sp-2);
+}
+
+/* Repetido linha a linha (os 5 indicadores do Health Score), o par
+   "filete + Como calculamos" virava cinco réguas e cinco rótulos iguais
+   dentro de um card só. Compacto guarda a mesma divulgação atrás do ⓘ —
+   `decisions/0010` continua satisfeito, a memória de cálculo segue a um
+   clique na mesma superfície — sem o ruído. */
+.assumptions--compact {
+  margin-top: 0;
+  border-top: 0;
+  padding-top: 0;
 }
 
 .assumptions > summary {

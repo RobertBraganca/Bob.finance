@@ -64,7 +64,9 @@ export type BentoCardConfig = { id: BentoCardId; span: BentoSpan; visible: boole
 export const DEFAULT_BENTO_LAYOUT: BentoCardConfig[] = [
   { id: 'month-mode', span: 12, visible: true },
   { id: 'hero', span: 6, visible: true },
-  { id: 'income-expense-kpi', span: 6, visible: true },
+  // Inteira: são três KPI lado a lado desde 01/09/2026, e em meia largura
+  // os números grandes se espremem.
+  { id: 'income-expense-kpi', span: 12, visible: true },
   { id: 'accounts', span: 6, visible: true },
   { id: 'credit-cards', span: 6, visible: true },
   { id: 'reconciliation', span: 12, visible: true },

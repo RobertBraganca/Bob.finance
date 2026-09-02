@@ -564,9 +564,9 @@ function DreColumn({
           <thead>
             <tr>
               <th>Categoria</th>
-              <th style={{ textAlign: 'right', width: 64 }}>Qtde</th>
-              <th style={{ textAlign: 'right', width: 64 }}>%</th>
-              <th style={{ textAlign: 'right', width: 120 }}>Valor</th>
+              <th className="table__num" style={{ width: 64 }}>Qtde</th>
+              <th className="table__num" style={{ width: 64 }}>%</th>
+              <th className="table__num" style={{ width: 120 }}>Valor</th>
             </tr>
           </thead>
           <tbody>

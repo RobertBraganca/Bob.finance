@@ -195,7 +195,9 @@ export function DailyPage() {
           <Card span={12}>
             <div className="row row--between" style={{ alignItems: 'center' }}>
               <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
-                <Icon name="check" size={16} />
+                <span className="icon-chip icon-chip--sm">
+                  <Icon name="check" size={14} />
+                </span>
                 <span style={{ fontSize: 'var(--text-sm)' }}>
                   {daily.data?.streak.days
                     ? `${daily.data.streak.days} dia${daily.data.streak.days > 1 ? 's' : ''} seguido${daily.data.streak.days > 1 ? 's' : ''} com lançamento no Diário`
@@ -361,7 +363,7 @@ function RecentDaily({ period }: { period: string }) {
                 <th style={{ width: 110 }}>Data</th>
                 <th>Nota</th>
                 <th style={{ width: 200 }}>Categoria</th>
-                <th style={{ textAlign: 'right', width: 130 }}>Valor</th>
+                <th className="table__num" style={{ width: 130 }}>Valor</th>
               </tr>
             </thead>
             <tbody>

@@ -270,31 +270,42 @@ export function Dashboard() {
         </div>
       </Slab>
     ),
+    /* Três KPI lado a lado, não empilhados com filete entre eles: eram
+       três números hero em coluna, o que fazia deste o card mais alto de
+       toda a linha, e a separação vinha de borda em vez de espaço (revisão
+       de design de 01/09/2026). `auto-fit` volta a empilhar sozinho quando
+       o card é estreito demais para três. */
     'income-expense-kpi': (
       <Card span={spanOf('income-expense-kpi')}>
-        <StatTile
-          label="Entradas"
-          value={moneyCompact(totals.incomeCents)}
-          delta={deltas.incomeBps}
-          deltaLabel="vs. anterior"
-          large
-        />
-        <hr className="divider" />
-        <StatTile
-          label="Saídas"
-          value={moneyCompact(totals.expenseCents)}
-          delta={deltas.expenseBps}
-          deltaLabel="vs. anterior"
-          large
-        />
-        <hr className="divider" />
-        <StatTile
-          label="A receber"
-          value={moneyCompact(totals.receivableCents)}
-          delta={deltas.receivableBps}
-          deltaLabel="vs. anterior"
-          large
-        />
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+            gap: 'var(--sp-5)',
+          }}
+        >
+          <StatTile
+            label="Entradas"
+            value={moneyCompact(totals.incomeCents)}
+            delta={deltas.incomeBps}
+            deltaLabel="vs. anterior"
+            large
+          />
+          <StatTile
+            label="Saídas"
+            value={moneyCompact(totals.expenseCents)}
+            delta={deltas.expenseBps}
+            deltaLabel="vs. anterior"
+            large
+          />
+          <StatTile
+            label="A receber"
+            value={moneyCompact(totals.receivableCents)}
+            delta={deltas.receivableBps}
+            deltaLabel="vs. anterior"
+            large
+          />
+        </div>
       </Card>
     ),
     accounts: (
@@ -1282,7 +1293,7 @@ function PendingListModal({
             <tr>
               <th>Descrição</th>
               <th>Data</th>
-              <th style={{ textAlign: 'right' }}>Valor</th>
+              <th className="table__num">Valor</th>
               <th style={{ width: 104 }} />
             </tr>
           </thead>

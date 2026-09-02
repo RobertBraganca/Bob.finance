@@ -191,9 +191,12 @@ function Entry({ entryKey, value }: { entryKey: string; value: unknown }) {
 export function Assumptions({
   data,
   label = 'Como calculamos',
+  compact = false,
 }: {
   data: AssumptionBag | undefined | null
   label?: string
+  /** Só o ⓘ, sem filete nem rótulo: para quando a mesma divulgação se repete linha a linha dentro de um card. */
+  compact?: boolean
 }) {
   if (!data) return null
 
@@ -201,10 +204,10 @@ export function Assumptions({
   const entries = Object.entries(rest)
 
   return (
-    <details className="assumptions">
-      <summary>
+    <details className={compact ? 'assumptions assumptions--compact' : 'assumptions'}>
+      <summary title={compact ? label : undefined} aria-label={compact ? label : undefined}>
         <Icon name="info" size={11} strokeWidth={2} />
-        {label}
+        {!compact && label}
       </summary>
       <div className="assumptions__body">
         {formula && <p className="assumptions__formula">{formula}</p>}

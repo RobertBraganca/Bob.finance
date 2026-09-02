@@ -109,9 +109,9 @@ export function CreditCardsPage() {
                     <tr>
                       <th>Cartão</th>
                       <th>Conta</th>
-                      <th style={{ textAlign: 'center' }}>Fechamento</th>
-                      <th style={{ textAlign: 'center' }}>Vencimento</th>
-                      <th style={{ textAlign: 'right' }}>Limite disponível</th>
+                      <th className="table__center">Fechamento</th>
+                      <th className="table__center">Vencimento</th>
+                      <th className="table__num">Limite disponível</th>
                       <th style={{ width: 108 }} />
                     </tr>
                   </thead>
@@ -128,8 +128,8 @@ export function CreditCardsPage() {
                           )}
                         </td>
                         <td className="muted">{card.accountName ?? '-'}</td>
-                        <td style={{ textAlign: 'center' }}>{fmtDate(card.nextClosingOn)}</td>
-                        <td style={{ textAlign: 'center' }}>{fmtDate(card.nextDueOn)}</td>
+                        <td className="table__center">{fmtDate(card.nextClosingOn)}</td>
+                        <td className="table__center">{fmtDate(card.nextDueOn)}</td>
                         <td className="table__num">
                           {money(card.availableLimitCents)}
                           <br />

@@ -110,7 +110,7 @@ export function SettingsPage() {
                     <th>Conta</th>
                     <th>Instituição</th>
                     <th>Tipo</th>
-                    <th style={{ textAlign: 'right' }}>Saldo atual</th>
+                    <th className="table__num">Saldo atual</th>
                     <th style={{ width: 76 }} />
                   </tr>
                 </thead>

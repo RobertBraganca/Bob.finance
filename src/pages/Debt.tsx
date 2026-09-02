@@ -350,13 +350,13 @@ export function DebtPage() {
                     <tr>
                       <th>Dívida</th>
                       <th>Tipo</th>
-                      <th style={{ textAlign: 'right' }}>Saldo</th>
-                      <th style={{ textAlign: 'right' }}>Taxa a.a.</th>
-                      <th style={{ textAlign: 'right' }}>Juros/mês</th>
-                      <th style={{ textAlign: 'right' }}>Mínimo</th>
-                      <th style={{ textAlign: 'right' }}>Programado</th>
-                      <th style={{ textAlign: 'center' }}>Parcelas</th>
-                      <th style={{ textAlign: 'right' }}>Share</th>
+                      <th className="table__num">Saldo</th>
+                      <th className="table__num">Taxa a.a.</th>
+                      <th className="table__num">Juros/mês</th>
+                      <th className="table__num">Mínimo</th>
+                      <th className="table__num">Programado</th>
+                      <th className="table__center">Parcelas</th>
+                      <th className="table__num">Share</th>
                       <th style={{ width: 108 }} />
                     </tr>
                   </thead>
@@ -383,7 +383,7 @@ export function DebtPage() {
                         <td className="table__num neg">{money(debt.monthlyInterestCents)}</td>
                         <td className="table__num">{money(debt.minimumPaymentCents)}</td>
                         <td className="table__num">{money(debt.scheduledPaymentCents)}</td>
-                        <td style={{ textAlign: 'center' }}>
+                        <td className="table__center">
                           <button
                             type="button"
                             className="badge"
@@ -788,7 +788,7 @@ function DebtPaymentHistoryModal({ debt, onClose }: { debt: DebtRow; onClose: ()
               <tr>
                 <th>Data</th>
                 <th>Tipo</th>
-                <th style={{ textAlign: 'right' }}>Valor</th>
+                <th className="table__num">Valor</th>
                 <th>Notas</th>
                 <th style={{ width: 40 }} />
               </tr>

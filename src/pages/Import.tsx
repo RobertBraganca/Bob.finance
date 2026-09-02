@@ -386,10 +386,10 @@ export function ImportPage() {
                       <th>Arquivo</th>
                       <th>Banco</th>
                       <th>Status</th>
-                      <th style={{ textAlign: 'right' }}>Linhas</th>
-                      <th style={{ textAlign: 'right' }}>Duplicatas</th>
-                      <th style={{ textAlign: 'right' }}>Erros</th>
-                      <th style={{ textAlign: 'right' }}>Gravadas</th>
+                      <th className="table__num">Linhas</th>
+                      <th className="table__num">Duplicatas</th>
+                      <th className="table__num">Erros</th>
+                      <th className="table__num">Gravadas</th>
                       <th />
                     </tr>
                   </thead>
@@ -583,7 +583,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
                   </th>
                   <th style={{ width: 96 }}>Data</th>
                   <th>Descrição</th>
-                  <th style={{ textAlign: 'right', width: 116 }}>Valor</th>
+                  <th className="table__num" style={{ width: 116 }}>Valor</th>
                   <th style={{ width: 210 }}>Categoria</th>
                 </tr>
               </thead>

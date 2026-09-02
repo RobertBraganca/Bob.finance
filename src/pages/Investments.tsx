@@ -1117,7 +1117,9 @@ function AssetGroupCard({
     <div className="card group-card">
       <button type="button" className="group-head" onClick={onToggle} aria-expanded={expanded}>
         <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0 }}>
-          <Icon name={ASSET_CLASS_ICON[assetClass] ?? 'wallet'} size={18} />
+          <span className="icon-chip icon-chip--sm">
+            <Icon name={ASSET_CLASS_ICON[assetClass] ?? 'wallet'} size={15} />
+          </span>
           <strong className="truncate">{label}</strong>
         </span>
         <span className="row row--wrap group-head__stats">
@@ -1148,16 +1150,16 @@ function AssetGroupCard({
               <thead>
                 <tr>
                   <th>Ativo</th>
-                  <th style={{ textAlign: 'center', width: 70 }}>Nota</th>
-                  <th style={{ textAlign: 'right' }}>Qtd.</th>
-                  <th style={{ textAlign: 'right' }}>Preço médio</th>
-                  <th style={{ textAlign: 'right' }}>Cotação</th>
-                  <th style={{ textAlign: 'right' }}>Variação</th>
-                  <th style={{ textAlign: 'right' }}>Saldo</th>
-                  <th style={{ textAlign: 'center' }}>Reserva</th>
-                  <th style={{ textAlign: 'right' }}>% carteira</th>
-                  <th style={{ textAlign: 'right' }}>% ideal</th>
-                  <th style={{ textAlign: 'center' }}>Comprar?</th>
+                  <th className="table__center" style={{ width: 70 }}>Nota</th>
+                  <th className="table__num">Qtd.</th>
+                  <th className="table__num">Preço médio</th>
+                  <th className="table__num">Cotação</th>
+                  <th className="table__num">Variação</th>
+                  <th className="table__num">Saldo</th>
+                  <th className="table__center">Reserva</th>
+                  <th className="table__num">% carteira</th>
+                  <th className="table__num">% ideal</th>
+                  <th className="table__center">Comprar?</th>
                   <th style={{ width: 76 }} />
                 </tr>
               </thead>
@@ -1183,7 +1185,7 @@ function AssetGroupCard({
                           </span>
                         )}
                       </td>
-                      <td style={{ textAlign: 'center' }}>
+                      <td className="table__center">
                         <NoteBadge
                           note={position.note}
                           answered={position.answeredCriteria}
@@ -1210,14 +1212,14 @@ function AssetGroupCard({
                         {variacao === null ? '-' : signedBps(variacao, 2)}
                       </td>
                       <td className="table__num">{money(position.marketValueCents)}</td>
-                      <td style={{ textAlign: 'center' }}>
+                      <td className="table__center">
                         <ReserveToggle assetId={position.assetId} checked={position.countsTowardReserve} />
                       </td>
                       <td className="table__num">{slice ? bps(slice.actualBps, 0) : '-'}</td>
                       <td className="table__num">
                         {slice === undefined || slice.targetBps === null ? '-' : bps(slice.targetBps, 0)}
                       </td>
-                      <td style={{ textAlign: 'center' }}>
+                      <td className="table__center">
                         {slice === undefined || slice.rebalanceCents === null ? (
                           <span className="muted">-</span>
                         ) : slice.rebalanceCents > 0 ? (
@@ -1357,9 +1359,9 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
                   <th>Data</th>
                   <th>Ativo</th>
                   <th>Tipo</th>
-                  <th style={{ textAlign: 'right' }}>Qtd.</th>
-                  <th style={{ textAlign: 'right' }}>Preço</th>
-                  <th style={{ textAlign: 'right' }}>Taxas</th>
+                  <th className="table__num">Qtd.</th>
+                  <th className="table__num">Preço</th>
+                  <th className="table__num">Taxas</th>
                   <th style={{ width: 40 }} />
                 </tr>
               </thead>
@@ -1465,9 +1467,9 @@ function TradeHistoryModal({
                 <th>Data</th>
                 <th>Ativo</th>
                 <th>Tipo</th>
-                <th style={{ textAlign: 'right' }}>Qtd.</th>
-                <th style={{ textAlign: 'right' }}>Preço</th>
-                <th style={{ textAlign: 'right' }}>Taxas</th>
+                <th className="table__num">Qtd.</th>
+                <th className="table__num">Preço</th>
+                <th className="table__num">Taxas</th>
                 <th style={{ width: 40 }} />
               </tr>
             </thead>
@@ -1758,8 +1760,8 @@ function ProfitabilityTab() {
                 {MONTH_LABELS.map((m) => (
                   <th key={m} style={{ textAlign: 'right' }}>{m}</th>
                 ))}
-                <th style={{ textAlign: 'right' }}>Retorno anual</th>
-                <th style={{ textAlign: 'right' }}>Acumulado</th>
+                <th className="table__num">Retorno anual</th>
+                <th className="table__num">Acumulado</th>
               </tr>
             </thead>
             <tbody>
