@@ -1,6 +1,6 @@
 import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis } from 'recharts'
 import { money, period as fmtPeriod } from '../../lib/format'
-import { themeFor, type Surface } from '../../lib/chartTheme'
+import { MARK, themeFor, type Surface } from '../../lib/chartTheme'
 import { useEffectiveSurface } from '../../lib/theme'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '../ui/chart'
 
@@ -83,6 +83,11 @@ export function DecumulationChart({
           type="natural"
           fill={`url(#${gradientId})`}
           fillOpacity={0.4}
+          strokeWidth={MARK.lineWidth}
+          // Mesma convencao dos outros seis graficos: sem a animacao de
+          // entrada, cujo clipPath inicial de width 0 deixa a area invisivel
+          // quando nao progride (02/09/2026).
+          isAnimationActive={false}
           stroke={theme.primary}
         />
       </AreaChart>

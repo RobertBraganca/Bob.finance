@@ -99,13 +99,29 @@
 
    `min-height: 0` em todos porque sem isso um filho de flex não encolhe
    abaixo do próprio conteúdo, e `overflow` nunca chega a rolar. */
-.card > .stack,
-.card > .kv,
-.card > .ranked,
-.card > .table-wrap,
-.slab > .stack,
-.slab > .kv {
-  flex: 1;
+/* Só `.table-wrap` — e `.chart`, logo abaixo, que tem a sua própria regra.
+   Estes dois são inequivocamente CONTEÚDO, e altura extra sempre os
+   serve: mais linha visível na tabela, mais resolução vertical no
+   gráfico.
+
+   `.stack`, `.kv` e `.ranked` saíram desta lista em 02/09/2026. O erro era
+   supor que a classe diz o papel: em Lançamentos, o primeiro filho do card
+   é um `.stack` que é BARRA DE FILTROS, e o `flex: 1` esticou 38px de
+   conteúdo real para 261px — 223px de vazio entre a barra e a tabela,
+   enquanto a tabela, com 979px de conteúdo, ficava com 229px. Uma barra de
+   controle nunca deve absorver folga.
+
+   Para o resto, crescer é OPT-IN via `.card__fill` (e suas variantes
+   `--center`/`--spread`/`--scroll`). Menos automático, mas o automático
+   aqui errava o alvo.
+
+   E sem `flex-grow`: uma tabela MAIS CURTA que o espaço disponível não
+   ganha nada sendo esticada — só produz vazio dentro da própria área de
+   rolagem. Era o caso do DRE, onde o card fica alto por causa do par ao
+   lado e a tabela de 356px era esticada até o teto de 420, deixando 64px
+   embaixo da última linha (medido em 02/09/2026). O `max-height` abaixo já
+   cobre o caso oposto: tabela longa rola em vez de esticar a linha. */
+.card > .table-wrap {
   min-height: 0;
 }
 

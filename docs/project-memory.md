@@ -1298,3 +1298,43 @@ chave do `localStorage` guardando a cópia numa variável de página e em
 seguida chamei `location.reload()`. O reload destrói o contexto, e a cópia
 foi com ele — o layout salvo do usuário foi perdido. Para testar storage,
 a cópia tem de sair da página antes de qualquer reload.
+
+## 02/09/2026 — O gráfico do Health Score tinha DOIS bugs empilhados
+
+O usuário reportou "não está sendo exibido". Eu achei o primeiro bug e
+declarei resolvido cedo demais; medindo no app, havia um segundo por baixo.
+
+**Bug 1 — altura zero.** `min-height` não é altura DEFINIDA, e o
+`ResponsiveContainer` que o `ChartContainer` do shadcn embute usa
+`height: 100%`, que só resolve contra pai definido. Corrigido com
+`.chart__plot--basis { flex: 1 1 auto }` e o `height` inline de volta.
+
+**Bug 2 — `clipPath` de animação preso em `width: 0`.** Com a altura
+corrigida, a geometria passou a estar certa (curva de 167×66, traço azul
+de marca) e ainda assim NADA pintava. A causa: o Recharts anima área por
+um clipPath que começa em largura zero, e quando essa animação não
+progride a área fica recortada a zero — geometria e cor corretas, tela
+vazia. Foi visível só ao inspecionar os `clipPath` do SVG:
+`animationClipPath-... width="0"`.
+
+**A convenção do app já resolvia, e três arquivos não seguiam.** Seis dos
+nove arquivos de gráfico usam `isAnimationActive={false}` — inclusive o
+`NetWorthHistoryChart`, que fica ao LADO do quebrado e sempre funcionou.
+Os três que não usavam são exatamente os três que passam pelo
+`ChartContainer`: `ScoreHistoryChart`, `SpendAreaChart` e
+`DecumulationChart`. Os mesmos três também omitiam `strokeWidth`, caindo
+no padrão 1 do Recharts em vez do `MARK.lineWidth: 2` do sistema — metade
+do peso de linha, o que ajudava a ler como ausente.
+
+Ou seja: esses três nasceram sem seguir as convenções de gráfico do
+projeto, e as três omissões (altura, animação, espessura) morderam juntas.
+
+**Lição de método:** "o path existe no DOM com a geometria certa" NÃO
+significa "aparece". Faltava checar recorte. Depois de corrigir uma causa,
+olhar a tela de novo em escala real — igualar o viewport à largura do
+painel, porque a 0,55x um traço de 2px não se julga.
+
+Verificado desenhando: Health Score (curva subindo de 28,6% a 38,1%) e
+Intensidade por dia em agosto (415×194, traço 2px). O de Decumulação usa o
+mesmo código e padrão, mas precisa de premissas preenchidas para ter dado
+— não deu para ver desenhando.

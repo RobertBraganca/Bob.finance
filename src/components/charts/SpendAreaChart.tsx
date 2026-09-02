@@ -1,6 +1,6 @@
 import { Area, AreaChart, CartesianGrid, XAxis } from 'recharts'
 import { money, dateShort } from '../../lib/format'
-import { themeFor, type Surface } from '../../lib/chartTheme'
+import { MARK, themeFor, type Surface } from '../../lib/chartTheme'
 import { useEffectiveSurface } from '../../lib/theme'
 import { ChartFrame } from './frame'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '../ui/chart'
@@ -87,6 +87,16 @@ export function SpendAreaChart({
             type="natural"
             fill={`url(#${gradientId})`}
             fillOpacity={0.4}
+            strokeWidth={MARK.lineWidth}
+            /*
+              Convencao do app, que estes tres graficos nao seguiam: o
+              Recharts anima area por um clipPath que comeca em width 0, e
+              quando a animacao nao progride a area fica recortada a zero e
+              NAO PINTA - geometria e cor corretas, nada na tela. Foi o que
+              segurou o Health Score depois de eu corrigir a altura
+              (02/09/2026). Os outros seis arquivos de grafico ja desligam.
+            */
+            isAnimationActive={false}
             stroke={theme.expense}
           />
         </AreaChart>
