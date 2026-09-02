@@ -4,7 +4,32 @@
    Barlow itself (the brand's display face — Brandboard: "FONTE
    PRINCIPAL: BARLOW BOLD/BLACK") and JetBrains Mono are shipped as local
    TTFs, so --font-display and --font-mono resolve without a network
-   fetch. */
+   fetch.
+
+   ---- Limpeza de 02/09/2026 -----------------------------------------
+   Eram 13 arquivos, 1371 kB de TTF. Sete saíram:
+
+     Barlow-Italic, Barlow-BlackItalic, JetBrainsMono-Italic
+       Não existe itálico no app. Nenhum `font-style: italic` fora destas
+       próprias declarações, e nenhuma tag <em> ou <i> em src/.
+
+     Barlow-ExtraBold, Barlow-Medium
+       Pesos 800 e 500 não são pedidos por nenhuma regra, e não estão no
+       brandboard. Medido no DOM das 16 rotas: o display resolve só em 400
+       (campo numérico) e 600 (todo o resto).
+
+     JetBrainsMono-Medium, -SemiBold, -Bold
+       --font-mono chega a exatamente quatro elementos <code> (duas telas
+       administrativas), e nenhum deles pede peso. Só o 400 é alcançável.
+       A utility `font-mono` do Tailwind NÃO é este token: o bloco
+       `@theme inline` de index.css define --font-heading e não define
+       --font-mono, então aquela classe usa a pilha própria do Tailwind.
+
+   Bold e Black FICARAM mesmo sem regra que os peça hoje, porque o
+   brandboard os nomeia como a fonte principal da marca. Apagá-los seria
+   mexer em ativo de marca para economizar bytes, o que não é uma troca
+   que valha a pena fazer sozinho.
+   ------------------------------------------------------------------- */
 
 @font-face {
   font-family: 'Barlow';
@@ -13,20 +38,7 @@
   font-style: normal;
   font-display: swap;
 }
-@font-face {
-  font-family: 'Barlow';
-  src: url('../assets/fonts/Barlow-Italic.ttf') format('truetype');
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Barlow';
-  src: url('../assets/fonts/Barlow-Medium.ttf') format('truetype');
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
+
 @font-face {
   font-family: 'Barlow';
   src: url('../assets/fonts/Barlow-SemiBold.ttf') format('truetype');
@@ -34,6 +46,7 @@
   font-style: normal;
   font-display: swap;
 }
+
 @font-face {
   font-family: 'Barlow';
   src: url('../assets/fonts/Barlow-Bold.ttf') format('truetype');
@@ -41,13 +54,7 @@
   font-style: normal;
   font-display: swap;
 }
-@font-face {
-  font-family: 'Barlow';
-  src: url('../assets/fonts/Barlow-ExtraBold.ttf') format('truetype');
-  font-weight: 800;
-  font-style: normal;
-  font-display: swap;
-}
+
 @font-face {
   font-family: 'Barlow';
   src: url('../assets/fonts/Barlow-Black.ttf') format('truetype');
@@ -55,46 +62,11 @@
   font-style: normal;
   font-display: swap;
 }
-@font-face {
-  font-family: 'Barlow';
-  src: url('../assets/fonts/Barlow-BlackItalic.ttf') format('truetype');
-  font-weight: 900;
-  font-style: italic;
-  font-display: swap;
-}
 
 @font-face {
   font-family: 'JetBrains Mono';
   src: url('../assets/fonts/JetBrainsMono-Regular.ttf') format('truetype');
   font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  src: url('../assets/fonts/JetBrainsMono-Italic.ttf') format('truetype');
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  src: url('../assets/fonts/JetBrainsMono-Medium.ttf') format('truetype');
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  src: url('../assets/fonts/JetBrainsMono-SemiBold.ttf') format('truetype');
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  src: url('../assets/fonts/JetBrainsMono-Bold.ttf') format('truetype');
-  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }

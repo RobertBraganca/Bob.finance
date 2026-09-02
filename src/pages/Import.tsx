@@ -639,7 +639,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
                             />
                             <span>
                               possível mesmo evento de "{row.manualMatchDescription}"
-                              {row.manualMatchPostedOn ? `, ${fmtDate(row.manualMatchPostedOn)}` : ''} — marcar
+                              {row.manualMatchPostedOn ? `, ${fmtDate(row.manualMatchPostedOn)}` : ''}; marcar
                               pra substituir o lançamento manual
                             </span>
                           </label>

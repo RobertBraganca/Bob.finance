@@ -768,7 +768,7 @@ export async function cashFlowProjection(opts: {
       ressalvaDeConta:
         accountId === null
           ? 'visao consolidada: transferencia entre contas proprias se anula, entao a linha de saldo fecha'
-          : 'com filtro de conta, a linha de saldo ignora transferencia entre contas proprias, que MOVE o saldo desta conta — o numero consolidado e o confiavel',
+          : 'com filtro de conta, a linha de saldo ignora transferencia entre contas proprias, que MOVE o saldo desta conta. O numero consolidado e o confiavel',
       origem:
         'linhas reais de transactions; as futuras foram materializadas de cash_flow_forecasts (decisions/0028), nao estimadas aqui',
       escopo:

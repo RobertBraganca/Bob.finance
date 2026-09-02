@@ -39,8 +39,6 @@ export type ManifestEntry = {
 }
 
 export const backupDir = () => BACKUP_DIR
-export const manifestPath = () => MANIFEST_PATH
-
 export function readManifest(): ManifestEntry[] {
   if (!existsSync(MANIFEST_PATH)) return []
   try {
@@ -95,7 +93,7 @@ export function createSnapshot(_label: string, _trigger: BackupTrigger): Manifes
   // before it does anything, rather than silently no-op or write a fake
   // manifest entry pointing at a file that doesn't exist.
   throw new BackupError(
-    'backup automático ainda não reimplementado para o Postgres/Supabase (decisions/0026, Fase 4) — pendente de decisão de design',
+    'backup automático ainda não reimplementado para o Postgres/Supabase (decisions/0026, Fase 4). Pendente de decisão de design',
   )
 }
 
@@ -162,7 +160,7 @@ export function restoreSnapshot(_version: number): { restored: ManifestEntry; pr
   // overwriting a local SQLite file, and needs its own explicit design
   // before this does anything.
   throw new BackupError(
-    'restauração ainda não reimplementada para o Postgres/Supabase (decisions/0026, Fase 4) — pendente de decisão de design',
+    'restauração ainda não reimplementada para o Postgres/Supabase (decisions/0026, Fase 4). Pendente de decisão de design',
   )
 }
 

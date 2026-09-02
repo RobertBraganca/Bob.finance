@@ -38,78 +38,6 @@ export type PerformancePoint = {
   gainCents: number
 }
 
-export function PortfolioPerformanceChart({
-  data,
-  surface = 'paper',
-  height = 250,
-}: {
-  data: PerformancePoint[]
-  surface?: Surface
-  height?: number
-}) {
-  const theme = themeFor(useEffectiveSurface(surface))
-  const hasData = data.some((d) => d.valueCents > 0 || d.contributedCents > 0)
-
-  const Tip = makeTooltip<PerformancePoint>((point) => ({
-    title: fmtPeriod(point.period),
-    rows: [
-      { label: 'Valor de mercado', value: money(point.valueCents), color: theme.series[0]! },
-      { label: 'Capital aportado', value: money(point.contributedCents), color: theme.neutral },
-      { label: 'Ganho', value: money(point.gainCents) },
-    ],
-  }))
-
-  return (
-    <ChartFrame
-      legend={[
-        { label: 'Valor de mercado', color: theme.series[0]! },
-        { label: 'Capital aportado', color: theme.neutral },
-      ]}
-      isEmpty={!hasData}
-      emptyTitle="Nenhuma posição registrada"
-      emptyBody="Cadastre ativos e aportes para acompanhar o valor da carteira contra o capital investido."
-      table={{
-        caption: 'Valor da carteira contra capital aportado',
-        rows: data,
-        columns: [
-          { header: 'Mês', value: (row) => fmtPeriod(row.period) },
-          { header: 'Aportado', value: (row) => money(row.contributedCents), align: 'right' },
-          { header: 'Valor', value: (row) => money(row.valueCents), align: 'right' },
-          { header: 'Ganho', value: (row) => money(row.gainCents), align: 'right' },
-        ],
-      }}
-      note="A distância entre as duas linhas é o ganho real: o que a carteira rendeu além do que foi depositado."
-    >
-      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
-        <LineChart data={data} margin={{ top: 12, right: 12, bottom: 4, left: 0 }}>
-          <CartesianGrid {...gridProps(theme)} />
-          <XAxis dataKey="period" tickFormatter={fmtPeriod} minTickGap={36} {...axisProps(theme)} />
-          <YAxis tickFormatter={(v: number) => axisMoney(v)} width={48} {...axisProps(theme)} />
-          <Tooltip content={<Tip />} cursor={{ stroke: theme.axis, strokeWidth: 1 }} />
-          <Line
-            type="monotone"
-            dataKey="contributedCents"
-            stroke={theme.neutral}
-            strokeWidth={MARK.lineWidth}
-            dot={false}
-            activeDot={{ r: MARK.activeDotRadius, ...surfaceRing(theme) }}
-            isAnimationActive={false}
-          />
-          <Line
-            type="monotone"
-            dataKey="valueCents"
-            stroke={theme.series[0]}
-            strokeWidth={MARK.lineWidth}
-            dot={false}
-            activeDot={{ r: MARK.activeDotRadius, ...surfaceRing(theme) }}
-            isAnimationActive={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
-    </ChartFrame>
-  )
-}
-
 /* ================================================================== *
  * Allocation: actual share vs target share, per asset class.
  * Horizontal bars because the category names are long, with a target
@@ -329,9 +257,8 @@ export function AllocationVsTargetChart({
 
 /* ================================================================== *
  * Evolução do Patrimônio — stacked bar: capital aplicado (base) +
- * ganho de capital (stacked on top). Same "gap is the story" idea as
- * PortfolioPerformanceChart, in bar form for a period-by-period read
- * instead of a running line. Aplicado stays neutral (a fact, not a
+ * ganho de capital (stacked on top). Barra em vez de linha corrida,
+ * para uma leitura periodo a periodo. Aplicado stays neutral (a fact, not a
  * signal); ganho takes the app's own gain colour, same hue the "pos"
  * utility class and every Delta already use for a positive result.
  * ================================================================== */

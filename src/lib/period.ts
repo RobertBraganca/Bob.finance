@@ -20,12 +20,3 @@ export function currentPeriod(): string {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
-
-/**
- * Comparação de período é comparação de string, porque `YYYY-MM` é
- * lexicograficamente ordenável — só é verdade com o mês em dois dígitos,
- * que é o que `shiftPeriod` garante.
- */
-export function isAfter(period: string, limit: string): boolean {
-  return period > limit
-}

@@ -202,8 +202,16 @@ export function useRange(): RangeContextValue {
 /* ------------------------------------------------------------------ *
  * Shared queries
  * ------------------------------------------------------------------ */
+/**
+ * `staleTime` de 60s, o mesmo de `useCategories`: isto é metadado do app
+ * (contagens de conta, perfil e regra), não número de tela, e mudava de
+ * dono só quando o usuário mexe no cadastro — momento em que a própria
+ * mutação já invalida `['meta']` explicitamente. Com o padrão de 10s ele
+ * refazia a chamada em quase toda navegação, e `useMeta` é chamado por
+ * oito telas mais o shell (02/09/2026).
+ */
 export const useMeta = () =>
-  useQuery({ queryKey: ['meta'], queryFn: () => api.get<Meta>('/meta') })
+  useQuery({ queryKey: ['meta'], queryFn: () => api.get<Meta>('/meta'), staleTime: 60_000 })
 
 export const useCategories = () =>
   useQuery({

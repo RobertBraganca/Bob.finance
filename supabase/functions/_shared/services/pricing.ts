@@ -449,7 +449,7 @@ export async function updateQuote(id: number, patch: QuoteEdit): Promise<QuoteRo
 
   if (touchesCalculation && existing.status === 'approved') {
     throw new PricingError(
-      'esta cotação já foi aprovada e gerou um lançamento de receita com o valor anterior — editar horas, custos ou multiplicadores não é permitido, porque o preço exibido deixaria de bater com o que está no ledger. Só o rótulo pode ser editado.',
+      'esta cotação já foi aprovada e gerou um lançamento de receita com o valor anterior. Editar horas, custos ou multiplicadores não é permitido, porque o preço exibido deixaria de bater com o que está no ledger. Só o rótulo pode ser editado.',
     )
   }
 
@@ -776,13 +776,13 @@ export async function quoteAnalytics(monthsBack = 12): Promise<QuoteAnalytics> {
       cotacoesConsideradas: totalCount,
       janela: `${monthsBack} meses, de ${first} a ${current}`,
       valorEnviado:
-        'preco RECOMENDADO das cotacoes que sairam do rascunho — e o unico valor que toda cotacao tem, independente de status',
+        'preco RECOMENDADO das cotacoes que sairam do rascunho, o unico valor que toda cotacao tem, independente de status',
       valorAprovado:
         'valor efetivamente FECHADO (actual_price_cents), caindo para o recomendado quando a aprovacao nao registrou um valor proprio',
       funilEInferido:
         'a cotacao guarda o status ATUAL, nao o historico de transicoes: nao existe log de mudanca de etapa. "Chegou ate a etapa N" e derivado por implicacao (para estar aprovada, foi enviada e analisada). A implicacao vale para frente; o que o funil NAO diz e quantas voltaram atras, porque "Em ajuste" e um retorno, nao uma etapa',
       limiteDeDataDeAprovacao:
-        'nao existe coluna de data de aprovacao. Uma cotacao aprovada e contada no mes em que foi CRIADA, nao no mes em que fechou — updatedAt muda a cada edicao (decisions/0021) e o paidOn fica na transacao. Para ciclo de venda curto isso coincide; para longo, nao',
+        'nao existe coluna de data de aprovacao. Uma cotacao aprovada e contada no mes em que foi CRIADA, nao no mes em que fechou, porque updatedAt muda a cada edicao (decisions/0021) e o paidOn fica na transacao. Para ciclo de venda curto isso coincide; para longo, nao',
       reprovadas: rejeitadas,
       notaDeVolume:
         totalCount < 10

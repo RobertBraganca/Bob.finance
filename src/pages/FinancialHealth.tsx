@@ -266,7 +266,7 @@ export function FinancialHealthPage() {
             <Card
               span={6}
               title="Evolução do Health Score"
-              subtitle="Últimos 12 meses, recalculado a cada mês — nunca um número guardado"
+              subtitle="Últimos 12 meses, recalculado a cada mês. Nunca um número guardado"
             >
               <ScoreHistoryChart points={scoreHistory.data?.history ?? []} />
             </Card>
@@ -382,7 +382,7 @@ export function FinancialHealthPage() {
             <Card
               span={12}
               title="Evolução do patrimônio líquido"
-              subtitle="Últimos 12 meses, recalculado a cada mês — nunca um número guardado"
+              subtitle="Últimos 12 meses, recalculado a cada mês. Nunca um número guardado"
             >
               <NetWorthHistoryChart points={netWorthHistory.data?.history ?? []} />
             </Card>

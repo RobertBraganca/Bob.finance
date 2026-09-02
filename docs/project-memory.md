@@ -1338,3 +1338,67 @@ Verificado desenhando: Health Score (curva subindo de 28,6% a 38,1%) e
 Intensidade por dia em agosto (415×194, traço 2px). O de Decumulação usa o
 mesmo código e padrão, mas precisa de premissas preenchidas para ter dado
 — não deu para ver desenhando.
+
+## 02/09/2026 — Limpeza, performance e travessões
+
+**Travessões (ADR 0007).** A ADR já definia o corte: proibido em texto que
+o usuário vê, comentário de código e log de servidor explicitamente FORA
+de escopo, e cada ocorrência reescrita com a pontuação que a frase pede,
+nunca trocada por hífen. Havia 9 violações em UI, incluindo duas que eu
+mesmo introduzi (as premissas de `cashFlowProjection` e de
+`quoteAnalytics`) e o subtítulo dos dois gráficos da Saúde financeira.
+Reescritas com ponto, dois-pontos, vírgula ou conector, uma a uma.
+
+Para achá-las foi preciso um parser que separa string e texto JSX de
+comentário: um grep simples devolve 922 falsos positivos, porque
+comentário é onde o travessão mais aparece e é justamente o que a ADR
+permite.
+
+**Código morto: 550 linhas.** Quatro arquivos shadcn órfãos (`badge`,
+`card`, `popover`, `select` — 452 linhas), `PortfolioPerformanceChart` (72
+linhas, referenciado só por um comentário), e seis exports sem uso algum
+(`moneyWhole`, `percent`, `brlWhole`, `isAfter`, `manifestPath`,
+`closeDb`). O `isAfter` era meu, de ontem, e nunca foi usado.
+
+O detector precisou de duas correções: `server/src/db/reset.ts` parecia
+órfão mas é entry point de `npm run db:reset`, e o único "TODO" do projeto
+é a palavra portuguesa em "Exporta TODO o filtro atual".
+
+**Performance: as fontes eram o gargalo, não o JavaScript.** 1371 kB de
+TTF contra 703 kB do maior chunk JS.
+
+| | antes | depois |
+|---|---|---|
+| TTF local | 13 arquivos, 1371 kB | 5 arquivos, 513 kB |
+| Google Fonts | 15 faces pedidas | 3 arquivos |
+| faces declaradas | 73 | 19 |
+
+O corte saiu de medição no DOM das 16 rotas, não de leitura de CSS: o app
+resolve **Barlow Condensed 600** (e 400 no campo numérico), **Inter
+400/500/600/700** e **JetBrains Mono 400**. Nada mais. Barlow Condensed no
+Google é estática, uma face por peso, então cada um dos 9 pesos pedidos
+era arquivo baixado à toa.
+
+**Um erro meu, corrigido pelo próprio briefing.** Apaguei Barlow-Bold e
+Barlow-Black por "não serem pedidos por nenhuma regra". Mas o comentário
+de `fonts.css` registra que o brandboard os nomeia como fonte principal da
+marca, e o briefing de design dizia "não sugira mudanças de cor de marca,
+fonte ou logo". Restaurei os dois: apagar ativo de marca para economizar
+bytes não é troca que se faça sozinho.
+
+**O que investiguei e decidi NÃO fazer**, porque o risco supera o ganho:
+- **Subsetting de fonte** (mais 55%): derivei o conjunto de glifos do
+  código e são 10 caracteres fora do Latin-1. Mas descrição de extrato
+  bancário é dado do usuário e pode trazer caractere que o scan não vê;
+  tofu na tela é pior que 500 kB.
+- **Escopar os 63 `invalidateQueries()` sem argumento**: medido, o Painel
+  faz 12 requisições, e um lançamento novo realmente muda quase todos
+  aqueles números — ali o invalidate amplo é correto. Trocaria custo de
+  rede por risco de UI velha, que é pior.
+- **A requisição dobrada de `/api/meta`**: é o `StrictMode`, que dobra
+  efeitos só em desenvolvimento. Não existe em produção.
+
+Sobrou uma afinação segura: `useMeta` ganhou `staleTime` de 60s, igual ao
+`useCategories`. É metadado que muda raramente, já invalidado
+explicitamente quando muda, e era refeito em quase toda navegação por oito
+telas mais o shell.

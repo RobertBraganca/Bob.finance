@@ -6,17 +6,9 @@ const brl = new Intl.NumberFormat('pt-BR', {
   minimumFractionDigits: 2,
 })
 
-const brlWhole = new Intl.NumberFormat('pt-BR', {
-  style: 'currency',
-  currency: 'BRL',
-  maximumFractionDigits: 0,
-})
-
 const decimal = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 })
 
 export const money = (cents: number) => brl.format(cents / 100)
-export const moneyWhole = (cents: number) => brlWhole.format(cents / 100)
-
 /**
  * Compact money for axis ticks and tight stat tiles: R$ 12,5 mil / R$ 1,2 mi.
  * Full precision always remains available in the table view and tooltips.
@@ -55,9 +47,6 @@ export const points = (value: number, digits = 1) =>
 
 export const signedPoints = (value: number, digits = 1) =>
   `${value > 0 ? '+' : ''}${points(value, digits)}`
-
-export const percent = (ratio: number, digits = 0) =>
-  `${(ratio * 100).toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`
 
 export const quantity = (value: number) =>
   value.toLocaleString('pt-BR', { maximumFractionDigits: 8 })

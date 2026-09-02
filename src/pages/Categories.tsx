@@ -360,7 +360,7 @@ function CategoryModal({
                   onChange={(value) => setDreGroup(value ?? '')}
                 />
                 <span className="field__hint">
-                  Só usado no DRE formal da conta PJ (specs/dre) — define em que linha (Receita
+                  Só usado no DRE formal da conta PJ (specs/dre): define em que linha (Receita
                   Bruta, Dedução, Custo do serviço, Resultado financeiro, Imposto sobre o lucro)
                   esta categoria entra. Sem escolher, cai no balde padrão.
                 </span>

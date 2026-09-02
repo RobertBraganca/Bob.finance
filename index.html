@@ -7,8 +7,20 @@
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo-red.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!--
+      Só os pesos que o app usa, medido no DOM das 16 rotas em 02/09/2026:
+      Barlow Condensed 400 (o campo numérico, que herda o peso do input) e
+      600 (todo o resto do display); Inter 400, 500, 600 e 700.
+
+      O pedido anterior trazia 9 faces de Barlow Condensed e 6 de Inter, com
+      itálico nas duas. Barlow Condensed no Google é estática, uma face por
+      peso, então cada peso extra era um arquivo baixado para nada; e o app
+      não tem uma única tag <em> ou <i>, nem regra de `font-style: italic`.
+      Inter fica na faixa variável 400..700, que o Google serve como um
+      arquivo só.
+    -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,700;1,800;1,900&family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600&family=Inter:opsz,wght@14..32,400..700&display=swap"
       rel="stylesheet"
     />
   </head>
