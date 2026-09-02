@@ -1104,3 +1104,53 @@ do `.select` — o botão colapsa para o tamanho do padding (34px) e o span
 com `min-width: 0` vai a zero. A primeira medição acusou colisão em
 `--bare` e `--toolbar` por causa disso, não por bug do app. Medir `.select`
 exige um container com largura definida, como ele tem no app real.
+
+## 02/09/2026 — Visualização futura: itens 1 e 3
+
+**O backend já fazia quase tudo.** `cashFlowForecasts` tem
+`recurring | installment | single`, `dueDay` e `endPeriod`; o
+materializador cria linhas pendentes reais 24 meses à frente (ADR 0028);
+`forwardBoundsFor` já calcula janelas de 3/6/12/24 meses. A lacuna era
+**ver**: toda série (`monthlySeries`, `dailySeries`, `netFlowSeries`)
+filtra `pending = false` por ADR 0003, então os 24 meses materializados
+eram invisíveis a qualquer gráfico. `receivable()` era a única leitura
+para frente e devolve um escalar.
+
+**Decisão de arquitetura.** Não resolver deixando o período selecionado ir
+para o futuro: a ADR 0030 documenta que `anchor` nunca passa de hoje
+porque um lançamento mal datado arrastaria "Mês atual" e todo preset. Se o
+período avança, todo total realizado fica errado. A projeção é **eixo
+separado**, como `forwardBoundsFor` já é para os cards de pendência.
+
+**Item 1 — `analytics.cashFlowProjection`.** Realizado e pendente em
+faixas separadas, nunca somados na saída. O caso que obriga isso é a
+pendência ATRASADA: 3 meses passados do banco real têm vencimento passado
+e não confirmado, e "R$ 8.000 em setembro" esconderia se o dinheiro
+entrou.
+
+Classificação igual às outras séries: `transfer` e pagamento de fatura
+fora dos dois lados, `investment` como via própria. A consequência está
+declarada em `assumptions` — com filtro de conta a linha de saldo ignora
+transferência entre contas próprias, e o consolidado é o confiável.
+
+**A linha de saldo tem duas metades, e a primeira versão estava errada.**
+Eu reconstruía o passado para trás descontando o net de cada mês. Mas o
+net exclui transferência, então a reconstrução errava por exatamente o
+volume transferido: rodando contra o banco real, mostrava **R$ −5.247 em
+março**, que o usuário leria como "estive no vermelho" sem ter estado. O
+saldo real é fato consultável. Agora mês passado usa o saldo confirmado do
+banco (março virou R$ −85) e do mês corrente para frente acumula.
+
+Verificado com 7 asserções contra o banco real: net coerente nos 10 meses,
+mês corrente fechando no saldo real exato (R$ 190,57), futuro acumulando
+sem degrau, nenhum mês futuro com realizado, nenhum passado sem.
+
+**Item 3 — fim de contrato.** `endPeriod` existia no banco, no serviço e
+na API, e **nenhum formulário mandava** (grep em `src/`: zero). O campo
+aparece só em "Recorrente"; parcelado termina pela contagem e pontual
+acontece uma vez. Guarda dos dois lados contra fim antes do início, que
+geraria uma previsão salva e invisível — o silêncio que a ADR 0020 fechou
+para outro caso.
+
+**Falta:** item 2 (gráfico de abertura do Painel) e item 4 (cards de
+pendência interativos com o gráfico).

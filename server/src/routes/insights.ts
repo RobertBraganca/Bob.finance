@@ -1043,6 +1043,26 @@ export async function insightsRoutes(app: FastifyInstance) {
   })
 
   /** The two "pendentes" home widgets read straight from here, scoped to the exact same from/to as the rest of the dashboard. */
+  /**
+   * A serie que olha para frente. Fica em /cash-flow porque e o mesmo
+   * dominio das previsoes que a alimentam, ainda que o calculo viva em
+   * `services/analytics`.
+   */
+  app.get('/cash-flow/projection', async (req) => {
+    const query = z
+      .object({
+        monthsBack: z.coerce.number().int().min(0).max(60).default(12),
+        monthsAhead: z.coerce.number().int().min(0).max(60).default(12),
+        accountId: z.coerce.number().int().positive().optional(),
+      })
+      .parse(req.query)
+    return analytics.cashFlowProjection({
+      monthsBack: query.monthsBack,
+      monthsAhead: query.monthsAhead,
+      accountId: query.accountId ?? null,
+    })
+  })
+
   app.get('/cash-flow/pending', async (req) => {
     const query = z
       .object({

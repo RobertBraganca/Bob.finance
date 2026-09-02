@@ -903,6 +903,26 @@ app.delete('/cash-flow/forecasts/:id', async (c) => {
   return c.json(await cashFlowService.deleteForecast(id))
 })
 
+/**
+ * A serie que olha para frente — ver o comentario em services/analytics.
+ */
+app.get('/cash-flow/projection', async (c) => {
+  const query = z
+    .object({
+      monthsBack: z.coerce.number().int().min(0).max(60).default(12),
+      monthsAhead: z.coerce.number().int().min(0).max(60).default(12),
+      accountId: z.coerce.number().int().positive().optional(),
+    })
+    .parse(c.req.query())
+  return c.json(
+    await analytics.cashFlowProjection({
+      monthsBack: query.monthsBack,
+      monthsAhead: query.monthsAhead,
+      accountId: query.accountId ?? null,
+    }),
+  )
+})
+
 app.get('/cash-flow/pending', async (c) => {
   const query = z
     .object({
