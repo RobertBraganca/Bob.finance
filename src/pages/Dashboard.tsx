@@ -1552,6 +1552,14 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [installmentCount, setInstallmentCount] = useState('3')
   const [installmentsRealized, setInstallmentsRealized] = useState('0')
+  /**
+   * Fim de contrato de uma recorrência: um salário é fixo e só para quando
+   * o contrato encerra. O campo `end_period` existia no banco e na API
+   * desde sempre e nenhum formulário mandava — então toda recorrência
+   * nascia sem fim, e a única saída era apagar ocorrência por ocorrência
+   * (02/09/2026). Vazio = sem fim previsto, que segue sendo o padrão.
+   */
+  const [endMonth, setEndMonth] = useState('')
 
   const save = useMutation({
     mutationFn: () => {
@@ -1569,6 +1577,9 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
         dueDay: Number(paymentDate.slice(8, 10)),
         installmentCount: kind === 'installment' ? Math.max(1, Math.round(Number(installmentCount)) || 1) : null,
         installmentsRealized: kind === 'installment' ? Math.max(0, Math.round(Number(installmentsRealized)) || 0) : 0,
+        // Só recorrência tem fim de contrato: parcelado já termina pela
+        // contagem de parcelas, e pontual acontece uma vez.
+        endPeriod: kind === 'recurring' && endMonth !== '' ? endMonth : null,
       })
     },
     onSuccess: (created) => {
@@ -1628,7 +1639,7 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
           />
           <span className="field__hint">
             {kind === 'recurring'
-              ? 'Repete todo mês, indefinidamente, sempre no mesmo dia a partir da data de pagamento.'
+              ? 'Repete todo mês, sempre no mesmo dia a partir da data de pagamento. Sem fim informado, não para.'
               : kind === 'installment'
                 ? 'Uma quantidade fixa de parcelas, uma por mês, sempre no mesmo dia a partir da data de pagamento.'
                 : 'Uma única ocorrência, exatamente na data informada.'}
@@ -1671,6 +1682,26 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
             />
           </div>
         </div>
+
+        {kind === 'recurring' && (
+          <div className="field">
+            <label className="field__label" htmlFor="forecast-end">
+              Até quando <span className="muted">(opcional)</span>
+            </label>
+            <TextInput
+              id="forecast-end"
+              value={endMonth}
+              onChange={setEndMonth}
+              type="month"
+              min={paymentDate.slice(0, 7)}
+            />
+            <span className="field__hint">
+              {endMonth === ''
+                ? 'Vazio: repete sem data de término. Preencha com o encerramento do contrato para o planejamento parar ali.'
+                : `Última ocorrência em ${endMonth}. Depois disso nada é lançado.`}
+            </span>
+          </div>
+        )}
 
         {kind === 'installment' && (
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>

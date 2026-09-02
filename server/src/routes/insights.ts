@@ -1002,6 +1002,17 @@ export async function insightsRoutes(app: FastifyInstance) {
         endPeriod: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
         notes: z.string().nullable().optional(),
       })
+      /**
+       * Um fim ANTES do inicio nao gera ocorrencia nenhuma, e a previsao
+       * ficaria salva sem nunca aparecer em lugar algum — o mesmo tipo de
+       * silencio que `decisions/0020` fechou para o horizonte de
+       * materializacao. Comparacao de string funciona porque `YYYY-MM` e
+       * lexicograficamente ordenavel (02/09/2026).
+       */
+      .refine((v) => v.endPeriod == null || v.endPeriod >= v.startPeriod, {
+        message: 'o fim nao pode ser antes do inicio',
+        path: ['endPeriod'],
+      })
       .parse(req.body)
     return cashFlowService.createForecast(body)
   })

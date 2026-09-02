@@ -868,6 +868,12 @@ app.post('/cash-flow/forecasts', async (c) => {
       endPeriod: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
       notes: z.string().nullable().optional(),
     })
+    // Um fim ANTES do inicio nao gera ocorrencia nenhuma, e a previsao
+    // ficaria salva sem nunca aparecer (mesmo silencio de decisions/0020).
+    .refine((v) => v.endPeriod == null || v.endPeriod >= v.startPeriod, {
+      message: 'o fim nao pode ser antes do inicio',
+      path: ['endPeriod'],
+    })
     .parse(await c.req.json())
   return c.json(await cashFlowService.createForecast(body))
 })
