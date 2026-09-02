@@ -94,8 +94,30 @@ export function DropdownSelect<T extends string | number>({
       const rect = anchor.getBoundingClientRect()
       const panelHeight = panelRef.current?.offsetHeight ?? 0
       const openUp = rect.bottom + GAP + panelHeight > window.innerHeight && rect.top > panelHeight
-      const estimatedWidth = Math.min(Math.max(rect.width, 200), Math.min(360, window.innerWidth * 0.9))
-      const maxLeft = window.innerWidth - VIEWPORT_MARGIN - estimatedWidth
+      /**
+       * A largura para o clamp tem de ser a MEDIDA, não um chute. Ela está
+       * disponível: o painel renderiza uma vez com `visibility: hidden`
+       * antes deste efeito rodar, que é o mesmo motivo por que
+       * `panelHeight` acima funciona no primeiro abrir.
+       *
+       * Antes era `min(max(rect.width, 200), min(360, 90vw))` — um piso
+       * chutado em 200px. Um gatilho estreito com rótulos longos (a pílula
+       * de status de uma cotação: "Em revisão", "Reprovada") tem painel de
+       * ~300px, e o clamp calculado para 200 deixava 100px fora da tela.
+       * Medido em 6 casos realistas, 3 transbordavam — até 160px, e 100px
+       * num viewport de celular (01/09/2026).
+       *
+       * O `max` com `rect.width` e `panelMinWidth` está aqui porque a
+       * primeira medição acontece ANTES de o `minWidth` inline ser
+       * aplicado, então a medida sozinha subestimaria um painel que vai
+       * crescer até a largura do gatilho.
+       */
+      const cssMaxWidth = Math.min(360, window.innerWidth * 0.9)
+      const panelWidth = Math.min(
+        Math.max(panelRef.current?.offsetWidth ?? 0, rect.width, panelMinWidth ?? 0),
+        cssMaxWidth,
+      )
+      const maxLeft = window.innerWidth - VIEWPORT_MARGIN - panelWidth
       const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, maxLeft))
       const top = openUp ? rect.top - GAP - panelHeight : rect.bottom + GAP
       setPanelPos({ top, left, width: rect.width, openUp })
@@ -111,7 +133,7 @@ export function DropdownSelect<T extends string | number>({
       window.removeEventListener('resize', updatePosition)
       document.removeEventListener('scroll', updatePosition, true)
     }
-  }, [open, highlighted])
+  }, [open, highlighted, panelMinWidth])
 
   useEffect(() => {
     if (typeahead === '') return

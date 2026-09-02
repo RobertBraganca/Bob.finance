@@ -1022,3 +1022,43 @@ raio só nas pontas, desabilitado em `opacity .45` + `not-allowed` igual ao
 nos dois sentidos, mês sempre com dois dígitos (sem isso a comparação
 lexicográfica da guarda quebraria em outubro), e o caso de período futuro
 já no estado.
+
+## 01/09/2026 — Passo 3: o item de dropdown estava mal diagnosticado
+
+**A premissa da auditoria era falsa.** Eu escrevi "36 `<select>` nativos em
+12 páginas, migrar para o `Dropdown`". Não existe **nenhum** `<select>`
+nativo no app: os 3 casamentos de `grep` são comentários, e um único
+`role="listbox"` em todo o código, dentro de `Dropdown.tsx`. O número 36
+veio de um `grep -c "<Select\|<select"`, que casa o COMPONENTE e o
+elemento nativo ao mesmo tempo, sem distinguir maiúscula. `Select`,
+`FilterSelect` e `CategorySelect` já passam todos pelo `DropdownSelect`,
+que já é portado para o body com `position: fixed`.
+
+**O defeito real, esse existe** e está na largura usada para prender o
+painel na viewport:
+
+```
+estimatedWidth = min(max(rect.width, 200), min(360, 90vw))
+```
+
+O piso de 200px é chute. Um gatilho estreito com rótulos longos — a pílula
+de status de uma cotação, "Em revisão"/"Reprovada" — tem painel de ~300px,
+e o clamp calculado para 200 deixava o resto fora da tela. Medido em 6
+casos realistas: **3 transbordavam**, até 160px no desktop e 100px num
+viewport de celular. Isso é o "recorte" do briefing.
+
+A largura medida já estava disponível: o painel renderiza uma vez com
+`visibility: hidden` antes do `useLayoutEffect`, que é o mesmo motivo por
+que `panelHeight` funciona no primeiro abrir. Agora o clamp usa
+`min(max(medida, rect.width, panelMinWidth), min(360, 90vw))`. O `max` com
+`rect.width` importa porque a primeira medição acontece antes de o
+`minWidth` inline ser aplicado. Zero transbordos em 8 casos, incluindo
+viewport menor que o painel.
+
+**Achados laterais:**
+- `src/components/ui/select.tsx` (shadcn, com markup de `<select>` nativo)
+  não é importado em lugar nenhum — é a origem do meu falso positivo.
+  `badge.tsx`, `card.tsx` e `popover.tsx` também estão órfãos.
+- Endividamento usa `<Select>` com `recentClosedMonths(24)`. Não vale
+  trocar pelo `PeriodNav`: ali a lista de meses fechados é o domínio
+  válido, não uma navegação livre.
