@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useMeta } from '../lib/store'
+import type { IconName } from '../components/ui/Icon'
 import { bps, centsToInput, date as fmtDate, money, moneyCompact, parseMoneyInput } from '../lib/format'
 import {
   Assumptions,
@@ -94,7 +95,7 @@ export function PatrimonioPage() {
 
       <div className="page">
         <Bento>
-          <Slab span={5} accent>
+          <Slab span={6} accent>
             <HeroFigure label="Patrimônio líquido" value={nw ? moneyCompact(netWorthCents) : '-'}>
               <div className="stack stack--tight" style={{ marginTop: 'var(--sp-4)' }}>
                 <HeroLine label="Financeiro" value={nw ? money(nw.financialCents) : '-'} />
@@ -104,12 +105,48 @@ export function PatrimonioPage() {
             </HeroFigure>
           </Slab>
 
-          <Card span={7} title="Evolução do patrimônio" subtitle="Últimos 12 meses, recalculado a cada mês">
-            <NetWorthHistoryChart points={history.data?.history ?? []} surface="paper" />
+          <Card
+            span={6}
+            title="Composição"
+            subtitle="De onde vem cada parte do patrimônio"
+            assumptions={nw?.assumptions}
+          >
+            {!nw ? (
+              <SkeletonLines lines={4} />
+            ) : (
+              <div className="card__fill card__fill--spread">
+                {/*
+                  Linha compacta, o MESMO padrão do card Imobilizado logo
+                  abaixo. Antes eram quatro `StatTile` com número em tamanho
+                  hero, o que deixava este card cinco vezes mais alto que o
+                  hero ao lado e impedia o par — e era a inconsistência de
+                  `list_pattern` que o próprio usuário apontou: duas listas
+                  de valores na mesma página com tratamentos diferentes
+                  (02/09/2026).
+                */}
+                <CompositionRow icon="wallet" label="Saldo em conta" value={money(nw.balanceCents)} />
+                <CompositionRow
+                  icon="trending"
+                  label="Investimentos negociáveis"
+                  value={money(nw.financialCents - nw.balanceCents)}
+                />
+                <CompositionRow icon="landmark" label="Imobilizado" value={money(nw.illiquidCents)} />
+                <CompositionRow
+                  icon="alert"
+                  label="Dívida total"
+                  value={`- ${money(nw.debtCents)}`}
+                  negative
+                />
+                <p className="chart__note">
+                  Financeiro e Imobilizado somam o que existe; a dívida é subtraída no patrimônio
+                  líquido ao lado. Um bem imobilizado conta como patrimônio, mas não paga uma conta.
+                </p>
+              </div>
+            )}
           </Card>
 
           <Card
-            span={7}
+            span={12}
             title="Imobilizado"
             assumptions={illiquid.data?.assumptions}
             subtitle="Bens que entram no patrimônio mas não se rebalanceiam: imóvel, veículo, joia"
@@ -174,29 +211,9 @@ export function PatrimonioPage() {
             )}
           </Card>
 
-          <Card
-            span={5}
-            title="Composição"
-            subtitle="De onde vem cada parte do patrimônio"
-            assumptions={nw?.assumptions}
-          >
-            {!nw ? (
-              <SkeletonLines lines={4} />
-            ) : (
-              <>
-                <div className="stack stack--loose">
-                  <StatTile label="Saldo em conta" value={money(nw.balanceCents)} />
-                  <StatTile label="Investimentos negociáveis" value={money(nw.financialCents - nw.balanceCents)} />
-                  <StatTile label="Imobilizado" value={money(nw.illiquidCents)} />
-                  <StatTile label="Dívida total" value={money(nw.debtCents)} />
-                </div>
-                <p className="chart__note">
-                  Financeiro e Imobilizado somam o que existe; a dívida é subtraída no patrimônio
-                  líquido ao lado. Um bem imobilizado conta como patrimônio, mas não paga uma conta,
-                  então as duas metades aparecem separadas em vez de num número só.
-                </p>
-              </>
-            )}
+
+          <Card span={12} title="Evolução do patrimônio" subtitle="Últimos 12 meses, recalculado a cada mês">
+            <NetWorthHistoryChart points={history.data?.history ?? []} surface="paper" />
           </Card>
         </Bento>
       </div>
@@ -204,6 +221,40 @@ export function PatrimonioPage() {
       {adding && <AddAssetModal onClose={() => setAdding(false)} />}
       {revaluing && <RevalueModal item={revaluing} onClose={() => setRevaluing(null)} />}
     </>
+  )
+}
+
+/**
+ * Uma linha da Composição: ícone, rótulo, valor. Mesmo desenho das linhas
+ * do card Imobilizado (`.asset-row` + `.icon-chip`), para a página ter UM
+ * padrão de lista de valores e não dois.
+ */
+function CompositionRow({
+  icon,
+  label,
+  value,
+  negative,
+}: {
+  icon: IconName
+  label: string
+  value: string
+  negative?: boolean
+}) {
+  return (
+    <div className="asset-row">
+      <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0 }}>
+        <span className="icon-chip icon-chip--sm">
+          <Icon name={icon} size={14} />
+        </span>
+        <span className="truncate">{label}</span>
+      </span>
+      <span
+        className="tabular"
+        style={{ fontWeight: 600, flex: 'none', color: negative ? 'var(--delta-down)' : undefined }}
+      >
+        {value}
+      </span>
+    </div>
   )
 }
 
