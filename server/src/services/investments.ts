@@ -47,6 +47,23 @@ export const ASSET_CLASSES = [
  */
 export const ILLIQUID_ASSET_CLASS = 'illiquid'
 
+/**
+ * As classes que podem receber uma META de alocação — `ASSET_CLASSES` menos
+ * o imobilizado.
+ *
+ * A separação existe porque as duas listas respondem a perguntas
+ * diferentes: para CADASTRAR um bem o imobilizado é obrigatório (é o que
+ * faz um carro ser um carro), mas para DEFINIR UMA META ele não pode
+ * aparecer — o modal "Alocação-alvo por classe" oferecia a classe, e a
+ * política do usuário guardava 1% preso ali, um ponto do orçamento
+ * destinado a uma classe que `allocation()` nem exibe mais. O rodapé do
+ * modal somava 89% e ninguém sabia onde estava o resto (02/09/2026).
+ */
+export const ALLOCATABLE_ASSET_CLASSES = ASSET_CLASSES.filter(
+  (c): c is Exclude<(typeof ASSET_CLASSES)[number], typeof ILLIQUID_ASSET_CLASS> =>
+    c !== ILLIQUID_ASSET_CLASS,
+)
+
 type AssetClass = (typeof assets.$inferSelect)['assetClass']
 type TradeKind = (typeof assetTrades.$inferSelect)['kind']
 type GoalPurpose = (typeof investmentGoals.$inferSelect)['purpose']
@@ -844,10 +861,18 @@ export async function suggestContribution(amountCents: number, goalId?: number |
   const reserve = await reserveStatus()
   const reserveAllocatedCents = Math.min(amountCents, reserve.gapCents)
 
-  const classTargets = await db
-    .select({ assetClass: targetAllocations.assetClass, targetBps: targetAllocations.targetBps })
-    .from(targetAllocations)
-    .where(goalId ? eq(targetAllocations.goalId, goalId) : sql`goal_id is null`)
+  // Filtra imobilizado: o valor ATUAL da classe vem de `tradablePositions`
+  // e é sempre zero, então uma meta de 1% deixava o gap positivo e a classe
+  // entrava na fila de aporte — dinheiro destinado a uma classe sem destino
+  // possível. Hoje isso fica escondido porque a reserva de emergência
+  // absorve todo aporte antes de chegar às classes; assim que a reserva
+  // fechar, apareceria (02/09/2026).
+  const classTargets = (
+    await db
+      .select({ assetClass: targetAllocations.assetClass, targetBps: targetAllocations.targetBps })
+      .from(targetAllocations)
+      .where(goalId ? eq(targetAllocations.goalId, goalId) : sql`goal_id is null`)
+  ).filter((ct) => ct.assetClass !== ILLIQUID_ASSET_CLASS)
 
   // Kept unfiltered (unlike classQueue below) so LEVEL 4 can still reach a
   // class that started at or above its own target — see decisions/0019.
@@ -1612,14 +1637,24 @@ export async function deleteGoal(id: number) {
   return { removed: (await db.delete(investmentGoals).where(eq(investmentGoals.id, id))).count }
 }
 
+/**
+ * Recusa imobilizado em vez de ignorar em silêncio: uma meta salva que não
+ * existe depois é pior do que um erro na hora de salvar.
+ */
 export async function setTargetAllocation(
   goalId: number | null,
   entries: Array<{ assetClass: string; targetBps: number }>,
 ) {
+  const imobilizado = entries.find((e) => e.assetClass === ILLIQUID_ASSET_CLASS && e.targetBps > 0)
+  if (imobilizado) {
+    throw new Error('Imobilizado não recebe meta de alocação: um bem físico não se rebalanceia')
+  }
+
   await db.transaction(async (tx) => {
     await tx.delete(targetAllocations).where(goalId === null ? sql`goal_id is null` : eq(targetAllocations.goalId, goalId))
     for (const entry of entries) {
       if (entry.targetBps <= 0) continue
+      if (entry.assetClass === ILLIQUID_ASSET_CLASS) continue
       await tx.insert(targetAllocations).values({ goalId, assetClass: entry.assetClass as AssetClass, targetBps: entry.targetBps })
     }
   })

@@ -633,6 +633,15 @@ export async function insightsRoutes(app: FastifyInstance) {
         value,
         label: investments.ASSET_CLASS_LABELS[value] ?? value,
       })),
+      /**
+       * Só as classes que podem receber META. O modal de alocação-alvo usa
+       * esta, e o cadastro de ativo usa a de cima — que precisa do
+       * imobilizado para um carro poder ser cadastrado como carro.
+       */
+      allocatableAssetClasses: investments.ALLOCATABLE_ASSET_CLASSES.map((value) => ({
+        value,
+        label: investments.ASSET_CLASS_LABELS[value] ?? value,
+      })),
       goalPurposes: investments.GOAL_PURPOSES.map((value) => ({
         value,
         label: investments.GOAL_PURPOSE_LABELS[value] ?? value,
@@ -845,7 +854,8 @@ export async function insightsRoutes(app: FastifyInstance) {
         goalId: z.number().int().positive().nullable().default(null),
         entries: z.array(
           z.object({
-            assetClass: z.enum(investments.ASSET_CLASSES),
+            // Lista ALOCÁVEL, não a completa: imobilizado não recebe meta.
+            assetClass: z.enum(investments.ALLOCATABLE_ASSET_CLASSES),
             targetBps: z.number().int().min(0).max(10_000),
           }),
         ),

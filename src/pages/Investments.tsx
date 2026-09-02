@@ -102,6 +102,8 @@ type PortfolioResponse = {
   performance: Array<{ period: string; contributedCents: number; valueCents: number; gainCents: number }>
   goals: Goal[]
   assetClasses: Array<{ value: string; label: string }>
+  /** Sem imobilizado: só o que pode receber meta de alocação. */
+  allocatableAssetClasses: Array<{ value: string; label: string }>
   goalPurposes: Array<{ value: string; label: string }>
 }
 
@@ -236,7 +238,7 @@ export function InvestmentsPage() {
       )}
       {allocModal && (
         <AllocationModal
-          classes={data?.assetClasses ?? []}
+          classes={data?.allocatableAssetClasses ?? []}
           current={data?.allocation ?? []}
           onClose={() => setAllocModal(false)}
         />

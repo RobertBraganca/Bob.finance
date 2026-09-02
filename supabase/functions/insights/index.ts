@@ -565,6 +565,8 @@ app.get('/investments', async (c) => {
     performance,
     goals,
     assetClasses: investments.ASSET_CLASSES.map((value) => ({ value, label: investments.ASSET_CLASS_LABELS[value] ?? value })),
+    /** Só as classes que podem receber META — o modal de alocação-alvo usa esta. */
+    allocatableAssetClasses: investments.ALLOCATABLE_ASSET_CLASSES.map((value) => ({ value, label: investments.ASSET_CLASS_LABELS[value] ?? value })),
     goalPurposes: investments.GOAL_PURPOSES.map((value) => ({ value, label: investments.GOAL_PURPOSE_LABELS[value] ?? value })),
   })
 })
@@ -743,7 +745,8 @@ app.put('/investments/allocation', async (c) => {
   const body = z
     .object({
       goalId: z.number().int().positive().nullable().default(null),
-      entries: z.array(z.object({ assetClass: z.enum(investments.ASSET_CLASSES), targetBps: z.number().int().min(0).max(10_000) })),
+      // Lista ALOCÁVEL, não a completa: imobilizado não recebe meta.
+      entries: z.array(z.object({ assetClass: z.enum(investments.ALLOCATABLE_ASSET_CLASSES), targetBps: z.number().int().min(0).max(10_000) })),
     })
     .parse(await c.req.json())
   return c.json({ allocation: await investments.setTargetAllocation(body.goalId, body.entries) })
