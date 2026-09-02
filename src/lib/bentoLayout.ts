@@ -64,9 +64,22 @@ export type BentoCardConfig = { id: BentoCardId; span: BentoSpan; visible: boole
 export const DEFAULT_BENTO_LAYOUT: BentoCardConfig[] = [
   { id: 'month-mode', span: 12, visible: true },
   { id: 'hero', span: 6, visible: true },
-  // Inteira: são três KPI lado a lado desde 01/09/2026, e em meia largura
-  // os números grandes se espremem.
-  { id: 'income-expense-kpi', span: 12, visible: true },
+  /**
+   * Meia largura, para PAREAR com o hero — que de outro modo fica sozinho
+   * na linha com a metade direita vazia (medido no app rodando a 1440px em
+   * 02/09/2026: era o único buraco do Painel).
+   *
+   * Em 01/09 este card foi para largura inteira com a justificativa de que
+   * "em meia largura os números grandes se espremem". Medido agora, não se
+   * espremem: o `clamp()` que entrou em `.stat__value` na MESMA revisão
+   * resolve isso, e com "R$ 128,4 mil" nos três stats nada corta a 469px —
+   * o grid interno cai para duas colunas e o terceiro desce, o que lê bem.
+   * A justificativa velha ficou desatualizada pela correção vizinha.
+   *
+   * O par também é o certo semanticamente: o resultado do período ao lado
+   * das entradas e saídas que o produzem.
+   */
+  { id: 'income-expense-kpi', span: 6, visible: true },
   { id: 'accounts', span: 6, visible: true },
   { id: 'credit-cards', span: 6, visible: true },
   { id: 'reconciliation', span: 12, visible: true },

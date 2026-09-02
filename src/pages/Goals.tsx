@@ -186,7 +186,7 @@ export function GoalsPage() {
           </Bento>
         ) : (
           <Bento>
-            <Slab span={4} accent>
+            <Slab span={6} accent>
               <HeroFigure
                 label="Sobrou no mês"
                 value={moneyCompact(data.actual.netCents)}
@@ -201,7 +201,7 @@ export function GoalsPage() {
               </HeroFigure>
             </Slab>
 
-            <Card span={4} title="Receita">
+            <Card span={6} title="Receita">
               <GoalRow
                 label="Meta de receita"
                 actual={data.progress.income.actualCents}
@@ -229,7 +229,7 @@ export function GoalsPage() {
                 )}
             </Card>
 
-            <Card span={4} title="Teto de gastos">
+            <Card span={6} title="Teto de gastos">
               <GoalRow
                 label="Limite total do mês"
                 actual={data.progress.spend.spentCents}
@@ -246,7 +246,7 @@ export function GoalsPage() {
             </Card>
 
             <Card
-              span={7}
+              span={6}
               title="Tetos por categoria"
               subtitle="A marca escura em cada barra é o ritmo esperado para hoje"
               actions={
@@ -307,7 +307,7 @@ export function GoalsPage() {
               )}
             </Card>
 
-            <Card span={5} title="Histórico de metas" subtitle="Meses que bateram todos os alvos definidos">
+            <Card span={12} title="Histórico de metas" subtitle="Meses que bateram todos os alvos definidos">
               <div className="bento" style={{ gap: 'var(--sp-3)' }}>
                 <div className="col-6">
                   <StatTile

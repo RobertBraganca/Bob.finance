@@ -1252,3 +1252,49 @@ desktop.
 - Comparar overflow contra `innerWidth` se anula: quando o conteúdo estica
   o layout, `innerWidth` estica junto (451) e a comparação nunca dispara. O
   limite verdadeiro é `documentElement.clientWidth` (390).
+
+## 02/09/2026 — Alinhamento nas 16 rotas (o resto)
+
+Auditoria medida no app rodando, desktop (1440) e mobile (390), nas 16
+rotas de `App.tsx` — não só nas que aparecem na navegação. Buraco de linha
+= um card de MEIA largura sozinho, com a outra metade vazia.
+
+| rota | buracos antes | o que era |
+|---|---|---|
+| `/` | 1 | hero sozinho; o card de KPI ao lado era largura inteira |
+| `/motor` | 1 | hero sozinho; "Como chegamos" era inteira |
+| `/metas` | 2 | "Teto de gastos" e "Histórico de metas" |
+| `/cartoes` | 1 | hero sozinho; só há 2 cards na página |
+| `/precificacao` | 1 | o estado vazio "Nenhuma simulação" |
+| `/ajustes` | 1 | terceiro de três slabs de contagem |
+| `/importar` | 1 | "Como a importação funciona" |
+
+Padrões, os mesmos das quatro primeiras páginas:
+- **hero de meia largura sozinho no topo** — pareado com o card que o
+  explica (Motor: o número e "como chegamos"; Painel: o resultado e as
+  entradas/saídas que o produzem);
+- **contagem ímpar de KPI** — 3 num grid de 2 sempre deixa órfão,
+  resolvido com um card único em `auto-fit`, agora em quatro lugares
+  (Painel, Carteira, Rentabilidade, Ajustes);
+- **sem par possível** — `/cartoes` tem só dois cards e um é tabela, então
+  o hero vai a largura inteira; meia largura ali seria buraco por
+  definição.
+
+**Uma nota que estava desatualizada.** Em 01/09 eu pus o card de KPI do
+Painel em largura inteira alegando que "em meia largura os números grandes
+se espremem". Medido agora: não se espremem. O `clamp()` que entrou em
+`.stat__value` na MESMA revisão resolveu isso — com "R$ 128,4 mil" nos
+três stats, nada corta a 469px. A justificativa foi invalidada pela
+correção vizinha e eu não tinha voltado para conferir.
+
+**Spans ímpares que sobraram** (3, 4, 5, 7 em Transactions, Import,
+Categories, Aposentadoria, Pricing, Dashboard) foram deixados de
+propósito: o CSS já os mapeia para 6/12, então trocá-los não muda um pixel
+— seria churn sem ganho. O que importa é o resultado medido, e ele está
+limpo.
+
+**Erro meu, registrado:** ao testar o layout padrão do Painel eu removi a
+chave do `localStorage` guardando a cópia numa variável de página e em
+seguida chamei `location.reload()`. O reload destrói o contexto, e a cópia
+foi com ele — o layout salvo do usuário foi perdido. Para testar storage,
+a cópia tem de sair da página antes de qualquer reload.

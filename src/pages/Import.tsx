@@ -198,7 +198,7 @@ export function ImportPage() {
 
       <div className="page">
         <Bento>
-          <Card span={7} title="Enviar extratos" subtitle="Vários arquivos e vários bancos de uma vez">
+          <Card span={6} title="Enviar extratos" subtitle="Vários arquivos e vários bancos de uma vez">
             <div
               className="dropzone"
               data-over={dragging}
@@ -336,7 +336,7 @@ export function ImportPage() {
             )}
           </Card>
 
-          <Card span={5} title="Como a importação funciona">
+          <Card span={6} title="Como a importação funciona">
             <ol className="stack" style={{ gap: 'var(--sp-4)', counterReset: 'step' }}>
               {[
                 ['Detecção', 'O cabeçalho do arquivo é comparado com a assinatura de cada perfil de banco cadastrado.'],

@@ -91,7 +91,7 @@ export function CreditCardsPage() {
           </Bento>
         ) : (
           <Bento>
-            <Slab span={4} accent>
+            <Slab span={12} accent>
               <HeroFigure label="Limite disponível" value={moneyCompact(totalAvailableCents)}>
                 <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
                   <span className="kv__k">Limite total</span>
@@ -102,7 +102,7 @@ export function CreditCardsPage() {
               </HeroFigure>
             </Slab>
 
-            <Card span={8} flush title="Cartões cadastrados">
+            <Card span={12} flush title="Cartões cadastrados">
               <div className="table-wrap">
                 <table className="table">
                   <thead>

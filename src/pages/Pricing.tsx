@@ -404,7 +404,7 @@ function SimulateTab() {
           </Card>
         </>
       ) : (
-        <Card span={5}>
+        <Card span={12}>
           <EmptyState
             icon="sparkle"
             title="Nenhuma simulação ainda"

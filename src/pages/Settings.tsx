@@ -87,19 +87,29 @@ export function SettingsPage() {
 
       <div className="page">
         <Bento>
-          <Slab span={4}>
-            <StatTile label="Contas ativas" value={accounts.data?.accounts.length ?? 0} large />
-          </Slab>
-          <Slab span={4}>
-            <StatTile label="Perfis de banco" value={profiles.data?.profiles.length ?? 0} large />
-          </Slab>
-          <Slab span={4}>
-            <StatTile
-              label="Convenções de sinal cobertas"
-              value={new Set((profiles.data?.profiles ?? []).map((p) => p.signConvention)).size}
-              large
-              foot="de 4 suportadas"
-            />
+          {/*
+            Os três num card só, em `auto-fit`: como cards separados eles
+            davam dois pareados e um órfão de meia largura no grid de duas
+            colunas (medido a 1440px em 02/09/2026). Mesmo padrão do card de
+            KPI do Painel, da aba Carteira e da Rentabilidade.
+          */}
+          <Slab span={12}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                gap: 'var(--sp-5)',
+              }}
+            >
+              <StatTile label="Contas ativas" value={accounts.data?.accounts.length ?? 0} large />
+              <StatTile label="Perfis de banco" value={profiles.data?.profiles.length ?? 0} large />
+              <StatTile
+                label="Convenções de sinal cobertas"
+                value={new Set((profiles.data?.profiles ?? []).map((p) => p.signConvention)).size}
+                large
+                foot="de 4 suportadas"
+              />
+            </div>
           </Slab>
 
           <Card span={12} flush title="Contas" subtitle="O saldo é sempre derivado dos lançamentos">

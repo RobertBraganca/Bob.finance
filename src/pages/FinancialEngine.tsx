@@ -185,7 +185,7 @@ export function FinancialEnginePage() {
           </Card>
         ) : (
           <Bento>
-            <Slab span={4} accent>
+            <Slab span={6} accent>
               <HeroFigure
                 label="Disponível para alocação"
                 value={moneyCompact(available.data.availableCents)}
@@ -198,7 +198,7 @@ export function FinancialEnginePage() {
               </HeroFigure>
             </Slab>
 
-            <Card span={8} title="Como chegamos a esse número" assumptions={available.data?.assumptions}>
+            <Card span={6} title="Como chegamos a esse número" assumptions={available.data?.assumptions}>
               <div className="kv">
                 <span className="kv__k">Saldo consolidado</span>
                 <span className="kv__v">{money(available.data.terms.consolidatedBalanceCents)}</span>
