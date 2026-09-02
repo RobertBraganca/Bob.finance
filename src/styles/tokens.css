@@ -83,8 +83,18 @@
   --slab-raised: var(--paper);
   --slab-line: var(--line);
   --slab-hairline: var(--hairline);
-  --slab-accent-bg: var(--surface-muted);
-  --slab-accent-line: var(--line);
+  /* O card de destaque volta a ser ESCURO no modo claro (revisão de
+     01/09/2026: "exatamente 1 card de destaque por tela"). Entre 25/08 e
+     01/09 ele era `--surface-muted`, praticamente indistinguível de um card
+     comum — medido lado a lado, não dava para dizer qual era o destaque.
+     Preto já está na paleta (é a pílula ativa da navegação), então não é
+     cor nova; e dois dos três estilos de referência do usuário pedem
+     exatamente isto ("1 card escuro de contraste por tela"). */
+  --slab-accent-bg: #080808;
+  --on-accent-1: #ffffff;
+  --on-accent-2: rgba(255, 255, 255, 0.72);
+  --on-accent-3: rgba(255, 255, 255, 0.5);
+  --slab-accent-line: #1f1f1f;
   /* Overlay tints for controls rendered ON a slab (buttons, segmented
      controls, filter-selects, badges, meter tracks) — dark-tinted here
      since the slab itself is light now; dark theme restores the
@@ -195,6 +205,10 @@
   --r-md: 6px;
   --r-lg: 8px;
   --r-xl: 12px;
+  /* Raio dos CARDS, separado de `--r-lg` (que também veste cabeçalho de
+     grupo e outros blocos internos): a revisão de design de 01/09/2026
+     pede 16-24px no card, sem mexer nos raios menores de dentro dele. */
+  --r-card: 16px;
   --r-pill: 9999px;
 
   --sp-1: 4px;
@@ -259,6 +273,11 @@
   --slab-line: #222222;
   --slab-hairline: rgba(255, 255, 255, 0.08);
   --slab-accent-bg: #262626;
+  /* No escuro o accent já contrasta com o fundo, e o texto sobre ele é o
+     mesmo de qualquer slab. */
+  --on-accent-1: #ffffff;
+  --on-accent-2: #a1a1aa;
+  --on-accent-3: #71717a;
   --slab-accent-line: #333333;
   --slab-overlay-weak: rgba(255, 255, 255, 0.08);
   --slab-overlay-strong: rgba(255, 255, 255, 0.14);

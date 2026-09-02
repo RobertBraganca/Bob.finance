@@ -804,3 +804,49 @@ MEDIÇÃO (bordas via `getBoundingClientRect`) e leitura do CSS COMPILADO, não
 screenshot. Um detalhe que custou tempo: o minificador reescreve
 `@media (min-width:768px)` como `@media (width>=768px)`, então procurar pela
 forma original no bundle dá falso negativo.
+
+
+## Revisão de design contra referências externas (01/09/2026)
+
+Usuário trouxe 7 dashboards de referência e um conjunto de regras objetivas
+(raio, espaçamento, hierarquia tipográfica, uso de cor), pedindo revisão sem
+mexer em cor de marca, fonte ou logo. Aplicados os cinco de maior impacto,
+todos em token/CSS:
+
+1. Raio de card 8px -> 16px. Token novo `--r-card`, em vez de mexer em
+   `--r-lg`, que também veste cabeçalho de grupo e outros blocos internos.
+2. Título de card 14px -> 20px. Estava do mesmo tamanho do corpo: a
+   hierarquia dentro do card era plana.
+3. Botões viraram pill (`--r-pill`), padding lateral 14 -> 16px. Efeito de
+   segunda ordem: botão só de ícone virava cápsula oval, então ganhou
+   `.btn--icon` (largura = altura). E precisou de `flex: none` — sem isso
+   ele encolhia como item flex e ficava com 17px medidos, menor que o alvo
+   de toque mínimo.
+4. Número de KPI 28 -> 36px (e o `--lg` 36 -> 48px), com `clamp` porque o
+   mesmo tile aparece em card de meia largura e no telefone.
+5. **Card de destaque voltou a ser escuro no modo claro.** Entre 25/08 e
+   01/09 `--slab-accent-bg` era `--surface-muted`, indistinguível de um card
+   comum — medido lado a lado, não dava pra dizer qual era o destaque. Preto
+   já está na paleta (pílula ativa da navegação), e dois dos três estilos de
+   referência do usuário pedem exatamente "1 card escuro de contraste por
+   tela". `.slab--accent` redefine `--on-slab-*`, `--ink-*`, os overlays de
+   controle e `--line` dentro do próprio card, então os filhos se adaptam
+   sem saber que estão num accent.
+
+Contraste conferido com composição de alpha: o texto mais fraco (branco a
+50% sobre #080808) dá 5.32:1, acima do mínimo AA. **Cuidado com medição de
+contraste que ignora alpha** — a primeira versão do meu script reportava
+20:1 para todos os textos, inclusive os translúcidos.
+
+**Correção de um achado errado da minha própria revisão**: eu havia
+reportado "Investimentos tem 5 cards de destaque na mesma tela". Era
+contagem de grep, não de render — os 5 estão em ramos mutuamente exclusivos
+(estado vazio x populado, abas diferentes). Todas as páginas já renderizam
+exatamente 1 accent. Vale a lição: contar ocorrências no código não é contar
+o que aparece na tela.
+
+Fica pendente da revisão (média/baixa prioridade): chip de fundo nos ícones,
+quebrar o card de 3 KPI do Painel em 3, gauge no Health Score e no limite de
+cartão, sparkline nos KPI de série, header de tabela alinhado com a coluna
+numérica, separação de linhas por espaçamento em vez de borda, `Assumptions`
+compactado em ⓘ, status de cotação como pill.

@@ -336,7 +336,9 @@ export function Button({
   return (
     <button
       type={type}
-      className={cx('btn', `btn--${variant}`, size && `btn--${size}`)}
+      /* Sem rótulo, o botão é só o ícone: com o raio de pill (01/09/2026)
+         ele viraria uma cápsula oval larga em vez de um alvo redondo. */
+      className={cx('btn', `btn--${variant}`, size && `btn--${size}`, children === undefined && 'btn--icon')}
       onClick={onClick}
       disabled={disabled}
       title={title}

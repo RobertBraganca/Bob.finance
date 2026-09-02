@@ -11,7 +11,7 @@
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-card);
   padding: var(--sp-5);
   display: flex;
   flex-direction: column;
@@ -31,7 +31,7 @@
 .slab {
   background: var(--slab);
   border: 1px solid var(--slab-line);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-card);
   padding: var(--sp-5);
   color: var(--on-slab-1);
   box-shadow: var(--shadow-slab);
@@ -41,13 +41,27 @@
   min-width: 0;
 }
 
-/* Exactly one card per view earns this — a step above the plain
-   surface (never a flat #262626 anymore in light mode, since .slab
-   is no longer dark there — see tokens.css). Dark theme still gets
-   the original flat SOFT black, unchanged. */
+/* Exatamente UM card por tela merece isto. Redefine os tokens de texto
+   sobre slab dentro do próprio card: os filhos (HeroFigure, StatTile,
+   Meter) já leem `--on-slab-*`, então o conteúdo inteiro se adapta ao
+   fundo escuro sem nenhum deles precisar saber que está num accent. */
 .slab--accent {
   background: var(--slab-accent-bg);
   border-color: var(--slab-accent-line);
+  --on-slab-1: var(--on-accent-1);
+  --on-slab-2: var(--on-accent-2);
+  --on-slab-3: var(--on-accent-3);
+  --ink-1: var(--on-accent-1);
+  --ink-2: var(--on-accent-2);
+  --ink-3: var(--on-accent-3);
+  /* Controles desenhados para superfície clara (botão `--slab`, segmented,
+     borda de badge) usariam overlays escuros e sumiriam sobre o fundo
+     escuro do accent. Aqui eles viram overlays claros. */
+  --slab-overlay-weak: rgba(255, 255, 255, 0.1);
+  --slab-overlay-strong: rgba(255, 255, 255, 0.18);
+  --line: rgba(255, 255, 255, 0.16);
+  --line-strong: rgba(255, 255, 255, 0.24);
+  color: var(--on-accent-1);
 }
 
 .card__head,
@@ -78,9 +92,12 @@
   flex-wrap: wrap;
 }
 
+/* 20px, não 14: o título estava do mesmo tamanho do corpo do card e a
+   hierarquia dentro da tela ficava plana (revisão de 01/09/2026, regra de
+   18-24px para título de seção). */
 .card__title,
 .slab__title {
-  font-size: var(--text-base);
+  font-size: var(--text-lg);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -105,17 +122,20 @@
   color: var(--ink-3);
 }
 
+/* 36px, não 28: regra de "número hero 32-48px" da revisão de 01/09/2026.
+   `clamp` porque o mesmo tile aparece num card de meia largura e no
+   telefone, onde um valor longo em 36px estouraria a linha. */
 .stat__value {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: var(--text-xl);
+  font-size: clamp(var(--text-xl), 4.5vw, var(--text-2xl));
   letter-spacing: -0.025em;
   line-height: 1.05;
   font-variant-numeric: proportional-nums;
 }
 
 .stat__value--lg {
-  font-size: var(--text-2xl);
+  font-size: clamp(var(--text-2xl), 6vw, var(--text-hero));
 }
 
 .stat__foot {
@@ -142,8 +162,10 @@
   align-items: center;
   justify-content: center;
   gap: var(--sp-2);
-  padding: 8px 14px;
-  border-radius: var(--r-sm);
+  padding: 8px 16px;
+  /* Pill (revisão de 01/09/2026). O padding lateral sobe junto: num raio
+     totalmente arredondado, 14px encosta o texto na curva. */
+  border-radius: var(--r-pill);
   border: 1px solid transparent;
   font-size: var(--text-sm);
   font-weight: 600;
@@ -196,6 +218,22 @@
   min-height: 30px;
   padding: 4px 10px;
   font-size: var(--text-xs);
+}
+
+/* Botão só de ícone: largura igual à altura, para o raio de pill dar um
+   círculo em vez de uma cápsula esticada. */
+.btn--icon {
+  padding: 0;
+  width: 36px;
+  /* Sem isto o botão encolhe como item flex e volta à largura do ícone
+     (medido: 17px em vez de 36) — um alvo de toque menor que o mínimo. */
+  flex: none;
+}
+.btn--icon.btn--sm {
+  width: 30px;
+}
+.btn--icon.btn--quiet {
+  padding: 0;
 }
 
 .btn--slab {
