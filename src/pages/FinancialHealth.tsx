@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { currentPeriod } from '../lib/period'
 import { useMeta } from '../lib/store'
 import { bps, bpsToInput, money, parsePercentInput, periodLong, points } from '../lib/format'
 import {
@@ -18,6 +19,7 @@ import {
   StatTile,
   useToast,
   type AssumptionBag,
+  PeriodNav,
 } from '../components/ui'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
@@ -132,12 +134,6 @@ type HealthSettings = {
   riskPositiveMarginBps: number
 }
 
-function shiftPeriod(period: string, months: number): string {
-  const [y, m] = period.split('-').map(Number) as [number, number]
-  const total = y * 12 + (m - 1) + months
-  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`
-}
-
 /** "4,2 meses" / "sem despesa para calcular" — never "infinito" and never 0. */
 const monthsLabel = (months: number | null) =>
   months === null
@@ -220,12 +216,7 @@ export function FinancialHealthPage() {
         subtitle={resolvedPeriod ? periodLong(resolvedPeriod) : undefined}
         actions={
           <div className="row">
-            <Button size="sm" onClick={() => setPeriod(shiftPeriod(resolvedPeriod ?? '2026-01', -1))}>
-              Anterior
-            </Button>
-            <Button size="sm" onClick={() => setPeriod(shiftPeriod(resolvedPeriod ?? '2026-01', 1))}>
-              Seguinte
-            </Button>
+            <PeriodNav period={resolvedPeriod ?? currentPeriod()} onChange={setPeriod} />
             <Button size="sm" icon="sparkle" onClick={() => setSimulating(true)}>
               Simular
             </Button>

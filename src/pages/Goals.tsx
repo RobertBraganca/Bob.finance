@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { shiftPeriod } from '../lib/period'
 import { telemetry } from '../lib/telemetry'
 import { useMeta } from '../lib/store'
 import {
@@ -29,6 +30,7 @@ import {
   StatusBadge,
   useToast,
   type MeterState,
+  PeriodNav,
 } from '../components/ui'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
@@ -94,12 +96,6 @@ type History = {
   hitRateBps: number | null
 }
 
-function shiftPeriod(period: string, months: number): string {
-  const [y, m] = period.split('-').map(Number) as [number, number]
-  const total = y * 12 + (m - 1) + months
-  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`
-}
-
 export function GoalsPage() {
   const meta = useMeta()
   const today = meta.data?.today ?? '2026-08-19'
@@ -140,12 +136,7 @@ export function GoalsPage() {
         subtitle={periodLong(period)}
         actions={
           <div className="row">
-            <Button size="sm" onClick={() => setPeriod((p) => shiftPeriod(p, -1))}>
-              Anterior
-            </Button>
-            <Button size="sm" onClick={() => setPeriod((p) => shiftPeriod(p, 1))}>
-              Seguinte
-            </Button>
+            <PeriodNav period={period} onChange={setPeriod} />
             <Button variant="primary" icon="target" onClick={() => setEditing(true)}>
               Definir metas
             </Button>

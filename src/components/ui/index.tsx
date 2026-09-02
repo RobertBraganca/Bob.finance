@@ -18,6 +18,8 @@ import { Skeleton } from './skeleton'
 import { subscribeToast } from '../../lib/toastBus'
 
 export { Icon, CategorySelect, FilterSelect, Assumptions }
+export { PeriodNav } from './PeriodNav'
+export { MonthGrid } from './MonthGrid'
 export { Bento } from './Bento'
 export type { IconName }
 export type { AssumptionBag } from './Assumptions'

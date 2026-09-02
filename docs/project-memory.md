@@ -979,3 +979,46 @@ sem `align-items: start`: sem ele, o card estica para preencher o span, a
 medição seguinte lê a altura esticada e o span cresce um gap por passo. Na
 demo o grid cresceu 16.320px em 2 segundos. O app nunca teve isso, porque
 o `start` estava lá — mas quem for reintroduzir masonry precisa saber.
+
+## 01/09/2026 — Passo 2: PeriodNav único
+
+Quatro páginas (Diário, Motor financeiro, Saúde financeira, Metas do mês)
+tinham `shiftPeriod` copiada **byte a byte idêntica** (md5 igual nas
+quatro) e três gramáticas visuais diferentes para a mesma ação. Agora:
+`lib/period.ts` tem a função, `ui/PeriodNav.tsx` tem o controle,
+`ui/MonthGrid.tsx` tem a grade que o `PeriodPickerPopover` também passou a
+usar.
+
+**O bug que o item de design escondia**: só o Diário travava a navegação no
+mês corrente. As outras três paginavam indefinidamente para meses vazios no
+futuro. O `PeriodNav` desabilita "próximo" em `period >= max`, e a grade
+desabilita mês futuro em vez de escondê-lo (esconder muda a forma da grade
+mês a mês).
+
+**Duas correções ao escopo que eu mesmo tinha escrito na auditoria:**
+- O "Anterior/Seguinte" de Lançamentos é **paginação de tabela**, não
+  período. Nunca foi um quarto seletor.
+- Endividamento não tem navegação de mês; usa um `<select>` de meses. Cai
+  no item de dropdown, não neste.
+Então são 4 telas, não 5 nem 8. Visão geral, Lançamentos e DRE seguem no
+`PeriodPickerPopover` porque escolhem um **intervalo de datas**, não um mês
+— forma de dado diferente, componente diferente, mas agora com a mesma
+grade e a mesma seta.
+
+**A seta esquerda não existia.** O `Icon.tsx` tinha `arrowRight`,
+`chevronRight`, `chevronDown` e nenhuma seta para a esquerda — daí o
+`PeriodPickerPopover` desenhar "ano anterior" com um `chevronRight` virado
+por `transform: scaleX(-1)`. Entrou `arrowLeft` (`IconArrowBigLeftFilled`,
+espelho exato do `arrowRight`) e o hack saiu.
+
+**Erro meu na especificação**: a auditoria dizia altura 32px "para alinhar
+com `.btn--sm`". Medido, `.btn--sm` tem **30px**. O componente é 30, e o
+documento foi corrigido.
+
+Verificado por medição: 30px igual ao `.btn--sm`, setas 30×30 (acima do
+alvo de toque de 24), bordas internas sobrepostas em 1px em vez de dobradas,
+raio só nas pontas, desabilitado em `opacity .45` + `not-allowed` igual ao
+`.btn:disabled`. E 17 asserções em node sobre a aritmética: virada de ano
+nos dois sentidos, mês sempre com dois dígitos (sem isso a comparação
+lexicográfica da guarda quebraria em outubro), e o caso de período futuro
+já no estado.

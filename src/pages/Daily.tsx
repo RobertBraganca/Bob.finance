@@ -25,6 +25,7 @@ import {
   StatusBadge,
   useToast,
   type MeterState,
+  PeriodNav,
 } from '../components/ui'
 import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
@@ -46,12 +47,6 @@ type DailyResponse = {
     dailyAllowanceCents: number | null
   }
   receivableCents: number
-}
-
-function shiftPeriod(period: string, months: number): string {
-  const [y, m] = period.split('-').map(Number) as [number, number]
-  const total = y * 12 + (m - 1) + months
-  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`
 }
 
 export function DailyPage() {
@@ -90,18 +85,7 @@ export function DailyPage() {
         title="Diário"
         subtitle={periodLong(period)}
         actions={
-          <div className="row">
-            <Button size="sm" icon="chevronDown" onClick={() => setPeriod((p) => shiftPeriod(p, -1))}>
-              Mês anterior
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => setPeriod((p) => shiftPeriod(p, 1))}
-              disabled={period >= today.slice(0, 7)}
-            >
-              Mês seguinte
-            </Button>
-          </div>
+          <PeriodNav period={period} onChange={setPeriod} max={today.slice(0, 7)} />
         }
       />
 

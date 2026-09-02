@@ -667,6 +667,85 @@
   cursor: default;
 }
 
+/* ---- Period nav ------------------------------------------------------
+   O seletor de mês único (ui/PeriodNav.tsx). Três peças coladas num
+   controle só: seta, rótulo clicável, seta. As medidas batem com
+   `.btn--sm` (32px de altura) para ele alinhar com os outros botões da
+   barra de página sem ajuste caso a caso. Trinta, não trinta e dois: a
+   especificação da auditoria dizia 32px e estava errada — medido, o
+   .btn--sm tem 30. */
+.period-nav {
+  display: inline-flex;
+  align-items: stretch;
+  height: 30px;
+}
+
+.period-nav__step,
+.period-nav__label {
+  appearance: none;
+  font: inherit;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-1);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Um controle, não três: as bordas internas se sobrepõem em vez de
+   dobrarem de espessura, e só as pontas são arredondadas. */
+.period-nav__step:first-child {
+  border-radius: var(--r-md) 0 0 var(--r-md);
+  width: 30px;
+  flex: none;
+}
+
+.period-nav__step:last-child {
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  width: 30px;
+  flex: none;
+  margin-left: -1px;
+}
+
+.period-nav__label {
+  padding: 0 var(--sp-3);
+  margin-left: -1px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.period-nav__step:hover:not(:disabled),
+.period-nav__label:hover {
+  background: var(--surface-hover);
+}
+
+/* Botão sobreposto precisa subir no empilhamento para a borda de foco não
+   ficar cortada pelo vizinho. */
+.period-nav__step:focus-visible,
+.period-nav__label:focus-visible {
+  position: relative;
+  z-index: 1;
+}
+
+/* Estado desabilitado padronizado — antes cada página inventava o seu, ou
+   não tinha nenhum. Mesmos valores de `.btn:disabled`. */
+.period-nav__step:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.period-picker__month:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.period-picker__month:disabled:hover {
+  background: var(--surface);
+}
+
 /* ---- Period picker ---------------------------------------------------
    The month/year grid that replaced the old preset pill row + separate
    custom-range popover — one control for every way to slice the period. */

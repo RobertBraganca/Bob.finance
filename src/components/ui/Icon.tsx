@@ -14,6 +14,7 @@ import {
   IconCircleArrowUpRightFilled,
   IconCircleArrowDownLeftFilled,
   IconArrowBigRightFilled,
+  IconArrowBigLeftFilled,
   IconPlusFilled,
   IconCheckFilled,
   IconXFilled,
@@ -82,6 +83,10 @@ const ICONS: Record<string, TablerIcon> = {
   arrowUpRight: IconCircleArrowUpRightFilled,
   arrowDownLeft: IconCircleArrowDownLeftFilled,
   arrowRight: IconArrowBigRightFilled,
+  // Espelho exato do arrowRight. Faltava, e a ausência aparecia: o seletor
+  // de período desenhava a seta esquerda com um chevronRight virado por
+  // `transform: scaleX(-1)` (revisão de 01/09/2026).
+  arrowLeft: IconArrowBigLeftFilled,
   plus: IconPlusFilled,
   check: IconCheckFilled,
   x: IconXFilled,

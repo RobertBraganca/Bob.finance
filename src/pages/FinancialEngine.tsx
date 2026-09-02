@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { currentPeriod } from '../lib/period'
 import { useMeta } from '../lib/store'
 import {
   bpsToInput,
@@ -24,6 +25,7 @@ import {
   StatTile,
   useToast,
   type AssumptionBag,
+  PeriodNav,
 } from '../components/ui'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
@@ -96,12 +98,6 @@ type EngineSettings = {
   marginCents: number
 }
 
-function shiftPeriod(period: string, months: number): string {
-  const [y, m] = period.split('-').map(Number) as [number, number]
-  const total = y * 12 + (m - 1) + months
-  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`
-}
-
 /**
  * Why a line is zero, when it is zero for a reason the user can act on.
  * States the situation and stops there: what to do about it is not a
@@ -150,12 +146,7 @@ export function FinancialEnginePage() {
         subtitle={resolvedPeriod ? periodLong(resolvedPeriod) : undefined}
         actions={
           <div className="row">
-            <Button size="sm" onClick={() => setPeriod(shiftPeriod(resolvedPeriod ?? '2026-01', -1))}>
-              Anterior
-            </Button>
-            <Button size="sm" onClick={() => setPeriod(shiftPeriod(resolvedPeriod ?? '2026-01', 1))}>
-              Seguinte
-            </Button>
+            <PeriodNav period={resolvedPeriod ?? currentPeriod()} onChange={setPeriod} />
             <Button variant="primary" icon="settings" onClick={() => setTuning(true)}>
               Parâmetros
             </Button>

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { Segmented } from './index'
 import { DateRangeFields, usePopoverDismiss } from './DateRangePopover'
-import { MONTHS_SHORT, date as fmtDate, periodLong as fmtPeriodLong } from '../../lib/format'
+import { MonthGrid } from './MonthGrid'
+import { date as fmtDate, periodLong as fmtPeriodLong } from '../../lib/format'
 import type { RangePreset } from '../../lib/store'
 
 const QUICK_PRESETS: Array<{ value: RangePreset; label: string }> = [
@@ -121,43 +122,13 @@ export function PeriodPickerPopover({
             />
           ) : (
             <>
-              <div className="period-picker__year-nav">
-                <button
-                  type="button"
-                  className="btn btn--quiet btn--sm"
-                  onClick={() => setViewYear((y) => y - 1)}
-                  aria-label="Ano anterior"
-                >
-                  <span style={{ display: 'inline-flex', transform: 'scaleX(-1)' }}>
-                    <Icon name="chevronRight" size={14} />
-                  </span>
-                </button>
-                <strong>{viewYear}</strong>
-                <button
-                  type="button"
-                  className="btn btn--quiet btn--sm"
-                  onClick={() => setViewYear((y) => y + 1)}
-                  aria-label="Próximo ano"
-                >
-                  <Icon name="chevronRight" size={14} />
-                </button>
-              </div>
-              <div className="period-picker__grid">
-                {MONTHS_SHORT.map((label, i) => {
-                  const period = `${viewYear}-${String(i + 1).padStart(2, '0')}`
-                  const isSelected = period === selectedMonth
-                  return (
-                    <button
-                      key={label}
-                      type="button"
-                      className={`period-picker__month${isSelected ? ' period-picker__month--active' : ''}`}
-                      onClick={() => selectMonth(i)}
-                    >
-                      {label}
-                    </button>
-                  )
-                })}
-              </div>
+              <MonthGrid
+                viewYear={viewYear}
+                onViewYearChange={setViewYear}
+                selected={selectedMonth}
+                onSelect={(period) => selectMonth(Number(period.slice(5, 7)) - 1)}
+                max={anchor.slice(0, 7)}
+              />
               <div className="row row--between">
                 <button type="button" className="btn btn--quiet btn--sm" onClick={() => setOpen(false)}>
                   Cancelar
