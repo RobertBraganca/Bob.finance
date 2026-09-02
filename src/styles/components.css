@@ -102,6 +102,25 @@
   letter-spacing: -0.01em;
 }
 
+/* O ⓘ da memória de cálculo anda junto do título, não no fim do card. */
+.card__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* O título cede espaço; o ⓘ nunca encolhe, senão vira meia bolinha
+   cortada num card estreito. */
+.card__title-row > .card__title,
+.card__title-row > .slab__title {
+  min-width: 0;
+}
+
+.card__title-row > .assumptions {
+  flex: none;
+}
+
 .card__sub {
   font-size: var(--text-xs);
   color: var(--ink-3);
@@ -1313,6 +1332,65 @@
   margin-top: 0;
   border-top: 0;
   padding-top: 0;
+  position: relative;
+}
+
+/* Aberto no cabeçalho, o painel não pode empurrar o título nem esticar o
+   card: sai do fluxo, ancorado no próprio ⓘ. max-width com vw porque
+   no celular o card inteiro é mais estreito que o painel. */
+.assumptions--compact[open] > .assumptions__body {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: min(340px, calc(100vw - var(--sp-8)));
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+}
+
+/* Dobra a classe de propósito: a regra base ".assumptions[open] > summary"
+   tem a MESMA especificidade e vem depois neste arquivo, então sem isto ela
+   devolvia o margin-bottom de 8px e o ⓘ pulava 4px ao ser clicado. */
+.assumptions.assumptions--compact[open] > summary {
+  margin-bottom: -6px;
+}
+
+/* Num contêiner que corta o que transborda o popover sumiria: .table-wrap
+   tem overflow-x auto (e overflow-y vira auto junto, pela spec) e o card
+   flush tem overflow hidden. Nesses dois o painel volta a abrir no fluxo,
+   empurrando a linha — feio é melhor do que invisível. */
+.table-wrap .assumptions--compact[open] > .assumptions__body,
+.card--flush .assumptions--compact[open] > .assumptions__body {
+  position: static;
+  width: auto;
+  max-width: none;
+  box-shadow: none;
+  margin-top: var(--sp-2);
+}
+
+/* Dentro de um slab escuro o texto do painel já é claro (--ink-1 virou
+   branco). O fundo tem de ser OPACO e escuro: o painel é absoluto e
+   transborda o slab, então um overlay translúcido compõe com a página
+   clara atrás e devolve branco sobre branco (medido em 01/09/2026). */
+.slab--accent .assumptions__body {
+  background: var(--slab-accent-bg);
+  border-color: var(--slab-accent-line);
+}
+
+/* Alvo de toque: o ⓘ desenha 11px de ícone, longe dos 24px mínimos de um
+   alvo tocável. A caixa cresce até 24 e o excesso volta em margem negativa,
+   para o ícone continuar visualmente colado no título. */
+.assumptions--compact > summary {
+  min-width: 24px;
+  min-height: 24px;
+  justify-content: center;
+  margin: -6px -2px;
+  border-radius: var(--r-sm);
+}
+
+.assumptions--compact > summary:hover {
+  background: var(--surface-muted);
 }
 
 .assumptions > summary {

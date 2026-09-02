@@ -207,7 +207,7 @@ export function FinancialEnginePage() {
               </HeroFigure>
             </Slab>
 
-            <Card span={8} title="Como chegamos a esse número">
+            <Card span={8} title="Como chegamos a esse número" assumptions={available.data?.assumptions}>
               <div className="kv">
                 <span className="kv__k">Saldo consolidado</span>
                 <span className="kv__v">{money(available.data.terms.consolidatedBalanceCents)}</span>
@@ -231,7 +231,6 @@ export function FinancialEnginePage() {
                   <strong>{money(available.data.availableCents)}</strong>
                 </span>
               </div>
-              <Assumptions data={available.data.assumptions} />
             </Card>
 
             <Card span={6} title="Recordes" subtitle="Últimos 24 meses observados">
@@ -276,9 +275,9 @@ export function FinancialEnginePage() {
                       <tr key={destination.key}>
                         <td>
                           {destination.label}
-                          {/* The formula sits with its own row, not in a pile
-                              of disclosures under the table. */}
-                          <Assumptions data={destination.assumptions} />
+                          {/* A fórmula anda com a própria linha, como ⓘ, não
+                              numa pilha de divulgações embaixo da tabela. */}
+                          <Assumptions data={destination.assumptions} compact />
                         </td>
                         <td className="table__num">
                           {destination.targetCents === null ? (
@@ -308,6 +307,7 @@ export function FinancialEnginePage() {
             <Card
               span={12}
               title="Ponto de equilíbrio de faturamento"
+              assumptions={breakEven.data?.assumptions}
               subtitle="O faturamento que cobriria tudo que já está configurado neste mês"
             >
               {breakEven.isError ? (
@@ -421,7 +421,6 @@ export function FinancialEnginePage() {
                     acima seriam os necessários para cobrir o mês.
                   </p>
 
-                  <Assumptions data={breakEven.data.assumptions} label="Como calculamos o ponto de equilíbrio" />
                 </div>
               )}
             </Card>

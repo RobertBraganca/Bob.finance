@@ -229,6 +229,20 @@ export type IlliquidItem = {
   lastPricedOn: string | null
 }
 
+/**
+ * A carteira: tudo que se pode negociar, sem os bens imobilizados.
+ *
+ * Um bem imobilizado e patrimonio, nao carteira (ver ILLIQUID_ASSET_CLASS).
+ * Somar os dois num numero so faz a meta de investimento parecer 3x mais
+ * perto do que esta e dilui a rentabilidade da carteira pelo valor de um
+ * bem parado. Toda funcao que responde "como vai a carteira" parte daqui;
+ * so netWorth, netWorthHistory e illiquidOverview usam positions() cru,
+ * porque a pergunta deles e mesmo "o que voce tem" (01/09/2026).
+ */
+export async function tradablePositions(asOfDate?: string): Promise<Position[]> {
+  return (await positions(asOfDate)).filter((p) => p.assetClass !== ILLIQUID_ASSET_CLASS)
+}
+
 export type IlliquidOverview = {
   totalCents: number
   items: IlliquidItem[]
@@ -259,7 +273,7 @@ export async function illiquidOverview(): Promise<IlliquidOverview> {
         'último valor informado manualmente por bem (asset_valuations); nenhum bem desta classe tem cotação de mercado automática',
       semCotacao: rows.filter((p) => p.lastPricedOn === null).length,
       notaDeEscopo:
-        'esta classe entra no patrimônio líquido mas fica fora da política de alocação da carteira, porque não se rebalanceia um bem físico',
+        'esta classe entra no patrimônio líquido mas fica fora da carteira: nem alocação, nem rentabilidade, nem progresso de meta de investimento a contam, porque não se rebalanceia nem se resgata um bem físico',
     },
   }
 }
@@ -400,7 +414,9 @@ export async function reserveStatus(): Promise<ReserveStatus> {
   }
 
   const targetCents = monthlyLivingCostCents * multiple
-  const currentCents = (await positions())
+  // Imobilizado nunca compõe reserva de emergência, mesmo se marcado: uma
+  // reserva que exige vender um bem para virar dinheiro não é reserva.
+  const currentCents = (await tradablePositions())
     .filter((p) => p.countsTowardReserve)
     .reduce((s, p) => s + p.marketValueCents, 0)
   const gapCents = Math.max(0, targetCents - currentCents)
@@ -422,7 +438,7 @@ export async function reserveStatus(): Promise<ReserveStatus> {
 }
 
 export async function portfolioSummary() {
-  const rows = await positions()
+  const rows = await tradablePositions()
   const marketValueCents = rows.reduce((s, p) => s + p.marketValueCents, 0)
   const contributedCents = rows.reduce((s, p) => s + p.contributedCents, 0)
   const dividendsCents = rows.reduce((s, p) => s + p.dividendsCents, 0)
@@ -455,7 +471,7 @@ export type AllocationSlice = {
 }
 
 export async function allocation(goalId?: number | null): Promise<AllocationSlice[]> {
-  const rows = (await positions()).filter((p) => p.assetClass !== ILLIQUID_ASSET_CLASS)
+  const rows = await tradablePositions()
   const total = rows.reduce((s, p) => s + p.marketValueCents, 0)
 
   const byClass = new Map<string, number>()
@@ -547,6 +563,8 @@ export async function allocationDeviation(goalId?: number | null): Promise<{
       classesComMeta: classes.length,
       goalId: goalId ?? null,
       origem: 'posições derivadas de asset_trades e asset_valuations, metas de target_allocations',
+      imobilizadoExcluido:
+        'bens da classe Imobilizado ficam fora de 100% da carteira usada aqui; eles aparecem em Patrimônio',
       ordem: 'alfabética por classe, deliberadamente neutra: a ordem não é calculada a partir do tamanho do desvio',
     },
   }
@@ -604,7 +622,7 @@ export async function assetAllocationWithinClass(
    */
   preloaded?: { allRows: Position[]; classTargetBps: number | null },
 ): Promise<ClassAllocationDetail> {
-  const allRows = preloaded?.allRows ?? (await positions())
+  const allRows = preloaded?.allRows ?? (await tradablePositions())
   const totalPortfolioCents = allRows.reduce((s, p) => s + p.marketValueCents, 0)
   const classRows = allRows.filter((p) => p.assetClass === assetClass)
   const classValueCents = classRows.reduce((s, p) => s + p.marketValueCents, 0)
@@ -819,7 +837,7 @@ export async function suggestContribution(amountCents: number, goalId?: number |
   // descartada, mais uma por classe dentro do Promise.all), cada uma
   // refazendo o mesmo JOIN+GROUP BY sobre todos os trades e a mesma busca
   // de notas por ativo (achado de 29/08/2026).
-  const allRows = await positions()
+  const allRows = await tradablePositions()
   const totalBeforeCents = allRows.reduce((s, p) => s + p.marketValueCents, 0)
   const totalAfterCents = totalBeforeCents + amountCents
 
@@ -1090,7 +1108,9 @@ export type PerformancePoint = {
 
 /** `and a.asset_class = X`, or nothing — composed straight into the SQL below. */
 const classFilter = (assetClass?: string | null) =>
-  assetClass ? sql`and a.asset_class = ${assetClass}` : sql``
+  assetClass
+    ? sql`and a.asset_class = ${assetClass}`
+    : sql`and a.asset_class <> ${ILLIQUID_ASSET_CLASS}`
 
 export async function performanceSeries(months = 24, assetClass?: string | null): Promise<PerformancePoint[]> {
   const rows = await db.execute<{ first: string | null }>(sql`

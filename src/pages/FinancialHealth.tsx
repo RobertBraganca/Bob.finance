@@ -275,6 +275,7 @@ export function FinancialHealthPage() {
             <Card
               span={8}
               title="Composição do score"
+              assumptions={data.assumptions}
               subtitle="Cada indicador vale de 0 a 100. Um indicador sem dado sai da média, e seu peso é redistribuído entre os demais"
             >
               <div className="stack stack--loose">
@@ -282,7 +283,6 @@ export function FinancialHealthPage() {
                   <IndicatorRow key={indicator.key} indicator={indicator} />
                 ))}
               </div>
-              <Assumptions data={data.assumptions} label="Como compomos o score" />
             </Card>
 
             <Card
@@ -338,6 +338,7 @@ export function FinancialHealthPage() {
             <Card
               span={12}
               title="Patrimônio consolidado"
+              assumptions={netWorth.data?.assumptions}
               subtitle="Quanto existe hoje contra quanto se deve, somando conta, carteira e dívida"
             >
               {netWorth.isError ? (
@@ -361,7 +362,15 @@ export function FinancialHealthPage() {
                       <StatTile label="Dívida total" value={money(netWorth.data.debtCents)} />
                     </div>
                     <div className="col-3">
-                      <StatTile label="Liquidez" value={money(netWorth.data.liquidityCents)} large />
+                      {/* Este número soma TODOS os investimentos, imobilizado incluído, menos a
+                          dívida total: é patrimônio líquido, não liquidez. O rótulo antigo
+                          dizia "Liquidez" sobre um valor que inclui um bem que não paga
+                          conta nenhuma (01/09/2026). */}
+                      <StatTile
+                        label="Patrimônio líquido"
+                        value={money(netWorth.data.liquidityCents)}
+                        large
+                      />
                     </div>
                   </div>
                   <p className="chart__note">
@@ -369,7 +378,6 @@ export function FinancialHealthPage() {
                     lado, que usa só a dívida dos próximos 30 dias e só os investimentos líquidos.
                     As duas perguntas são diferentes, então os dois números também são.
                   </p>
-                  <Assumptions data={netWorth.data.assumptions} />
                 </>
               )}
             </Card>
@@ -385,6 +393,7 @@ export function FinancialHealthPage() {
             <Card
               span={5}
               title="Runway"
+              assumptions={runway.data?.consolidated.assumptions}
               subtitle="Quantos meses os recursos atuais cobrem o custo mensal médio"
             >
               {runway.isError ? (
@@ -408,7 +417,6 @@ export function FinancialHealthPage() {
                       </span>
                     }
                   />
-                  <Assumptions data={runway.data.consolidated.assumptions} />
                   <hr className="divider" />
                   <div className="kv">
                     {runway.data.scopes
@@ -428,6 +436,7 @@ export function FinancialHealthPage() {
             <Card
               span={7}
               title="Radar de risco"
+              assumptions={radar.data?.assumptions}
               subtitle="Cada indicador comparado com o limite que você configurou"
             >
               {radar.isError ? (
@@ -449,7 +458,6 @@ export function FinancialHealthPage() {
                   {radar.data.rules.map((rule) => (
                     <RiskRow key={rule.key} rule={rule} />
                   ))}
-                  <Assumptions data={radar.data.assumptions} label="Como avaliamos o radar" />
                 </div>
               )}
             </Card>

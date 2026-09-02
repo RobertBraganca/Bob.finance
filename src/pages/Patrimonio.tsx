@@ -111,6 +111,7 @@ export function PatrimonioPage() {
           <Card
             span={7}
             title="Imobilizado"
+            assumptions={illiquid.data?.assumptions}
             subtitle="Bens que entram no patrimônio mas não se rebalanceiam: imóvel, veículo, joia"
           >
             {illiquid.isError ? (
@@ -169,12 +170,16 @@ export function PatrimonioPage() {
                     </div>
                   ))}
                 </div>
-                <Assumptions data={illiquid.data.assumptions} />
               </>
             )}
           </Card>
 
-          <Card span={5} title="Composição" subtitle="De onde vem cada parte do patrimônio">
+          <Card
+            span={5}
+            title="Composição"
+            subtitle="De onde vem cada parte do patrimônio"
+            assumptions={nw?.assumptions}
+          >
             {!nw ? (
               <SkeletonLines lines={4} />
             ) : (
@@ -190,7 +195,6 @@ export function PatrimonioPage() {
                   líquido ao lado. Um bem imobilizado conta como patrimônio, mas não paga uma conta,
                   então as duas metades aparecem separadas em vez de num número só.
                 </p>
-                <Assumptions data={nw.assumptions} />
               </>
             )}
           </Card>

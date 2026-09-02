@@ -893,3 +893,46 @@ gauge deriva as cores de `useEffectiveSurface`, que em modo claro devolve
 'paper' mesmo dentro do accent — o arco sairia com a trilha de superfície
 clara sobre fundo escuro. Exigiria um prop de superfície explícito no
 gauge, e não dá para verificar isso fora do app real.
+
+## 01/09/2026 — Imobilizado fora das metas, e o ⓘ no título
+
+**Bug de dados, achado pelo usuário.** Imobilizado contava como carteira.
+Medido no banco real antes de mexer: carteira negociável R$ 1.765,82 contra
+R$ 3.500,00 de imobilizado (Setup + celular) — o bem era **66% da base das
+metas**. A meta "2 noites nas montanhas" aparecia batida (R$ 5.265 / R$ 2.500
+= 210%); depois do corte, 70,6%. A rentabilidade sofria o inverso: +46,3%
+reais diluídos para +11,6% pelo aporte de um bem que nunca se revaloriza.
+
+A raiz era `positions()` significar "tudo que você tem" enquanto quase todo
+consumidor queria "a carteira". Em vez de filtrar em cinco lugares, criou-se
+`tradablePositions()`; `positions()` cru sobrou só para `netWorth`,
+`netWorthHistory` e `illiquidOverview`, onde a pergunta é mesmo patrimônio.
+`classFilter` também mudou: o caso "sem classe" passou a significar a
+carteira, o que conserta de uma vez `performanceSeries`, `snapshotAsOf`,
+`portfolioMonthlyReturns`, `profitabilityTable` e `rangeSummary`. A reserva
+de emergência entrou junto: uma reserva que exige vender um bem não é
+reserva.
+
+**Rótulo errado achado no caminho**: o StatTile "Liquidez" da Saúde
+financeira mostra `saldo + TODOS os investimentos − dívida`, que é
+patrimônio líquido. Chamar de liquidez um número que inclui um Setup e um
+celular é o oposto do que a palavra diz. Só o rótulo mudou; a fórmula é a
+mesma.
+
+**O ⓘ.** "Como calculamos" saiu do fim do corpo do card e virou um ⓘ de
+24×24 colado no título, via prop `assumptions` em `Card`/`Slab`. Doze
+chamadas migraram. Três detalhes que só apareceram medindo:
+- o painel aberto é absoluto, então o card não cresce nem o título é
+  empurrado (129px fechado, 129px aberto);
+- `.assumptions[open] > summary` tem a MESMA especificidade da regra
+  compacta e vem depois no arquivo: sem dobrar a classe, o ⓘ pulava 4px ao
+  ser clicado;
+- dentro de `.table-wrap` (overflow-x auto faz overflow-y virar auto) e de
+  `.card--flush` (overflow hidden) o popover seria cortado — ali ele volta
+  ao fluxo;
+- num slab escuro o painel precisa de fundo OPACO: ele transborda o slab, e
+  um overlay translúcido compunha com a página clara atrás, devolvendo
+  branco sobre branco. Agora `--slab-accent-bg`, 20:1.
+
+Os dois `Assumptions` do `SimulatorModal` seguem com rótulo completo: não há
+título de seção ali para o ⓘ acompanhar.

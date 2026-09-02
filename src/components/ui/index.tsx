@@ -12,7 +12,7 @@ import { Icon, type IconName } from './Icon'
 import { money, signedBps } from '../../lib/format'
 import { CategorySelect } from './CategorySelect'
 import { FilterSelect } from './FilterSelect'
-import { Assumptions } from './Assumptions'
+import { Assumptions, type AssumptionBag } from './Assumptions'
 import { DropdownSelect } from './Dropdown'
 import { Skeleton } from './skeleton'
 import { subscribeToast } from '../../lib/toastBus'
@@ -31,6 +31,7 @@ export function Card({
   title,
   subtitle,
   actions,
+  assumptions,
   children,
   span,
   flush,
@@ -40,6 +41,16 @@ export function Card({
   title?: ReactNode
   subtitle?: ReactNode
   actions?: ReactNode
+  /**
+   * A memória de cálculo do card, como um ⓘ colado no título.
+   *
+   * Ela vivia solta no fim do corpo, com filete e o rótulo "Como
+   * calculamos" — em telas com seis cards derivados isso viravam seis
+   * réguas e seis rótulos idênticos disputando espaço com os números.
+   * Presa ao título, a divulgação de `decisions/0010` continua a um
+   * clique e some do fluxo de leitura (01/09/2026).
+   */
+  assumptions?: AssumptionBag | null
   children?: ReactNode
   span?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
   flush?: boolean
@@ -56,10 +67,13 @@ export function Card({
         className,
       )}
     >
-      {(title || actions) && (
+      {(title || actions || assumptions) && (
         <header className={cx('card__head', flush && 'card__head--padded')} style={flush ? { padding: 'var(--sp-5) var(--sp-5) 0' } : undefined}>
           <div>
-            {title && <h2 className="card__title">{title}</h2>}
+            <div className="card__title-row">
+              {title && <h2 className="card__title">{title}</h2>}
+              {assumptions && <Assumptions data={assumptions} compact />}
+            </div>
             {subtitle && <p className="card__sub">{subtitle}</p>}
           </div>
           {actions && <div className="row">{actions}</div>}
@@ -75,6 +89,7 @@ export function Slab({
   title,
   subtitle,
   actions,
+  assumptions,
   children,
   span,
   accent,
@@ -83,6 +98,8 @@ export function Slab({
   title?: ReactNode
   subtitle?: ReactNode
   actions?: ReactNode
+  /** Mesmo ⓘ do `Card`, na mesma posição. */
+  assumptions?: AssumptionBag | null
   children?: ReactNode
   span?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
   accent?: boolean
@@ -92,10 +109,13 @@ export function Slab({
     <section
       className={cx('slab', 'on-slab', accent && 'slab--accent', span && `col-${span}`, className)}
     >
-      {(title || actions) && (
+      {(title || actions || assumptions) && (
         <header className="slab__head">
           <div>
-            {title && <h2 className="slab__title">{title}</h2>}
+            <div className="card__title-row">
+              {title && <h2 className="slab__title">{title}</h2>}
+              {assumptions && <Assumptions data={assumptions} compact />}
+            </div>
             {subtitle && <p className="card__sub">{subtitle}</p>}
           </div>
           {actions && <div className="row">{actions}</div>}

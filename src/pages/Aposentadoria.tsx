@@ -285,7 +285,12 @@ export function AposentadoriaPage() {
                 )}
               </Card>
 
-              <Card span={5} title="Ao fim do horizonte" subtitle="O que restaria depois de todas as retiradas simuladas">
+              <Card
+                span={5}
+                title="Ao fim do horizonte"
+                subtitle="O que restaria depois de todas as retiradas simuladas"
+                assumptions={result.assumptions}
+              >
                 <StatTile
                   label={`Patrimônio em ${legacyPoint ? fmtPeriod(legacyPoint.period) : '-'}`}
                   large
@@ -296,7 +301,6 @@ export function AposentadoriaPage() {
                       : 'o patrimônio chegou a zero antes do fim do horizonte'
                   }
                 />
-                <Assumptions data={result.assumptions} />
               </Card>
             </>
           )}

@@ -772,6 +772,7 @@ function AllocationDeviationCard() {
     <Card
       span={12}
       title="Desvio de alocação"
+      assumptions={deviation.data?.assumptions}
       subtitle="Sua carteira hoje comparada com a política de alocação que você configurou"
     >
       {deviation.isError ? (
@@ -810,7 +811,6 @@ function AllocationDeviationCard() {
               </tbody>
             </table>
           </div>
-          <Assumptions data={deviation.data?.assumptions} />
         </>
       )}
     </Card>

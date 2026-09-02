@@ -331,6 +331,11 @@ export async function simulateDecumulation(input: DecumulationInput): Promise<De
    * por mês de um imóvel sem vendê-lo, e vender não é algo que este produto
    * simule (`decisions/0011`). Incluí-lo aqui inflaria a base e faria a
    * simulação dizer que o dinheiro dura muito mais do que duraria.
+   *
+   * Desde 01/09/2026 `portfolioSummary()` já devolve só o negociável, então
+   * este filtro é redundante — fica como guarda porque o número que ele
+   * protege é o "seu dinheiro dura até X", e um dia de regressão silenciosa
+   * aqui vale mais do que as ~45 comparações que ele custa.
    */
   const startingValueCents = summary.positions
     .filter((p) => p.assetClass !== ILLIQUID_ASSET_CLASS)

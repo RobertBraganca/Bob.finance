@@ -360,7 +360,7 @@ function SimulateTab() {
             </div>
           </Slab>
 
-          <Card span={12} title="Como chegamos a esse preço">
+          <Card span={12} title="Como chegamos a esse preço" assumptions={result.assumptions}>
             <div className="kv">
               <span className="kv__k">Ponto de equilíbrio do mês</span>
               <span className="kv__v">{money(result.breakdown.breakEvenCents)}</span>
@@ -395,7 +395,6 @@ function SimulateTab() {
               O preço mínimo nunca é reescrito por multiplicador: mesmo que a combinação puxe o
               recomendado para baixo, o mínimo continua sendo o piso técnico das horas.
             </p>
-            <Assumptions data={result.assumptions} />
           </Card>
         </>
       ) : (
