@@ -1,6 +1,12 @@
 import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import {
+  QuoteSentVsApprovedChart,
+  QuoteStatusRing,
+  type QuotePeriodPoint,
+  type QuoteStatusSlice,
+} from '../components/charts/PricingCharts'
 import { useAccounts } from '../lib/store'
 import { telemetry } from '../lib/telemetry'
 import {
@@ -496,6 +502,16 @@ function QuotesTab() {
     queryKey: ['pricing-quotes'],
     queryFn: () => api.get<{ quotes: Quote[] }>('/pricing/quotes'),
   })
+  const analytics = useQuery({
+    queryKey: ['pricing-quote-analytics'],
+    queryFn: () =>
+      api.get<{
+        byStatus: QuoteStatusSlice[]
+        byPeriod: QuotePeriodPoint[]
+        totalCount: number
+        assumptions: Record<string, unknown>
+      }>('/pricing/quotes/analytics'),
+  })
   const [approving, setApproving] = useState<Quote | null>(null)
   const [editing, setEditing] = useState<Quote | null>(null)
 
@@ -522,6 +538,59 @@ function QuotesTab() {
 
   return (
     <Bento>
+      {/*
+        Os dois cards de resumo vêm ANTES da tabela: o card de detalhe é a
+        lista, e uma tela se lê do agregado para o item. Os dois em meia
+        largura pareiam numa linha (regra paired_cards).
+      */}
+      <Card
+        span={6}
+        title="Cotações por status"
+        subtitle="Onde está o valor recomendado, por estado da proposta"
+        assumptions={analytics.data?.assumptions}
+      >
+        {analytics.isError ? (
+          <EmptyState icon="alert" title="Falha ao carregar" body="Não foi possível carregar o resumo agora." />
+        ) : !analytics.data ? (
+          <SkeletonLines lines={4} />
+        ) : analytics.data.totalCount === 0 ? (
+          <EmptyState
+            icon="info"
+            title="Nenhuma cotação salva"
+            body="Salve uma cotação em Simular para ela aparecer aqui."
+          />
+        ) : (
+          <>
+            <QuoteStatusRing
+              slices={analytics.data.byStatus}
+              labels={QUOTE_STATUS_LABELS}
+              surface="paper"
+            />
+            {analytics.data.totalCount < 10 && (
+              <p className="chart__note">
+                {analytics.data.totalCount} cotações no total. Com menos de dez, a proporção muda
+                muito a cada nova proposta: leia como retrato de agora, não como tendência.
+              </p>
+            )}
+          </>
+        )}
+      </Card>
+
+      <Card
+        span={6}
+        title="Enviado x aprovado"
+        subtitle="Quanto foi proposto e quanto foi fechado, mês a mês"
+        assumptions={analytics.data?.assumptions}
+      >
+        {analytics.isError ? (
+          <EmptyState icon="alert" title="Falha ao carregar" body="Não foi possível carregar o resumo agora." />
+        ) : !analytics.data ? (
+          <SkeletonLines lines={4} />
+        ) : (
+          <QuoteSentVsApprovedChart data={analytics.data.byPeriod} surface="paper" />
+        )}
+      </Card>
+
       <Card span={12} flush title="Cotações salvas" subtitle="Números congelados no momento de cada simulação">
         {quotes.isError ? (
           <EmptyState

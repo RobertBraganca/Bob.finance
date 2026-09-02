@@ -25,14 +25,20 @@ export type Slice = {
  */
 const MAX_SEGMENTS = 6
 
-const SliceTooltip = makeTooltip<Slice>((slice) => ({
-  title: slice.name,
-  rows: [
-    { label: 'Valor', value: money(slice.amountCents), color: slice.color },
-    { label: 'Participação', value: `${(slice.shareBps / 100).toFixed(1)}%` },
-    { label: 'Lançamentos', value: String(slice.transactionCount) },
-  ],
-}))
+/**
+ * Fábrica, não const de módulo: o rótulo da contagem virou prop
+ * (`countLabel`) quando a rosca de status de cotação passou a reusar este
+ * anel e a contar outra coisa que não lançamento (02/09/2026).
+ */
+const makeSliceTooltip = (countLabel: string) =>
+  makeTooltip<Slice>((slice) => ({
+    title: slice.name,
+    rows: [
+      { label: 'Valor', value: money(slice.amountCents), color: slice.color },
+      { label: 'Participação', value: `${(slice.shareBps / 100).toFixed(1)}%` },
+      { label: countLabel, value: String(slice.transactionCount) },
+    ],
+  }))
 
 /**
  * A ring is only honest for part-to-whole at a glance, and it is useless
@@ -45,6 +51,7 @@ export function CategoryRing({
   childSlices,
   surface = 'paper',
   totalLabel = 'Total',
+  countLabel = 'Lançamentos',
   height = 220,
   paddingAngle = 1.2,
   cornerRadius = 0,
@@ -61,6 +68,13 @@ export function CategoryRing({
   childSlices?: Slice[]
   surface?: Surface
   totalLabel?: string
+  /**
+   * Como chamar a contagem de cada fatia no tooltip e na tabela. O anel
+   * nasceu servindo categorias de lançamento, e o rótulo estava cravado;
+   * a rosca de status de cotação reusa o mesmo componente e conta outra
+   * coisa (02/09/2026).
+   */
+  countLabel?: string
   height?: number
   /**
    * Gap between segments, in degrees. Opt-in rather than global: a wide gap
@@ -78,6 +92,7 @@ export function CategoryRing({
   onSliceClick?: (categoryId: number) => void
 }) {
   const theme = themeFor(useEffectiveSurface(surface))
+  const SliceTooltip = useMemo(() => makeSliceTooltip(countLabel), [countLabel])
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
   // Every leaf row folds under its parent (or under itself, when a
@@ -132,7 +147,7 @@ export function CategoryRing({
         rows: segments,
         columns: [
           { header: 'Categoria', value: (row) => row.name },
-          { header: 'Lançamentos', value: (row) => row.transactionCount, align: 'right' },
+          { header: countLabel, value: (row) => row.transactionCount, align: 'right' },
           { header: 'Participação', value: (row) => `${(row.shareBps / 100).toFixed(1)}%`, align: 'right' },
           { header: 'Valor', value: (row) => money(row.amountCents), align: 'right' },
         ],

@@ -1154,3 +1154,45 @@ para outro caso.
 
 **Falta:** item 2 (gráfico de abertura do Painel) e item 4 (cards de
 pendência interativos com o gráfico).
+
+## 02/09/2026 — Precificação: rosca e barras (funil segurado)
+
+Rodado contra o banco real ANTES de construir: 3 cotações (2 em revisão, 1
+aprovada). Os três gráficos pedidos renderizariam como rosca de 2 fatias,
+2 barras em 12 meses e um funil 3→3→3→1 — um retângulo com um degrau. O
+usuário já rejeitou gráficos por "não fizeram sentido e só ocupam espaço",
+então levei os números antes. **Decisão dele: fazer a rosca e as barras,
+segurar o funil.**
+
+**Duas limitações de dado, não de desenho**, ambas declaradas em
+`assumptions`:
+- **Não existe data de aprovação.** `updatedAt` muda a cada edição (ADR
+  0021) e o `paidOn` fica na transação. Então "aprovado por mês" conta a
+  cotação no mês em que foi CRIADA. Ciclo curto coincide, longo não. Uma
+  coluna `approvedAt` resolveria.
+- **Não existe histórico de transições.** O funil teria de inferir
+  ("aprovada logo foi enviada"), e não diz quantas voltaram atrás, porque
+  "Em ajuste" é retorno, não etapa. É por isso que ele foi segurado.
+
+**Cor das fatias.** Três status compartilham o tom neutro, e três roscas
+cinzas não servem. A divisão ficou semântica: as três ETAPAS de caminho
+usam passos da rampa sequencial azul (`--seq-300/450/600`, do claro ao
+escuro na ordem em que a cotação anda) e os três VEREDITOS usam as cores
+de status reservadas. Medido: as seis passam 3:1 contra o papel (3,02 /
+5,74 / 12,87 / 4,48 / 4,00 / 4,21). Entre azuis vizinhos a separação cai
+a 1,9 — o máximo que uma rampa de matiz único dá sem invadir os hues
+reservados —, aceitável porque o `CategoryRing` sempre desenha a lista
+ranqueada nomeada ao lado: a cor nunca é o único diferenciador.
+
+**Um erro que a verificação pegou.** A fatia é dimensionada por DINHEIRO
+(preço recomendado), mas o `shareBps` do serviço é calculado sobre
+CONTAGEM. Reaproveitá-lo faria o anel desenhar uma fatia de 81,7% escrita
+"66,7%" — medido, com os dados reais. A participação passou a ser
+recalculada no componente sobre a mesma base do ângulo.
+
+`CategoryRing` ganhou `countLabel` (padrão 'Lançamentos'): o rótulo estava
+cravado e a rosca de cotações conta outra coisa. O tooltip virou fábrica
+memoizada, porque era const de módulo e não alcançava a prop.
+
+**Não verificado:** a renderização dos dois gráficos. A aplicação exige
+login. Matemática, contraste e build conferidos; o desenho, não.
