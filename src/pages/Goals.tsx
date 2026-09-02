@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { shiftPeriod } from '../lib/period'
+import { currentPeriod, shiftPeriod } from '../lib/period'
 import { telemetry } from '../lib/telemetry'
 import { useMeta } from '../lib/store'
 import {
@@ -136,7 +136,11 @@ export function GoalsPage() {
         subtitle={periodLong(period)}
         actions={
           <div className="row">
-            <PeriodNav period={period} onChange={setPeriod} />
+            {/* Sem teto no mês corrente: definir a meta do mês que vem É o
+                caso de uso da tela. O limite é o horizonte de materialização
+                de pendências (decisions/0028), porque além dele não há o que
+                comparar a meta com. */}
+            <PeriodNav period={period} onChange={setPeriod} max={shiftPeriod(currentPeriod(), 12)} />
             <Button variant="primary" icon="target" onClick={() => setEditing(true)}>
               Definir metas
             </Button>

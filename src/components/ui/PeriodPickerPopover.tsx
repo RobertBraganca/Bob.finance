@@ -127,7 +127,6 @@ export function PeriodPickerPopover({
                 onViewYearChange={setViewYear}
                 selected={selectedMonth}
                 onSelect={(period) => selectMonth(Number(period.slice(5, 7)) - 1)}
-                max={anchor.slice(0, 7)}
               />
               <div className="row row--between">
                 <button type="button" className="btn btn--quiet btn--sm" onClick={() => setOpen(false)}>

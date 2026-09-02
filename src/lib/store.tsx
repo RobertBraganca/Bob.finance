@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from './api'
+import { shiftPeriod } from './period'
 
 /* ------------------------------------------------------------------ *
  * Shared server types (mirrors of the service return shapes)
@@ -86,11 +87,13 @@ const RangeContext = createContext<RangeContextValue | null>(null)
 const pad = (n: number) => String(n).padStart(2, '0')
 const lastDayOf = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate()
 
-export function shiftPeriod(period: string, months: number): string {
-  const [y, m] = period.split('-').map(Number) as [number, number]
-  const total = y * 12 + (m - 1) + months
-  return `${Math.floor(total / 12)}-${pad((total % 12) + 1)}`
-}
+/**
+ * Reexportado de `lib/period` para não quebrar quem importa daqui. Era a
+ * QUINTA cópia da mesma função no projeto — as outras quatro (nas páginas)
+ * saíram em 01/09/2026 e esta passou batido, porque usava `pad()` local em
+ * vez do `padStart` inline (achado de 02/09/2026).
+ */
+export { shiftPeriod }
 
 function boundsFor(preset: RangePreset, anchorIso: string): { from: string; to: string } {
   const anchorPeriod = anchorIso.slice(0, 7)
