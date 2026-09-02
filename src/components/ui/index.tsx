@@ -135,6 +135,7 @@ export function StatTile({
   deltaLabel,
   foot,
   large,
+  spark,
 }: {
   label: string
   value: ReactNode
@@ -142,11 +143,14 @@ export function StatTile({
   deltaLabel?: string
   foot?: ReactNode
   large?: boolean
+  /** Série curta para a sparkline do tile: a forma do número ao longo do tempo, sem eixo nem rótulo. */
+  spark?: number[]
 }) {
   return (
     <div className="stat">
       <span className="stat__label">{label}</span>
       <span className={cx('stat__value', large && 'stat__value--lg')}>{value}</span>
+      {spark && spark.length > 1 && <Sparkline points={spark} />}
       {(delta !== undefined || foot) && (
         <span className="stat__foot">
           {delta !== undefined && <Delta bps={delta} label={deltaLabel} />}
@@ -154,6 +158,34 @@ export function StatTile({
         </span>
       )}
     </div>
+  )
+}
+
+/**
+ * Sparkline: só a forma da série, sem eixo, sem grade, sem rótulo — o
+ * número grande logo acima já diz onde ela terminou (regra de "sparkline
+ * dentro do card de KPI", revisão de 01/09/2026).
+ *
+ * SVG à mão em vez de Recharts: aqui não há tooltip, legenda nem eixo para
+ * justificar o peso da biblioteca, e o tile pode aparecer várias vezes na
+ * mesma tela. `preserveAspectRatio="none"` deixa o desenho esticar na
+ * largura do card sem recalcular nada em JS.
+ */
+function Sparkline({ points }: { points: number[] }) {
+  const min = Math.min(...points)
+  const max = Math.max(...points)
+  const span = max - min
+  const step = points.length > 1 ? 100 / (points.length - 1) : 0
+  // Série plana (span 0) desenha no meio: dividir por zero daria NaN e o
+  // path sumiria sem nenhum aviso.
+  const d = points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${(i * step).toFixed(2)} ${(span === 0 ? 50 : 100 - ((p - min) / span) * 100).toFixed(2)}`)
+    .join(' ')
+
+  return (
+    <svg className="sparkline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+    </svg>
   )
 }
 
@@ -441,6 +473,7 @@ export function Select<T extends string | number>({
   placeholder,
   bare,
   toolbar,
+  className,
 }: {
   id?: string
   value: T | null
@@ -450,6 +483,8 @@ export function Select<T extends string | number>({
   bare?: boolean
   /** Same chrome as a ghost/sm button, for sitting directly beside one in a toolbar row. */
   toolbar?: boolean
+  /** Variante visual do gatilho (ex. `select--pill select--good` para status). */
+  className?: string
 }) {
   return (
     <DropdownSelect
@@ -461,7 +496,7 @@ export function Select<T extends string | number>({
         <button
           id={id}
           {...triggerProps}
-          className={cx('select', bare && 'select--bare', toolbar && 'select--toolbar')}
+          className={cx('select', bare && 'select--bare', toolbar && 'select--toolbar', className)}
         >
           <span className="select__value truncate">{label}</span>
         </button>

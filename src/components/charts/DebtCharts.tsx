@@ -135,36 +135,59 @@ export function DebtProjectionChart({
  * The unfilled track is a lighter step of the same ramp; severity comes
  * from the status palette and always ships with an icon and a label.
  * ================================================================== */
-const DTI_BANDS = [
-  { maxBps: 2000, label: 'Saudável', tone: 'good' as const },
-  { maxBps: 3600, label: 'Atenção', tone: 'warning' as const },
-  { maxBps: 5000, label: 'Comprometido', tone: 'serious' as const },
-  { maxBps: Infinity, label: 'Crítico', tone: 'critical' as const },
+export type GaugeBand = {
+  /** limite superior da faixa, em bps; a primeira faixa que couber vence */
+  maxBps: number
+  label: string
+  tone: 'good' | 'warning' | 'serious' | 'critical'
+}
+
+const DTI_BANDS: GaugeBand[] = [
+  { maxBps: 2000, label: 'Saudável', tone: 'good' },
+  { maxBps: 3600, label: 'Atenção', tone: 'warning' },
+  { maxBps: 5000, label: 'Comprometido', tone: 'serious' },
+  { maxBps: Infinity, label: 'Crítico', tone: 'critical' },
+]
+
+/**
+ * Uso de limite de cartão. Os cortes são os mesmos de `capUsageState`
+ * (`components/ui`), para o arco e qualquer badge do mesmo número nunca
+ * discordarem — um teto é sobre não passar, então aqui MAIOR é pior.
+ */
+export const CARD_USAGE_BANDS: GaugeBand[] = [
+  { maxBps: 8000, label: 'Com folga', tone: 'good' },
+  { maxBps: 10_000, label: 'Apertado', tone: 'warning' },
+  { maxBps: Infinity, label: 'Estourado', tone: 'critical' },
 ]
 
 export function DebtServiceGauge({
   ratioBps,
   surface = 'slab',
   caption,
+  bands = DTI_BANDS,
+  emptyTitle = 'Sem renda para comparar',
+  emptyBody = 'Importe extratos com entradas para calcular o comprometimento da renda.',
 }: {
   ratioBps: number | null
   surface?: Surface
   caption?: string
+  /** Faixas de cor e rótulo; o default é comprometimento de renda. */
+  bands?: GaugeBand[]
+  emptyTitle?: string
+  emptyBody?: string
 }) {
   const theme = themeFor(useEffectiveSurface(surface))
 
   if (ratioBps === null) {
     return (
       <div className="empty" style={{ minHeight: 150 }}>
-        <span className="empty__title">Sem renda para comparar</span>
-        <p className="empty__body">
-          Importe extratos com entradas para calcular o comprometimento da renda.
-        </p>
+        <span className="empty__title">{emptyTitle}</span>
+        <p className="empty__body">{emptyBody}</p>
       </div>
     )
   }
 
-  const band = DTI_BANDS.find((b) => ratioBps <= b.maxBps)!
+  const band = bands.find((b) => ratioBps <= b.maxBps)!
   const fill = theme.status[band.tone]
   const clamped = Math.max(0, Math.min(1, ratioBps / 10_000))
 

@@ -28,7 +28,6 @@ import {
   Bento,
   Button,
   Card,
-  capUsageState,
   CategorySelect,
   EmptyState,
   HeroFigure,
@@ -56,6 +55,7 @@ import { TransactionForm, type TransactionFormValue } from '../components/forms/
 import { CategoryRing, type Slice } from '../components/charts/CategoryRing'
 import { NetFlowChart } from '../components/charts/NetFlowChart'
 import { AccountFlowSankey, type FlowEdge, type FlowNode, type LooseLeg } from '../components/charts/AccountFlowSankey'
+import { CARD_USAGE_BANDS, DebtServiceGauge } from '../components/charts/DebtCharts'
 
 type DashboardResponse = {
   range: { from: string; to: string }
@@ -289,6 +289,7 @@ export function Dashboard() {
             value={moneyCompact(totals.incomeCents)}
             delta={deltas.incomeBps}
             deltaLabel="vs. anterior"
+            spark={monthly.map((m) => m.incomeCents)}
             large
           />
           <StatTile
@@ -296,6 +297,7 @@ export function Dashboard() {
             value={moneyCompact(totals.expenseCents)}
             delta={deltas.expenseBps}
             deltaLabel="vs. anterior"
+            spark={monthly.map((m) => m.expenseCents)}
             large
           />
           <StatTile
@@ -1037,7 +1039,6 @@ function CreditCardsSlab({
     ? current.availableLimitCents
     : cards.reduce((s, c) => s + c.availableLimitCents, 0)
   const usedBps = limitCents > 0 ? Math.round(((limitCents - availableCents) / limitCents) * 10_000) : 0
-  const meterState = capUsageState(usedBps)
 
   const go = (delta: number) => setPage((p) => (p + delta + pageCount) % pageCount)
 
@@ -1088,12 +1089,25 @@ function CreditCardsSlab({
             />
           </div>
 
-          <div className="row row--between row--wrap">
-            <StatTile label="Limite disponível" value={money(availableCents)} large />
-            <StatTile label="Limite total" value={money(limitCents)} />
+          {/* Arco em vez de barra: o limite usado é um percentual contra um
+              teto, e a barra amarela de largura inteira punha cor decorativa
+              no card inteiro (revisão de design de 01/09/2026, "donut/gauge
+              para %"). O arco carrega a mesma cor de status num espaço
+              menor, com ícone e rótulo junto. */}
+          <div className="row row--between row--wrap" style={{ alignItems: 'center', gap: 'var(--sp-4)' }}>
+            <div className="stack" style={{ gap: 'var(--sp-3)', minWidth: 0 }}>
+              <StatTile label="Limite disponível" value={money(availableCents)} large />
+              <StatTile label="Limite total" value={money(limitCents)} />
+            </div>
+            <DebtServiceGauge
+              ratioBps={usedBps}
+              surface="paper"
+              bands={CARD_USAGE_BANDS}
+              caption="do limite total já comprometido"
+              emptyTitle="Sem limite cadastrado"
+              emptyBody="Informe o limite dos cartões para acompanhar quanto já está comprometido."
+            />
           </div>
-
-          <Meter usedBps={usedBps} state={meterState} />
 
           {current && (
             <div className="row row--between" style={{ fontSize: 'var(--text-xs)' }}>

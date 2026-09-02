@@ -850,3 +850,46 @@ quebrar o card de 3 KPI do Painel em 3, gauge no Health Score e no limite de
 cartão, sparkline nos KPI de série, header de tabela alinhado com a coluna
 numérica, separação de linhas por espaçamento em vez de borda, `Assumptions`
 compactado em ⓘ, status de cotação como pill.
+
+
+## Revisão de design: itens de média e baixa prioridade (01/09/2026)
+
+Feitos, todos verificados por medição no navegador:
+
+- **Alinhamento de tabela**: 29 `<th style={{textAlign:'right'}}>` viraram
+  `.table__num` (que traz `nowrap` e `tabular-nums` junto, não só o
+  alinhamento) e 12 células centrais viraram `.table__center`, classe que
+  não existia — o centro vinha inline célula a célula. Medido: header e
+  célula terminam no mesmo pixel nas 4 colunas.
+- **Separação de linha**: padding 9 -> 12px, borda de `--line` para
+  `--hairline` (4x mais fraca). A grade sobre tabelas de 10+ colunas some
+  sem perder a linha de leitura.
+- **Chip de ícone** (`.icon-chip`): ícone de conteúdo ganha fundo suave.
+  Aplicado no cabeçalho de classe de ativo, na sequência do Diário e nos
+  bens do Patrimônio. Ícone de botão e de navegação ficam de fora — já têm
+  o próprio alvo.
+- **`Assumptions` compacto**: repetido nos 5 indicadores do score, o par
+  "filete + Como calculamos" virava cinco réguas iguais. O modo compacto
+  guarda a mesma divulgação atrás do ⓘ, com `title`/`aria-label` —
+  `decisions/0010` continua satisfeito.
+- **3 KPI do Painel lado a lado** em `auto-fit`, sem `<hr>` entre eles, e o
+  card nasce em largura inteira.
+- **Gauge no limite de cartão**: a barra amarela de largura inteira virou
+  arco. `DebtServiceGauge` ganhou prop `bands`, então deixou de ser
+  específico de comprometimento de renda; `CARD_USAGE_BANDS` usa os mesmos
+  cortes de `capUsageState`, para o arco e qualquer badge do mesmo número
+  nunca discordarem.
+- **Sparkline no KPI** (`Sparkline` em `components/ui`): SVG à mão, não
+  Recharts — sem tooltip, eixo ou legenda, a biblioteca não se paga num
+  tile que aparece várias vezes na tela. Série plana desenha no meio: sem
+  esse guard, `span = 0` gerava `NaN` no path e o desenho sumia sem aviso
+  (testado com série plana, toda zerada, dois pontos e negativos).
+- **Status de cotação como pill**: `select--pill` reusa os valores exatos
+  de `.badge--*`. Continua sendo o mesmo gatilho de dropdown, então trocar
+  o status pela tabela não se perdeu.
+
+**Não feito**: gauge no Health Score. O hero virou card accent escuro, e o
+gauge deriva as cores de `useEffectiveSurface`, que em modo claro devolve
+'paper' mesmo dentro do accent — o arco sairia com a trilha de superfície
+clara sobre fundo escuro. Exigiria um prop de superfície explícito no
+gauge, e não dá para verificar isso fora do app real.

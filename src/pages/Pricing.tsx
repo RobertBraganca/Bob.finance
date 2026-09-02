@@ -32,6 +32,16 @@ import { PageHeader } from '../components/shell/Shell'
 const QUOTE_STATUSES = ['draft', 'sent', 'in_review', 'needs_changes', 'rejected', 'approved'] as const
 type QuoteStatus = (typeof QUOTE_STATUSES)[number]
 
+/** Tom da pill de status: aprovada é o único desfecho bom, rejeitada o único ruim; o resto é caminho, não veredito. */
+const QUOTE_STATUS_TONE: Record<QuoteStatus, 'good' | 'warning' | 'critical' | 'neutral'> = {
+  draft: 'neutral',
+  sent: 'neutral',
+  in_review: 'neutral',
+  needs_changes: 'warning',
+  rejected: 'critical',
+  approved: 'good',
+}
+
 const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
   draft: 'Rascunho',
   sent: 'Enviada',
@@ -578,9 +588,10 @@ function QuotesTab() {
                       )}
                     </td>
                     <td className="table__num muted">{money(quote.premiumPriceCents)}</td>
-                    <td style={{ minWidth: 150 }}>
+                    <td>
                       <Select
                         value={quote.status}
+                        className={`select--pill select--${QUOTE_STATUS_TONE[quote.status]}`}
                         options={QUOTE_STATUSES.map((value) => ({ value, label: QUOTE_STATUS_LABELS[value] }))}
                         onChange={(value) =>
                           value && setStatus.mutate({ id: quote.id, status: value as QuoteStatus })
