@@ -445,10 +445,19 @@
   color: var(--ink-1);
   cursor: pointer;
   padding-right: 28px;
-  background-image: linear-gradient(45deg, transparent 49%, var(--ink-3) 50%),
-    linear-gradient(-45deg, transparent 49%, var(--ink-3) 50%);
+  /* A cor da seta virou variável para uma variante poder trocá-la sem
+     redeclarar os dois gradientes. */
+  --select-arrow: var(--ink-3);
+  background-image: linear-gradient(45deg, transparent 49%, var(--select-arrow) 50%),
+    linear-gradient(-45deg, transparent 49%, var(--select-arrow) 50%);
   background-size: 5px 5px, 5px 5px;
-  background-position: calc(100% - 14px) 16px, calc(100% - 9px) 16px;
+  /* `center` no eixo Y, não pixel absoluto. O valor era 16px, calibrado
+     para o `min-height: 36px` desta classe, o que obrigava CADA variante
+     de altura a recalibrar dois números mágicos — e `.select--pill` (26px)
+     não recalibrou, deixando a seta 3px baixa (achado de 02/09/2026, o
+     "posição da seta" que o usuário viu). Centrado, qualquer altura futura
+     acerta sozinha. */
+  background-position: calc(100% - 14px) center, calc(100% - 9px) center;
   background-repeat: no-repeat;
 }
 .select__value {
@@ -464,7 +473,11 @@
 .select--pill {
   border-radius: var(--r-pill);
   min-height: 26px;
-  padding: 2px 10px;
+  /* 20px à direita, não 10: a seta ocupa os 4–14px finais, e o
+     `padding: 2px 10px` de antes sobrescrevia o `padding-right: 28px` de
+     `.select`, deixando o texto correr por baixo dela (o "espaçamento"
+     relatado em 02/09/2026). */
+  padding: 2px 20px 2px 10px;
   font-size: var(--text-2xs);
   font-weight: 600;
   width: auto;
@@ -474,19 +487,40 @@
 /* Exatamente os valores de `.badge--*` logo abaixo: o mesmo estado tem
    que ler na mesma cor, seja como pill estática ou como este gatilho. */
 .select--pill.select--good {
-  background: #e8f7ec;
+  /* `background-color`, nunca o shorthand `background`: o shorthand
+     reseta `background-image` para none, e era ele que desenhava a seta
+     do dropdown — as três pílulas de status ficaram SEM seta desde que
+     nasceram, em 01/09/2026, e a ausência foi relatada como "posição da
+     seta" (medido e corrigido em 02/09/2026). */
+  background-color: #e8f7ec;
   border-color: #bfe3cb;
   color: #14682a;
+  /* A seta acompanha a cor do estado em vez de ficar cinza sobre âmbar. */
+  --select-arrow: currentColor;
 }
 .select--pill.select--warning {
-  background: #fdf3e0;
+  /* `background-color`, nunca o shorthand `background`: o shorthand
+     reseta `background-image` para none, e era ele que desenhava a seta
+     do dropdown — as três pílulas de status ficaram SEM seta desde que
+     nasceram, em 01/09/2026, e a ausência foi relatada como "posição da
+     seta" (medido e corrigido em 02/09/2026). */
+  background-color: #fdf3e0;
   border-color: #f0dcae;
   color: #7a5b00;
+  /* A seta acompanha a cor do estado em vez de ficar cinza sobre âmbar. */
+  --select-arrow: currentColor;
 }
 .select--pill.select--critical {
-  background: #ffecec;
+  /* `background-color`, nunca o shorthand `background`: o shorthand
+     reseta `background-image` para none, e era ele que desenhava a seta
+     do dropdown — as três pílulas de status ficaram SEM seta desde que
+     nasceram, em 01/09/2026, e a ausência foi relatada como "posição da
+     seta" (medido e corrigido em 02/09/2026). */
+  background-color: #ffecec;
   border-color: #ffc7c7;
   color: #cc0000;
+  /* A seta acompanha a cor do estado em vez de ficar cinza sobre âmbar. */
+  --select-arrow: currentColor;
 }
 
 .select--bare {
@@ -494,7 +528,7 @@
   background-color: transparent;
   min-height: 30px;
   padding: 3px 26px 3px 6px;
-  background-position: calc(100% - 12px) 13px, calc(100% - 7px) 13px;
+  background-position: calc(100% - 12px) center, calc(100% - 7px) center;
   font-size: var(--text-xs);
 }
 .select--bare:hover {
@@ -509,7 +543,7 @@
   padding: 4px 26px 4px 10px;
   border-color: var(--line-strong);
   background-color: var(--surface);
-  background-position: calc(100% - 14px) 13px, calc(100% - 9px) 13px;
+  background-position: calc(100% - 14px) center, calc(100% - 9px) center;
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--ink-1);

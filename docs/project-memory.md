@@ -1062,3 +1062,45 @@ viewport menor que o painel.
 - Endividamento usa `<Select>` com `recentClosedMonths(24)`. Não vale
   trocar pelo `PeriodNav`: ali a lista de meses fechados é o domínio
   válido, não uma navegação livre.
+
+## 02/09/2026 — A pílula de status não tinha seta
+
+O usuário descreveu o problema do dropdown como "espaçamento e posição da
+seta". Medido, eram dois bugs meus na `.select--pill` de 01/09, e o
+segundo é pior do que "posição":
+
+**1. O shorthand `background` apagava a seta.** A seta do `.select` é
+desenhada com dois gradientes em `background-image`. As três regras de
+status (`.select--pill.select--good/warning/critical`) usavam
+`background: <cor>`, e o shorthand reseta `background-image` para `none`.
+As pílulas de status **nunca tiveram seta** — `backgroundImage: "none"`
+confirmado no navegador, contra o gradiente presente numa pílula sem
+classe de status. O que o usuário leu como "posição da seta" era a
+ausência dela. Agora é `background-color`.
+
+**2. O `padding: 2px 10px` sobrescrevia o espaço reservado.** `.select`
+tem `padding-right: 28px` justamente para a seta não encostar no texto. A
+pílula redeclarava o padding nos quatro lados e derrubava isso para 10px.
+Agora `padding: 2px 20px 2px 10px`, com 7px de folga medidos entre texto e
+seta nos três comprimentos de rótulo.
+
+**A causa raiz, corrigida junto:** o Y da seta era pixel absoluto
+(`background-position: ... 16px`), calibrado para o `min-height: 36px` do
+`.select`. Toda variante de altura tinha que recalibrar dois números
+mágicos — `--bare` e `--toolbar` (30px) recalibraram para 13px, e a
+pílula (26px) não recalibrou. Virou `center`, que acerta qualquer altura
+sozinha, e os três valores mágicos saíram do arquivo.
+
+A cor da seta virou `--select-arrow` (padrão `--ink-3`), e as pílulas usam
+`currentColor` — seta cinza sobre fundo âmbar parecia peça de outro
+componente. Contraste da seta medido: 5,17 a 6,23:1 nos três estados.
+
+Verificado em 7 casos, incluindo um `.select` de 130px onde o rótulo
+trunca: seta presente e centrada em todos, zero invasão do texto.
+
+**Armadilha do harness, para a próxima vez:** `align-items: flex-start`
+num container de flex-column sem largura definida quebra o `width: 100%`
+do `.select` — o botão colapsa para o tamanho do padding (34px) e o span
+com `min-width: 0` vai a zero. A primeira medição acusou colisão em
+`--bare` e `--toolbar` por causa disso, não por bug do app. Medir `.select`
+exige um container com largura definida, como ele tem no app real.
