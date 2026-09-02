@@ -1196,3 +1196,59 @@ memoizada, porque era const de módulo e não alcançava a prop.
 
 **Não verificado:** a renderização dos dois gráficos. A aplicação exige
 login. Matemática, contraste e build conferidos; o desenho, não.
+
+## 02/09/2026 — Revisão de UI com o app rodando (primeira vez)
+
+O usuário fez login no navegador, então esta revisão foi por MEDIÇÃO no app
+real, não por leitura de código. Isso mudou o resultado três vezes.
+
+**O bug do Health Score era meu.** Não era falta de dado (12 pontos, todos
+com score, conferido no banco). Na mudança de layout de 01/09 eu converti
+`height` para `minHeight` nos 15 gráficos de uma vez. Nos 12 que usam
+`ResponsiveContainer` direto foi seguro. Nos 3 que passam pelo
+`ChartContainer` do shadcn não: ele embute um `ResponsiveContainer` com
+`height: 100%`, e **`100%` só resolve contra pai de altura DEFINIDA**.
+`min-height` faz a altura *usada* ser 220px mas não a torna definida —
+então o Recharts resolveu contra `auto`, caiu para altura de conteúdo e
+deu zero. Medido: contêiner 220px, `ResponsiveContainer` 0px, nenhum SVG
+no DOM. Corrigido com `.chart__plot--basis { flex: 1 1 auto }` e o
+`height` inline de volta como flex-basis: definida para o Recharts, e
+ainda elástica. Depois: 220px, SVG presente, 2 traços.
+
+**Buracos de linha, medidos e fechados.** O grid tem duas colunas desde
+01/09, e as páginas ainda usavam spans da era de 12 (3, 4, 5, 7, 8): 7 e 8
+mapeiam para largura inteira, então um `span={8}` nunca pareia com um
+`span={4}`.
+
+| página | linhas antes | buracos antes | depois |
+|---|---|---|---|
+| Saúde financeira | 8 | 2 | 6, zero |
+| Endividamento | 5 | 2 | 4, zero |
+| Diário | 8 | 1 | 7, zero |
+| Investimentos (5 abas) | 11+ | 5 | 9, zero |
+
+Dois padrões recorrentes: **KPI ímpar** (3 ou 5 num grid de 2 sempre deixa
+órfão) resolvido com um card único em `auto-fit`, o mesmo padrão do Painel;
+e **um número em largura inteira** (o "A receber" do Diário ocupava 1105px
+enquanto os quatro KPI ao lado tinham 545).
+
+Uma decisão documentada foi preservada: um comentário em `FinancialHealth`
+dizia que "Patrimônio consolidado" é vizinho do Runway de propósito. A
+intenção existia no código e o layout não a entregava — agora entrega, e o
+script de reordenação carrega o comentário junto do card, senão a
+explicação apontaria para o card errado.
+
+**A única quebra real de mobile: o controle de abas.** `.segmented` era
+`inline-flex` sem escape, e as cinco abas de Investimentos somavam 451px
+num viewport de 390 — esticavam o LAYOUT INTEIRO para 451, dando rolagem
+horizontal e deixando todo card 61px mais largo que a tela. Agora
+`max-width: 100%` + `overflow-x: auto`, com a barra escondida. Dormente no
+desktop.
+
+**Duas armadilhas na minha própria medição**, que valem para a próxima:
+- `<details>` fechado: os filhos ainda têm caixa de layout, e um scan de
+  overflow ingênuo acusou 13 elementos "transbordando" dentro de acordeões
+  invisíveis. Filtrar por `details:not([open])` e `contentVisibility`.
+- Comparar overflow contra `innerWidth` se anula: quando o conteúdo estica
+  o layout, `innerWidth` estica junto (451) e a comparação nunca dispara. O
+  limite verdadeiro é `documentElement.clientWidth` (390).

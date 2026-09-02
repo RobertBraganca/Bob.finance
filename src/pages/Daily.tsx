@@ -93,7 +93,7 @@ export function DailyPage() {
         <Bento>
           <QuickAdd today={today} />
 
-          <Slab span={4} accent>
+          <Slab span={6} accent>
             <HeroFigure
               label={`Gasto em ${periodLong(period)}`}
               value={moneyCompact(pace?.spentCents ?? 0)}
@@ -134,11 +134,24 @@ export function DailyPage() {
               tiles caíam numa linha de 9 com 3 colunas vazias. Agora o
               gráfico ocupa uma linha e os 4 tiles fecham a seguinte em
               3+3+3+3 (auditoria de layout de 01/09/2026). */}
+          {/*
+            Meia largura, ao lado do hero: e UM numero, e ocupava 1105px
+            sozinho enquanto os quatro KPI de ritmo logo abaixo tinham 545
+            cada — a mesma informacao com dois pesos (02/09/2026).
+          */}
+          <Card span={6}>
+            <StatTile
+              label="A receber"
+              value={moneyCompact(daily.data?.receivableCents ?? 0)}
+              foot="entradas pendentes de confirmação no período"
+            />
+          </Card>
+
           <Slab span={12} title="Intensidade por dia" subtitle="Gasto de cada dia do mês selecionado">
             <SpendAreaChart days={daily.data?.days ?? []} surface="paper" />
           </Slab>
 
-          <Card span={3}>
+          <Card span={6}>
             <StatTile
               label="Ritmo projetado para o mês"
               value={moneyCompact(pace?.projectedMonthCents ?? 0)}
@@ -151,7 +164,7 @@ export function DailyPage() {
               }
             />
           </Card>
-          <Card span={3}>
+          <Card span={6}>
             <StatTile
               label="Pode gastar por dia"
               value={pace?.dailyAllowanceCents !== null && pace?.dailyAllowanceCents !== undefined ? moneyCompact(pace.dailyAllowanceCents) : '-'}
@@ -162,14 +175,14 @@ export function DailyPage() {
               }
             />
           </Card>
-          <Card span={3}>
+          <Card span={6}>
             <StatTile
               label="Média por dia com gasto"
               value={moneyCompact(avgPerActiveDay)}
               foot={`${daysWithSpend.length} dias com movimento`}
             />
           </Card>
-          <Card span={3}>
+          <Card span={6}>
             <StatTile
               label="Maior dia"
               value={busiest ? moneyCompact(busiest.expenseCents) : '-'}
@@ -194,13 +207,6 @@ export function DailyPage() {
                 </span>
               )}
             </div>
-          </Card>
-          <Card span={12}>
-            <StatTile
-              label="A receber"
-              value={moneyCompact(daily.data?.receivableCents ?? 0)}
-              foot="entradas pendentes de confirmação no período"
-            />
           </Card>
 
           <RecentDaily period={period} />
@@ -254,7 +260,7 @@ function QuickAdd({ today }: { today: string }) {
   })
 
   return (
-    <Card span={8} title="Lançamento rápido" subtitle="Para o gasto do dia, sem abrir formulário completo">
+    <Card span={12} title="Lançamento rápido" subtitle="Para o gasto do dia, sem abrir formulário completo">
       <form
         className="row row--wrap"
         style={{ gap: 'var(--sp-3)', alignItems: 'flex-end' }}

@@ -199,7 +199,7 @@ export function DebtPage() {
           </Bento>
         ) : (
           <Bento>
-            <Slab span={4} accent>
+            <Slab span={6} accent>
               <HeroFigure label="Dívida total" value={moneyCompact(data.totalCents)}>
                 <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
                   <span className="kv__k">Juros por mês</span>
@@ -213,7 +213,7 @@ export function DebtPage() {
             </Slab>
 
             <Slab
-              span={4}
+              span={6}
               title="Renda comprometida"
               subtitle="Parcela mensal sobre a renda daquele mês"
               actions={
@@ -236,7 +236,7 @@ export function DebtPage() {
               />
             </Slab>
 
-            <Slab span={4} title="Composição" subtitle="Saldo por tipo de dívida">
+            <Slab span={6} title="Composição" subtitle="Saldo por tipo de dívida">
               <CategoryRing
                 surface="paper"
                 totalLabel="Dívida total"
@@ -254,49 +254,7 @@ export function DebtPage() {
               />
             </Slab>
 
-            <Card
-              span={8}
-              title="Trajetória até a quitação"
-              subtitle="Mova o aporte extra para comparar cenários"
-            >
-              <div className="row row--wrap" style={{ gap: 'var(--sp-4)' }}>
-                <div className="grow" style={{ minWidth: 240 }}>
-                  <label className="field__label" htmlFor="extra-slider">
-                    Aporte extra por mês: <strong>{money(extraMonthlyCents)}</strong>
-                  </label>
-                  <input
-                    id="extra-slider"
-                    type="range"
-                    min={0}
-                    max={EXTRA_STEPS.length - 1}
-                    step={1}
-                    value={extraIndex}
-                    onChange={(event) => setExtraIndex(Number(event.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--brand)' }}
-                  />
-                </div>
-                <div className="field" style={{ minWidth: 190 }}>
-                  <label className="field__label">Estratégia</label>
-                  <Select
-                    value={strategy}
-                    options={[
-                      { value: 'avalanche', label: 'Avalanche (maior taxa)' },
-                      { value: 'snowball', label: 'Bola de neve (menor saldo)' },
-                    ]}
-                    onChange={(value) => setStrategy((value as 'avalanche' | 'snowball') ?? 'avalanche')}
-                  />
-                </div>
-              </div>
-
-              <DebtProjectionChart
-                data={projection.data?.merged ?? []}
-                surface="paper"
-                height={280}
-                extraMonthlyCents={extraMonthlyCents}
-              />
-            </Card>
-
-            <Card span={4} title="O que muda com o aporte">
+            <Card span={6} title="O que muda com o aporte">
               {projection.isError ? (
                 <EmptyState
                   icon="alert"
@@ -341,6 +299,48 @@ export function DebtPage() {
               ) : (
                 <EmptyState title="Calculando projeção…" />
               )}
+            </Card>
+
+            <Card
+              span={12}
+              title="Trajetória até a quitação"
+              subtitle="Mova o aporte extra para comparar cenários"
+            >
+              <div className="row row--wrap" style={{ gap: 'var(--sp-4)' }}>
+                <div className="grow" style={{ minWidth: 240 }}>
+                  <label className="field__label" htmlFor="extra-slider">
+                    Aporte extra por mês: <strong>{money(extraMonthlyCents)}</strong>
+                  </label>
+                  <input
+                    id="extra-slider"
+                    type="range"
+                    min={0}
+                    max={EXTRA_STEPS.length - 1}
+                    step={1}
+                    value={extraIndex}
+                    onChange={(event) => setExtraIndex(Number(event.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--brand)' }}
+                  />
+                </div>
+                <div className="field" style={{ minWidth: 190 }}>
+                  <label className="field__label">Estratégia</label>
+                  <Select
+                    value={strategy}
+                    options={[
+                      { value: 'avalanche', label: 'Avalanche (maior taxa)' },
+                      { value: 'snowball', label: 'Bola de neve (menor saldo)' },
+                    ]}
+                    onChange={(value) => setStrategy((value as 'avalanche' | 'snowball') ?? 'avalanche')}
+                  />
+                </div>
+              </div>
+
+              <DebtProjectionChart
+                data={projection.data?.merged ?? []}
+                surface="paper"
+                height={280}
+                extraMonthlyCents={extraMonthlyCents}
+              />
             </Card>
 
             <Card span={12} flush title="Dívidas cadastradas">

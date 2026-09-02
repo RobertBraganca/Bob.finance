@@ -338,6 +338,27 @@
   gap: 2px;
   background: var(--paper-sunken);
   border-radius: var(--r-pill);
+  /* Rola por dentro em vez de esticar a página.
+     Os botões têm `white-space: nowrap` (correto: "Metas (3)" não pode
+     quebrar no meio) e o controle era `inline-flex` sem escape, então as
+     cinco abas de Investimentos somavam 451px num viewport de 390 e
+     empurravam o LAYOUT INTEIRO para 451 — a página ganhava rolagem
+     horizontal e todo card ficava 61px mais largo que a tela. Medido em
+     02/09/2026; era a única quebra real de mobile nas quatro páginas
+     revisadas.
+
+     `max-width: 100%` é o que dá ao flex container um limite contra o qual
+     decidir rolar; sem ele o `overflow` nunca entra em ação, porque um
+     `inline-flex` cresce com o conteúdo. */
+  max-width: 100%;
+  overflow-x: auto;
+  /* A barra de rolagem sob uma pílula de 30px comeria o próprio controle.
+     Some no desktop e continua funcionando por toque/trackpad. */
+  scrollbar-width: none;
+}
+
+.segmented::-webkit-scrollbar {
+  display: none;
 }
 
 .on-slab .segmented {
@@ -1167,6 +1188,29 @@
 .chart__plot {
   flex: 1;
   min-height: 0;
+}
+
+/* ---- O caso do ChartContainer (shadcn) -----------------------------
+   Os 12 gráficos que usam `ResponsiveContainer` DIRETO aceitam
+   `height="100%"` porque quem resolve a altura é o próprio contêiner. Os
+   três que passam pelo `ChartContainer` do shadcn são outro bicho: ele
+   embute um `ResponsiveContainer` com altura 100%, e `100%` só resolve
+   contra um pai de altura DEFINIDA.
+
+   Em 01/09 eu troquei o `height` inline desses três por `min-height`
+   junto com os outros doze. `min-height` faz a altura USADA ser 220px,
+   mas não a torna definida — então o `100%` do Recharts resolveu contra
+   `auto`, caiu para altura de conteúdo e deu ZERO. Medido no app rodando
+   em 02/09/2026: contêiner de 220px, `ResponsiveContainer` de 0px e
+   nenhum SVG no DOM. É o "Evolução do Health Score não aparece".
+
+   A correção mantém a elasticidade: o `height` inline volta e serve de
+   `flex-basis` (daí `flex: 1 1 auto`, e não o `flex: 1` acima, cuja base
+   de 0% descartaria justamente essa altura). Assim a altura é definida
+   para o Recharts resolver, e ainda cresce quando a linha do grid é mais
+   alta. */
+.chart__plot--basis {
+  flex: 1 1 auto;
 }
 
 .chart__legend {

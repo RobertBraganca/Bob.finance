@@ -536,43 +536,60 @@ function PortfolioTab({
         </div>
       </Card>
 
-      <Card span={4}>
-        <StatTile
-          label={`Proventos recebidos (${rangeLabel})`}
-          value={summary.data ? money(summary.data.dividendsInRangeCents) : '-'}
-          foot={summary.data ? `Total ${money(summary.data.dividendsCents)}` : undefined}
-        />
-      </Card>
-      <Card span={4}>
-        <StatTile
-          label={`Rentabilidade (${rangeLabel})`}
-          value={
-            summary.data?.gainBpsInRange === null || summary.data?.gainBpsInRange === undefined
-              ? '-'
-              : signedBps(summary.data.gainBpsInRange)
-          }
-        />
-      </Card>
-      <Card span={4}>
-        <StatTile
-          label="Rentabilidade total"
-          value={
-            summary.data?.gainBpsAllTime === null || summary.data?.gainBpsAllTime === undefined
-              ? '-'
-              : signedBps(summary.data.gainBpsAllTime)
-          }
-        />
+      {/*
+        Um card para os tres, nao tres cards: em duas colunas eles davam
+        dois pareados e um orfao de meia largura (medido a 1440px em
+        02/09/2026). Mesmo padrao do card de KPI do Painel — `auto-fit`
+        empilha sozinho quando o card fica estreito.
+      */}
+      <Card span={12}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+            gap: 'var(--sp-5)',
+          }}
+        >
+          <StatTile
+            label={`Proventos recebidos (${rangeLabel})`}
+            value={summary.data ? money(summary.data.dividendsInRangeCents) : '-'}
+            foot={summary.data ? `Total ${money(summary.data.dividendsCents)}` : undefined}
+          />
+          <StatTile
+            label={`Rentabilidade (${rangeLabel})`}
+            value={
+              summary.data?.gainBpsInRange === null || summary.data?.gainBpsInRange === undefined
+                ? '-'
+                : signedBps(summary.data.gainBpsInRange)
+            }
+          />
+          <StatTile
+            label="Rentabilidade total"
+            value={
+              summary.data?.gainBpsAllTime === null || summary.data?.gainBpsAllTime === undefined
+                ? '-'
+                : signedBps(summary.data.gainBpsAllTime)
+            }
+          />
+        </div>
       </Card>
 
-      <Card span={7} title="Evolução do patrimônio">
+      <Card span={12} title="Evolução do patrimônio">
         <PortfolioEvolutionChart data={evolutionData} surface="paper" height={260} />
       </Card>
-      <Card span={5} title="Ativos na carteira">
+      <Card span={6} title="Ativos na carteira">
         <AssetClassRing slices={data.allocation} surface="paper" height={220} />
       </Card>
 
+      {/*
+        Vizinho da rosca de propósito: os dois de meia largura pareiam numa
+        linha, e antes a rosca ficava sozinha porque "Alocação por classe"
+        (largura inteira) estava entre eles (02/09/2026).
+      */}
+      <BelowTargetCard allocation={data.allocation} onOpenAlloc={onOpenAlloc} />
+
       <Card
-        span={7}
+        span={12}
         title="Alocação por classe"
         subtitle="Barra é o real, marca vertical é a meta"
         actions={
@@ -584,7 +601,6 @@ function PortfolioTab({
         <AllocationChart slices={data.allocation} surface="paper" />
       </Card>
 
-      <BelowTargetCard allocation={data.allocation} onOpenAlloc={onOpenAlloc} />
 
       <AllocationDeviationCard />
 
@@ -689,7 +705,7 @@ function BelowTargetCard({
 
   return (
     <Card
-      span={5}
+      span={6}
       title="Necessário para atingir a meta"
       subtitle="Quanto ainda falta em cada classe abaixo da alocação configurada"
     >
@@ -1644,7 +1660,12 @@ function ProfitabilityKpiCard({
   const diffBps = totalBps !== null && benchmarkBps !== null ? totalBps - benchmarkBps : null
   const flat = neutralOnFlat && totalBps !== null && Math.abs(totalBps) < 10
   return (
-    <Slab span={4}>
+    /*
+      Sem `span`: este bloco deixou de ser um card e virou conteudo de um
+      card unico, porque tres deles davam dois pareados e um orfao de meia
+      largura no grid de duas colunas (medido a 1440px em 02/09/2026).
+    */
+    <div className="stack stack--tight">
       <div className="stack stack--tight">
         <span className="stat__label">{label}</span>
         <span className="hero-figure" style={flat ? { color: 'var(--on-slab-2)' } : undefined}>
@@ -1667,7 +1688,7 @@ function ProfitabilityKpiCard({
           </span>
         )}
       </div>
-    </Slab>
+    </div>
   )
 }
 
@@ -1735,9 +1756,24 @@ function ProfitabilityTab() {
         </div>
       </Card>
 
-      <ProfitabilityKpiCard label="Rentabilidade total" totalBps={totalBps} benchmarkLabel={benchmarkLabel} benchmarkBps={benchmarkTotal} />
-      <ProfitabilityKpiCard label="Últimos 12 meses" totalBps={last12} benchmarkLabel={benchmarkLabel} benchmarkBps={benchmarkLast12} />
-      <ProfitabilityKpiCard label="Último mês" totalBps={lastMonth} benchmarkLabel={benchmarkLabel} benchmarkBps={benchmarkLastMonth} neutralOnFlat />
+      {/*
+        Os tres num card so, em auto-fit: como cards separados eles davam
+        dois pareados e um orfao de meia largura (02/09/2026). Mesmo padrao
+        do card de KPI do Painel e da aba Carteira.
+      */}
+      <Card span={12}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+            gap: 'var(--sp-5)',
+          }}
+        >
+          <ProfitabilityKpiCard label="Rentabilidade total" totalBps={totalBps} benchmarkLabel={benchmarkLabel} benchmarkBps={benchmarkTotal} />
+          <ProfitabilityKpiCard label="Últimos 12 meses" totalBps={last12} benchmarkLabel={benchmarkLabel} benchmarkBps={benchmarkLast12} />
+          <ProfitabilityKpiCard label="Último mês" totalBps={lastMonth} benchmarkLabel={benchmarkLabel} benchmarkBps={benchmarkLastMonth} neutralOnFlat />
+        </div>
+      </Card>
 
       <Card
         span={12}
@@ -1880,7 +1916,7 @@ function GoalsEnvironment({
           </Card>
         ) : (
           <>
-            <Slab span={4} accent>
+            <Slab span={6} accent>
               <HeroFigure
                 label={
                   goal.purpose
@@ -1904,7 +1940,7 @@ function GoalsEnvironment({
               </HeroFigure>
             </Slab>
 
-            <Card span={8} title="Trajetória projetada">
+            <Card span={6} title="Trajetória projetada">
               <GoalProjectionChart
                 data={data.series}
                 targetCents={goal.targetValueCents}
@@ -1913,21 +1949,21 @@ function GoalsEnvironment({
               />
             </Card>
 
-            <Card span={3}>
+            <Card span={6}>
               <StatTile
                 label="Aporte mensal planejado"
                 value={moneyCompact(goal.monthlyContributionCents)}
                 foot={`retorno esperado ${bps(goal.expectedReturnBps)} a.a.`}
               />
             </Card>
-            <Card span={3}>
+            <Card span={6}>
               <StatTile
                 label="Alcança a meta em"
                 value={data.reachedMonth === null ? 'além do horizonte' : monthsLabel(data.reachedMonth)}
                 foot={data.reachedPeriod ? fmtPeriod(data.reachedPeriod) : 'aumente o aporte'}
               />
             </Card>
-            <Card span={3}>
+            <Card span={6}>
               <StatTile
                 label="Aporte necessário na data"
                 value={
@@ -1940,7 +1976,7 @@ function GoalsEnvironment({
                 }
               />
             </Card>
-            <Card span={3}>
+            <Card span={6}>
               <StatTile
                 label="Projetado na data-alvo"
                 value={

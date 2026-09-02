@@ -250,7 +250,7 @@ export function FinancialHealthPage() {
           </Card>
         ) : (
           <Bento>
-            <Slab span={4} accent>
+            <Slab span={6} accent>
               <HeroFigure
                 label="Health Score do mês"
                 value={data.scoreBps === null ? 'sem dado' : bps(data.scoreBps, 0)}
@@ -264,7 +264,15 @@ export function FinancialHealthPage() {
             </Slab>
 
             <Card
-              span={8}
+              span={6}
+              title="Evolução do Health Score"
+              subtitle="Últimos 12 meses, recalculado a cada mês — nunca um número guardado"
+            >
+              <ScoreHistoryChart points={scoreHistory.data?.history ?? []} />
+            </Card>
+
+            <Card
+              span={12}
               title="Composição do score"
               assumptions={data.assumptions}
               subtitle="Cada indicador vale de 0 a 100. Um indicador sem dado sai da média, e seu peso é redistribuído entre os demais"
@@ -277,48 +285,46 @@ export function FinancialHealthPage() {
             </Card>
 
             <Card
-              span={12}
-              title="Checklist de fechamento mensal"
-              subtitle="O que falta olhar antes de considerar o mês fechado"
+              span={6}
+              title="Runway"
+              assumptions={runway.data?.consolidated.assumptions}
+              subtitle="Quantos meses os recursos atuais cobrem o custo mensal médio"
             >
-              {!closingChecklist.data ? (
-                <SkeletonLines lines={4} />
+              {runway.isError ? (
+                <EmptyState
+                  icon="alert"
+                  title="Falha ao carregar"
+                  body="Não foi possível carregar o runway agora. Tente novamente em instantes."
+                />
+              ) : !runway.data ? (
+                <EmptyState title="Calculando…" />
               ) : (
-                <div className="stack stack--tight">
-                  {closingChecklist.data.items.map((item) => (
-                    <div key={item.key} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
-                      <span className="row" style={{ gap: 'var(--sp-2)' }}>
-                        <span style={{ color: item.done ? 'var(--status-good)' : 'var(--neutral-mark)', display: 'grid' }}>
-                          <Icon name={item.done ? 'check' : 'clock'} size={14} strokeWidth={2.4} />
-                        </span>
-                        <span>{item.label}</span>
+                <div className="stack stack--loose">
+                  <StatTile
+                    label="Consolidado"
+                    large
+                    value={monthsLabel(runway.data.consolidated.months)}
+                    foot={
+                      <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                        {money(runway.data.consolidated.netWorthCents)} considerados,{' '}
+                        {money(runway.data.consolidated.monthlyCostCents)} por mês
                       </span>
-                      {item.kind === 'manual' ? (
-                        <Button
-                          size="sm"
-                          variant={item.done ? 'quiet' : 'primary'}
-                          icon={item.done ? 'x' : 'check'}
-                          onClick={() => toggleReview.mutate(!item.done)}
-                        >
-                          {item.done ? 'Desmarcar revisão' : 'Marcar como revisada'}
-                        </Button>
-                      ) : (
-                        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                          {item.detail}
-                        </span>
-                      )}
-                    </div>
-                  ))}
+                    }
+                  />
+                  <hr className="divider" />
+                  <div className="kv">
+                    {runway.data.scopes
+                      .filter((scope) => scope.accountId !== null)
+                      .map((scope) => (
+                        <RunwayRow key={scope.accountId} scope={scope} />
+                      ))}
+                  </div>
+                  <p className="chart__note">
+                    Investimentos entram apenas na linha consolidada, porque um ativo não pertence a
+                    uma conta corrente específica.
+                  </p>
                 </div>
               )}
-            </Card>
-
-            <Card
-              span={12}
-              title="Evolução do Health Score"
-              subtitle="Últimos 12 meses, recalculado a cada mês — nunca um número guardado"
-            >
-              <ScoreHistoryChart points={scoreHistory.data?.history ?? []} />
             </Card>
 
             {/*
@@ -327,7 +333,7 @@ export function FinancialHealthPage() {
               a diferença explícita em vez de parecer inconsistência.
             */}
             <Card
-              span={12}
+              span={6}
               title="Patrimônio consolidado"
               assumptions={netWorth.data?.assumptions}
               subtitle="Quanto existe hoje contra quanto se deve, somando conta, carteira e dívida"
@@ -382,50 +388,7 @@ export function FinancialHealthPage() {
             </Card>
 
             <Card
-              span={5}
-              title="Runway"
-              assumptions={runway.data?.consolidated.assumptions}
-              subtitle="Quantos meses os recursos atuais cobrem o custo mensal médio"
-            >
-              {runway.isError ? (
-                <EmptyState
-                  icon="alert"
-                  title="Falha ao carregar"
-                  body="Não foi possível carregar o runway agora. Tente novamente em instantes."
-                />
-              ) : !runway.data ? (
-                <EmptyState title="Calculando…" />
-              ) : (
-                <div className="stack stack--loose">
-                  <StatTile
-                    label="Consolidado"
-                    large
-                    value={monthsLabel(runway.data.consolidated.months)}
-                    foot={
-                      <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                        {money(runway.data.consolidated.netWorthCents)} considerados,{' '}
-                        {money(runway.data.consolidated.monthlyCostCents)} por mês
-                      </span>
-                    }
-                  />
-                  <hr className="divider" />
-                  <div className="kv">
-                    {runway.data.scopes
-                      .filter((scope) => scope.accountId !== null)
-                      .map((scope) => (
-                        <RunwayRow key={scope.accountId} scope={scope} />
-                      ))}
-                  </div>
-                  <p className="chart__note">
-                    Investimentos entram apenas na linha consolidada, porque um ativo não pertence a
-                    uma conta corrente específica.
-                  </p>
-                </div>
-              )}
-            </Card>
-
-            <Card
-              span={7}
+              span={12}
               title="Radar de risco"
               assumptions={radar.data?.assumptions}
               subtitle="Cada indicador comparado com o limite que você configurou"
@@ -448,6 +411,43 @@ export function FinancialHealthPage() {
                 <div className="stack stack--loose">
                   {radar.data.rules.map((rule) => (
                     <RiskRow key={rule.key} rule={rule} />
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <Card
+              span={12}
+              title="Checklist de fechamento mensal"
+              subtitle="O que falta olhar antes de considerar o mês fechado"
+            >
+              {!closingChecklist.data ? (
+                <SkeletonLines lines={4} />
+              ) : (
+                <div className="stack stack--tight">
+                  {closingChecklist.data.items.map((item) => (
+                    <div key={item.key} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
+                      <span className="row" style={{ gap: 'var(--sp-2)' }}>
+                        <span style={{ color: item.done ? 'var(--status-good)' : 'var(--neutral-mark)', display: 'grid' }}>
+                          <Icon name={item.done ? 'check' : 'clock'} size={14} strokeWidth={2.4} />
+                        </span>
+                        <span>{item.label}</span>
+                      </span>
+                      {item.kind === 'manual' ? (
+                        <Button
+                          size="sm"
+                          variant={item.done ? 'quiet' : 'primary'}
+                          icon={item.done ? 'x' : 'check'}
+                          onClick={() => toggleReview.mutate(!item.done)}
+                        >
+                          {item.done ? 'Desmarcar revisão' : 'Marcar como revisada'}
+                        </Button>
+                      ) : (
+                        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                          {item.detail}
+                        </span>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
