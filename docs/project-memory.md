@@ -936,3 +936,46 @@ chamadas migraram. Três detalhes que só apareceram medindo:
 
 Os dois `Assumptions` do `SimulatorModal` seguem com rótulo completo: não há
 título de seção ali para o ⓘ acompanhar.
+
+## 01/09/2026 — Layout: masonry sai, linha alinhada + conteúdo elástico entra
+
+Estudo com os quatro layouts possíveis para duas colunas, medido ao vivo
+(artefato publicado). Números na mesma amostra de 8 cards, 1200px:
+
+| modo | altura | pares com topo alinhado | topos distintos | vazio no card | gráfico |
+|---|---|---|---|---|---|
+| A masonry | 1070 | 1 de 6 | 7 | 5k px² | 96px |
+| B linha alinhada | 1204 | 3 de 4 | 5 | 150k px² | 96px |
+| C topo alinhado | 1204 | 3 de 3 | 5 | 5k px² | 96px |
+| D linha + elástico | 1204 | 3 de 4 | 5 | 5k px² | **208px** |
+
+O usuário escolheu D. O argumento decisivo é a última coluna: no B a altura
+extra da linha virava 150 mil px² de nada; no D vira resolução vertical do
+dado.
+
+**A queixa original estava mal diagnosticada** (por mim, em 01/09): "cards
+com espaço vazio" não vinha de `align-items: stretch`, vinha de conteúdo
+parado dentro de card alto. Trocar para `start` e depois para masonry
+tratou o sintoma.
+
+**Duas metades inseparáveis.** `align-items: stretch` no `.bento` só é
+aceitável junto com os blocos que crescem (`.chart`, `.card__fill`, e o
+padrão declarativo em `.card > .stack/.kv/.ranked/.table-wrap`). Ligar a
+primeira sem a segunda devolve exatamente o problema de origem.
+
+**Contrapartida medida e tratada.** Sem teto, 40 linhas de tabela levavam o
+card a 948px e o gráfico vizinho a 840px — tão ruim quanto o vazio. Daí
+`--card-content-cap: 420px` com rolagem interna em `.card > .table-wrap`.
+
+**O que ainda custa.** Uma lista curta ao lado de um card alto fica com
+vazio visível de verdade: medido em 236px numa `.stack` de 2 itens ao lado
+de uma `.kv` de 12. `.card__fill--center` e `--spread` existem para afinar
+isso caso a caso; o padrão continua alinhado ao topo porque lista
+centralizada se desgruda do próprio título. Só o número hero centraliza por
+padrão (`.hero-figure__block`).
+
+Uma armadilha que só apareceu porque tentei reproduzir o masonry numa demo
+sem `align-items: start`: sem ele, o card estica para preencher o span, a
+medição seguinte lê a altura esticada e o span cresce um gap por passo. Na
+demo o grid cresceu 16.320px em 2 segundos. O app nunca teve isso, porque
+o `start` estava lá — mas quem for reintroduzir masonry precisa saber.
