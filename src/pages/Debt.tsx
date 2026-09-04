@@ -94,8 +94,43 @@ type PaymentRow = {
   notes: string | null
 }
 
+type ClosedDebtRow = {
+  id: number
+  name: string
+  kind: string
+  installmentCount: number | null
+  closedOn: string | null
+  totalPaidCents: number
+  lastPaymentOn: string | null
+}
+
+type SuggestedMatch = {
+  pending: { id: number; postedOn: string; description: string; amountCents: number }
+  match: { id: number; postedOn: string; description: string; amountCents: number }
+  debtId: number
+  debtName: string
+}
+
+type ValueMismatch = {
+  debtId: number
+  debtName: string
+  registeredAmountCents: number
+  confirmedAmountCents: number
+  diffCents: number
+  paymentCount: number
+  confirmedTransactionCount: number
+  payments: Array<{ id: number; paidOn: string; amountCents: number; notes: string | null }>
+  confirmedTransactions: Array<{ id: number; postedOn: string; description: string; amountCents: number }>
+}
+
+type ReconciliationQueue = {
+  suggestedMatches: SuggestedMatch[]
+  valueMismatches: ValueMismatch[]
+}
+
 type Overview = {
   debts: DebtRow[]
+  closedDebts: ClosedDebtRow[]
   totalCents: number
   monthlyInterestCents: number
   minimumCents: number
@@ -137,6 +172,7 @@ export function DebtPage() {
   const [period, setPeriod] = useState(() => monthOptions[monthOptions.length - 1]!)
   const [paymentModal, setPaymentModal] = useState<DebtRow | null>(null)
   const [paymentHistory, setPaymentHistory] = useState<DebtRow | null>(null)
+  const [mismatchDetail, setMismatchDetail] = useState<ValueMismatch | null>(null)
 
   const extraMonthlyCents = EXTRA_STEPS[extraIndex] ?? 0
 
@@ -150,6 +186,11 @@ export function DebtPage() {
     queryFn: () => api.get<Projection>('/debts/projection', { extraMonthlyCents, strategy }),
     enabled: (overview.data?.debts.length ?? 0) > 0,
     placeholderData: (previous) => previous,
+  })
+
+  const reconciliation = useQuery({
+    queryKey: ['debt-reconciliation'],
+    queryFn: () => api.get<ReconciliationQueue>('/debts/reconciliation'),
   })
 
   const data = overview.data
@@ -343,6 +384,12 @@ export function DebtPage() {
               />
             </Card>
 
+            <ReconciliationQueueCard
+              queue={reconciliation.data}
+              isLoading={reconciliation.isLoading}
+              onDetail={setMismatchDetail}
+            />
+
             <Card span={12} flush title="Dívidas cadastradas">
               <div className="table-wrap">
                 <table className="table">
@@ -422,6 +469,47 @@ export function DebtPage() {
                 </table>
               </div>
             </Card>
+
+            {data.closedDebts.length > 0 && (
+              <Card
+                span={12}
+                flush
+                title="Quitadas"
+                subtitle="Dívidas cujas parcelas foram todas pagas — saem da lista ativa automaticamente"
+              >
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Dívida</th>
+                        <th>Tipo</th>
+                        <th className="table__center">Parcelas</th>
+                        <th className="table__num">Total pago</th>
+                        <th>Quitada em</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.closedDebts.map((debt) => (
+                        <tr key={debt.id}>
+                          <td>
+                            <span className="row" style={{ gap: 'var(--sp-2)' }}>
+                              <span className="swatch" style={{ background: KIND_COLOR[debt.kind] ?? '#71717a' }} />
+                              <strong>{debt.name}</strong>
+                            </span>
+                          </td>
+                          <td className="muted">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
+                          <td className="table__center">
+                            {debt.installmentCount === null ? '-' : `${debt.installmentCount} / ${debt.installmentCount}`}
+                          </td>
+                          <td className="table__num">{money(debt.totalPaidCents)}</td>
+                          <td className="muted">{debt.closedOn ? fmtDate(debt.closedOn) : '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
           </Bento>
         )}
       </div>
@@ -434,7 +522,230 @@ export function DebtPage() {
       {paymentHistory && (
         <DebtPaymentHistoryModal debt={paymentHistory} onClose={() => setPaymentHistory(null)} />
       )}
+      {mismatchDetail && (
+        <ValueMismatchDetailModal mismatch={mismatchDetail} onClose={() => setMismatchDetail(null)} />
+      )}
     </>
+  )
+}
+
+/**
+ * Fila de conciliação (specs/debt-reconciliation): dois tipos de item, um
+ * card só, para não precisar caçar cada caso espalhado pelo app.
+ *
+ * "Match sugerido" reaproveita reconciliationCandidates/confirm-match/
+ * dismiss — as MESMAS rotas que o card "Possíveis conciliações" do Painel
+ * já usa (`src/pages/Dashboard.tsx`), aqui filtradas para pendências
+ * ligadas a uma dívida. Confirmar ou rejeitar aqui também limpa a
+ * sugestão de lá, porque é a mesma linha no banco.
+ *
+ * "Divergência de valor" não tem match para confirmar — é uma
+ * discrepância entre dois registros que já existem (o que Endividamento
+ * anotou como pago vs. o que o extrato mostra), então só oferece "Ver
+ * detalhes".
+ */
+function ReconciliationQueueCard({
+  queue,
+  isLoading,
+  onDetail,
+}: {
+  queue: ReconciliationQueue | undefined
+  isLoading: boolean
+  onDetail: (mismatch: ValueMismatch) => void
+}) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+
+  const confirm = useMutation({
+    mutationFn: ({ pendingId, matchId }: { pendingId: number; matchId: number }) =>
+      api.post(`/cash-flow/pending/${pendingId}/confirm-match`, { matchId }),
+    onSuccess: () => {
+      toast('Conciliado: a pendência foi substituída pelo lançamento real')
+      queryClient.invalidateQueries()
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao conciliar', 'error'),
+  })
+
+  const dismiss = useMutation({
+    mutationFn: ({ pendingId, matchId }: { pendingId: number; matchId: number }) =>
+      api.post('/cash-flow/reconciliation-candidates/dismiss', { pendingId, matchId }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['debt-reconciliation'] }),
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
+  })
+
+  if (isLoading) {
+    return (
+      <Card span={12} title="Fila de conciliação">
+        <SkeletonLines lines={2} />
+      </Card>
+    )
+  }
+
+  const matches = queue?.suggestedMatches ?? []
+  const mismatches = queue?.valueMismatches ?? []
+  if (matches.length === 0 && mismatches.length === 0) return null
+
+  return (
+    <Card
+      span={12}
+      title="Fila de conciliação"
+      subtitle="Sugestões e divergências entre o extrato e o que está registrado — nada muda de status sem confirmação"
+    >
+      <div className="stack stack--loose">
+        {matches.map(({ pending, match, debtName }) => (
+          <div
+            key={`${pending.id}-${match.id}`}
+            className="row row--between row--wrap"
+            style={{ gap: 'var(--sp-3)' }}
+          >
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <span className="row" style={{ gap: 'var(--sp-2)' }}>
+                <strong className="truncate">{debtName}</strong>
+                <span className="badge badge--warning">Match sugerido</span>
+              </span>
+              <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                {match.description} · recebido em {fmtDate(match.postedOn)}
+              </div>
+            </div>
+            <span className="row" style={{ gap: 'var(--sp-3)' }}>
+              <span className="stack" style={{ gap: 0 }}>
+                <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                  cadastrado / CSV
+                </span>
+                <strong className="tabular">{money(Math.abs(pending.amountCents))}</strong>
+              </span>
+              <Button
+                size="sm"
+                variant="primary"
+                icon="check"
+                onClick={() => confirm.mutate({ pendingId: pending.id, matchId: match.id })}
+                disabled={confirm.isPending}
+              >
+                Confirmar match
+              </Button>
+              <Button
+                variant="quiet"
+                size="sm"
+                icon="x"
+                title="Não é o mesmo, remover esta sugestão"
+                onClick={() => dismiss.mutate({ pendingId: pending.id, matchId: match.id })}
+                disabled={dismiss.isPending}
+              />
+            </span>
+          </div>
+        ))}
+
+        {mismatches.map((mismatch) => (
+          <div key={mismatch.debtId} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <span className="row" style={{ gap: 'var(--sp-2)' }}>
+                <strong className="truncate">{mismatch.debtName}</strong>
+                <span className="badge badge--critical">Divergência de valor</span>
+              </span>
+              <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                {mismatch.paymentCount} pagamento(s) registrado(s) · {mismatch.confirmedTransactionCount} lançamento(s) confirmado(s) no extrato
+              </div>
+            </div>
+            <span className="row" style={{ gap: 'var(--sp-3)' }}>
+              <span className="stack" style={{ gap: 0 }}>
+                <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                  cadastrado
+                </span>
+                <strong className="tabular">{money(mismatch.registeredAmountCents)}</strong>
+              </span>
+              <span className="stack" style={{ gap: 0 }}>
+                <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                  extrato
+                </span>
+                <strong className="tabular">{money(mismatch.confirmedAmountCents)}</strong>
+              </span>
+              <span className="stack" style={{ gap: 0 }}>
+                <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                  diferença
+                </span>
+                <strong className="tabular neg">
+                  {mismatch.diffCents >= 0 ? '+' : ''}
+                  {money(mismatch.diffCents)}
+                </strong>
+              </span>
+              <Button size="sm" icon="search" onClick={() => onDetail(mismatch)}>
+                Ver detalhes
+              </Button>
+            </span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+function ValueMismatchDetailModal({ mismatch, onClose }: { mismatch: ValueMismatch; onClose: () => void }) {
+  return (
+    <Modal
+      title={`Divergência: ${mismatch.debtName}`}
+      onClose={onClose}
+      footer={
+        <Button variant="quiet" onClick={onClose}>
+          Fechar
+        </Button>
+      }
+    >
+      <div className="stack">
+        <p className="chart__note">
+          Endividamento registrou {money(mismatch.registeredAmountCents)} em {mismatch.paymentCount}{' '}
+          pagamento(s); o extrato confirma {money(mismatch.confirmedAmountCents)} em{' '}
+          {mismatch.confirmedTransactionCount} lançamento(s) ligado(s) a esta dívida. Os dois lados não
+          guardam qual pagamento corresponde a qual lançamento, então a comparação é pelo total — confira
+          as duas listas abaixo.
+        </p>
+
+        <div className="row row--wrap" style={{ gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <span className="stat__label">Registrado em Endividamento</span>
+            <div className="table-wrap" style={{ marginTop: 'var(--sp-2)' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th className="table__num">Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mismatch.payments.map((p) => (
+                    <tr key={p.id}>
+                      <td className="tabular">{fmtDate(p.paidOn)}</td>
+                      <td className="table__num">{money(p.amountCents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <span className="stat__label">Confirmado no extrato</span>
+            <div className="table-wrap" style={{ marginTop: 'var(--sp-2)' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th className="table__num">Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mismatch.confirmedTransactions.map((t) => (
+                    <tr key={t.id}>
+                      <td className="tabular">{fmtDate(t.postedOn)}</td>
+                      <td className="table__num">{money(Math.abs(t.amountCents))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Modal>
   )
 }
 

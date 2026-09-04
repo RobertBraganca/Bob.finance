@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { Icon, type IconName } from './Icon'
-import { money, signedBps } from '../../lib/format'
+import { money, signedBps, signedPoints } from '../../lib/format'
 import { CategorySelect } from './CategorySelect'
 import { FilterSelect } from './FilterSelect'
 import { Assumptions, type AssumptionBag } from './Assumptions'
@@ -131,7 +131,23 @@ export function Slab({
 /* ------------------------------------------------------------------ *
  * Figures
  * ------------------------------------------------------------------ */
-export function Delta({ bps, label }: { bps: number | null; label?: string }) {
+export function Delta({
+  bps,
+  label,
+  unit = 'percent',
+}: {
+  bps: number | null
+  label?: string
+  /**
+   * `percent` (padrão) é variação relativa: "receita subiu 12%".
+   * `points` é diferença entre duas porcentagens: a participação de
+   * parceiros saiu de 14% para 18% — isso é +4 p.p., e imprimir "+4%"
+   * afirmaria outra coisa (ver `points` em lib/format.ts, que já existia
+   * para o desvio de alocação). Mesma seta, mesma cor, mesmo tamanho: só
+   * a unidade muda.
+   */
+  unit?: 'percent' | 'points'
+}) {
   if (bps === null) {
     return <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>sem base de comparação</span>
   }
@@ -140,7 +156,7 @@ export function Delta({ bps, label }: { bps: number | null; label?: string }) {
   return (
     <span className="delta" style={{ color: flat ? 'var(--ink-3)' : rising ? 'var(--delta-up)' : 'var(--delta-down)' }}>
       {!flat && <Icon name={rising ? 'arrowUpRight' : 'arrowDownLeft'} size={12} strokeWidth={2.2} />}
-      {signedBps(bps)}
+      {unit === 'points' ? signedPoints(bps) : signedBps(bps)}
       {label && <span className="muted" style={{ fontWeight: 400 }}>{label}</span>}
     </span>
   )
@@ -155,6 +171,7 @@ export function StatTile({
   value,
   delta,
   deltaLabel,
+  deltaUnit,
   foot,
   large,
   spark,
@@ -163,6 +180,8 @@ export function StatTile({
   value: ReactNode
   delta?: number | null
   deltaLabel?: string
+  /** Repassado a `Delta` — ver o porquê de `points` lá. */
+  deltaUnit?: 'percent' | 'points'
   foot?: ReactNode
   large?: boolean
   /** Série curta para a sparkline do tile: a forma do número ao longo do tempo, sem eixo nem rótulo. */
@@ -175,7 +194,7 @@ export function StatTile({
       {spark && spark.length > 1 && <Sparkline points={spark} />}
       {(delta !== undefined || foot) && (
         <span className="stat__foot">
-          {delta !== undefined && <Delta bps={delta} label={deltaLabel} />}
+          {delta !== undefined && <Delta bps={delta} label={deltaLabel} unit={deltaUnit} />}
           {foot}
         </span>
       )}
@@ -348,7 +367,20 @@ export function Meter({
 }
 
 /** Status never rides on colour alone: icon + label always travel with it. */
-export function StatusBadge({ state }: { state: MeterState }) {
+export function StatusBadge({
+  state,
+  label,
+}: {
+  state: MeterState
+  /**
+   * Troca só as PALAVRAS, nunca o tom nem o ícone: "Pronto para saque" lê
+   * melhor que "Atingido" numa plataforma de parceiro, mas continua sendo
+   * o mesmo estado `met`, com a mesma cor e o mesmo classificador
+   * (`targetProgressState`). Sem isso a alternativa era um badge paralelo
+   * por tela, que é como um sistema de status vira três.
+   */
+  label?: string
+}) {
   const tone =
     state === 'met' || state === 'on_track'
       ? 'badge--good'
@@ -360,7 +392,7 @@ export function StatusBadge({ state }: { state: MeterState }) {
   return (
     <span className={cx('badge', tone)}>
       <Icon name={METER_ICON[state]} size={11} strokeWidth={2.4} />
-      {METER_LABEL[state]}
+      {label ?? METER_LABEL[state]}
     </span>
   )
 }

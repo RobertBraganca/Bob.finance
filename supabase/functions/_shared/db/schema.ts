@@ -375,6 +375,17 @@ export const transactions = pgTable(
     /** the approved quote whose revenue this row is, if any (decisions/0032 follow-up) */
     sourceQuoteId: int('source_quote_id').references(() => projectQuotes.id, { onDelete: 'set null' }),
     /**
+     * The partner platform whose withdrawal this row is, if any — set only
+     * on the entrada that a saque generates in the destination account.
+     * Same shape and purpose as `sourceQuoteId` above: the domain object
+     * that produced the row, invisible in Lançamentos, and the only link
+     * the derived platform balance needs to know what has already been
+     * withdrawn (decisions/0037).
+     */
+    partnerPlatformId: int('partner_platform_id').references(() => partnerPlatforms.id, {
+      onDelete: 'set null',
+    }),
+    /**
      * The YYYY-MM occurrence a materialized row fills, fixed at creation
      * time — independent of `postedOn`, which the user can freely edit
      * without that edit being mistaken for "this occurrence never
@@ -402,6 +413,7 @@ export const transactions = pgTable(
     index('txn_forecast_idx').on(t.forecastId),
     index('txn_debt_idx').on(t.debtId),
     index('txn_source_quote_idx').on(t.sourceQuoteId),
+    index('txn_partner_platform_idx').on(t.partnerPlatformId).where(sql`${t.partnerPlatformId} is not null`),
     // Guards the race in materialize()/materializeDebtInstallments(): two
     // concurrent calls both seeing "period missing" before either INSERT
     // commits used to be able to double-insert the same pending occurrence.
@@ -963,5 +975,63 @@ export const usageEvents = pgTable(
     index('usage_events_feature_idx').on(t.feature),
     index('usage_events_occurred_at_idx').on(t.occurredAt),
     index('usage_events_kind_idx').on(t.kind),
+  ],
+)
+
+/* ------------------------------------------------------------------ *
+ * Receita de parceiros — comissões de plataforma (Wbuy, Hostinger,
+ * Nuvemshop, Adobe) que acumulam saldo INTERNO na plataforma até bater
+ * um mínimo de saque, e só viram dinheiro de verdade quando sacadas.
+ *
+ * Duas tabelas de domínio, nenhum ledger paralelo e nenhum saldo
+ * gravado. A relação com `transactions` é a mesma que `projectQuotes`
+ * tem: o valor acumula no domínio e a REALIZAÇÃO (o saque, como a
+ * aprovação de uma cotação) é que escreve a linha real no ledger, na
+ * conta de destino que o usuário escolher.
+ * ------------------------------------------------------------------ */
+export const partnerPlatforms = pgTable(
+  'partner_platforms',
+  {
+    id: id(),
+    name: text('name').notNull(),
+    /**
+     * Mínimo de saque da plataforma, editável a qualquer momento — é uma
+     * regra do parceiro, não um dado histórico. Zero significa "sem
+     * mínimo", e nesse caso a barra de progresso não tem o que medir.
+     */
+    minWithdrawalCents: int('min_withdrawal_cents').notNull().default(0),
+    notes: text('notes'),
+    active: boolean('active').notNull().default(true),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('partner_platforms_name_uq').on(sql`lower(${t.name})`)],
+)
+
+/**
+ * Log de competência: o que a plataforma passou a DEVER, com data e valor.
+ *
+ * Não é um lançamento, e não deve virar um: esse dinheiro não está em
+ * conta nenhuma até o saque, então uma linha em `transactions` aqui
+ * inflaria saldo e receita de um mês em que nada entrou. O saldo da
+ * plataforma é `sum(amount_cents)` daqui menos o que já foi sacado —
+ * sempre derivado, nunca uma coluna (`architecture.md`, "Derivação em vez
+ * de saldo guardado").
+ */
+export const partnerCommissions = pgTable(
+  'partner_commissions',
+  {
+    id: id(),
+    platformId: int('platform_id')
+      .notNull()
+      .references(() => partnerPlatforms.id, { onDelete: 'cascade' }),
+    /** ISO date YYYY-MM-DD — ordena cronologicamente como texto, igual `postedOn` */
+    earnedOn: text('earned_on').notNull(),
+    amountCents: int('amount_cents').notNull(),
+    notes: text('notes'),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [
+    index('partner_commissions_platform_idx').on(t.platformId, t.earnedOn),
+    index('partner_commissions_earned_idx').on(t.earnedOn),
   ],
 )

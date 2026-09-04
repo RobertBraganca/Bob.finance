@@ -1000,6 +1000,20 @@
   background: var(--brand-wash);
 }
 
+/*
+ * Uma fatura (linha ligada a uma dívida, ver `debtId` em Transactions.tsx)
+ * já paga recua visualmente da que ainda está pendente. 0.55, não os 0.45
+ * de `.btn:disabled`/`.period-nav__step:disabled` — esta linha continua
+ * clicável e editável (não é um controle desabilitado), só precisa ler
+ * como "resolvida" contra o resto da tabela.
+ */
+.table tbody tr[data-settled-debt='true'] td {
+  opacity: 0.55;
+}
+.table tbody tr[data-settled-debt='true']:hover td {
+  opacity: 0.8;
+}
+
 /* Existia só como `style={{ textAlign: 'center' }}` repetido célula a
    célula; virou classe para o cabeçalho e a coluna nunca discordarem. */
 .table__center {

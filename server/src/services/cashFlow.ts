@@ -1,9 +1,9 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { cashFlowForecasts, debtPayments, debts, reconciliationDismissals, skippedOccurrences, transactions } from '../db/schema'
 import { addMonths, daysInMonth, monthsBetween, todayIso } from '../core/dates'
 import { dedupeHash, directionOf, normalizeDescription } from '../core/normalize'
-import { paymentStats } from './debt'
+import { closeDebtIfFullyPaid, paymentStats } from './debt'
 
 /**
  * A recurring retainer or an already-agreed installment deal, unified
@@ -509,6 +509,11 @@ export async function settlePending(id: number) {
     await db
       .insert(debtPayments)
       .values({ debtId: row.debtId, kind: 'payment', paidOn: row.postedOn, amountCents: Math.abs(row.amountCents) })
+    // Mesma regra de fechamento que Endividamento's "Registrar pagamento"
+    // aplica (debt.ts createPayment) -- as duas telas tem que fechar a
+    // divida pelo mesmo criterio, ou reabrimos o bug 2 por um caminho
+    // diferente (achado em 03/09/2026).
+    await closeDebtIfFullyPaid(row.debtId)
   }
 
   return updated
@@ -600,6 +605,8 @@ export async function confirmReconciliation(pendingId: number, matchId?: number)
           await db
             .insert(debtPayments)
             .values({ debtId: pendingRow.debtId, kind: 'payment', paidOn: match.postedOn, amountCents: Math.abs(match.amountCents) })
+          // Mesma regra de fechamento de settlePending/createPayment.
+          await closeDebtIfFullyPaid(pendingRow.debtId)
         }
       }
     }
@@ -611,4 +618,160 @@ function addDays(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString().slice(0, 10)
+}
+
+
+/* ------------------------------------------------------------------ *
+ * Fila de conciliacao de Endividamento (specs/debt, decisions/0037-ish
+ * "fila de conciliacao" -- ver docs/specs/debt-reconciliation)
+ * ------------------------------------------------------------------ */
+export type DebtValueMismatch = {
+  debtId: number
+  debtName: string
+  /** soma de debt_payments (kind='payment') -- o que Endividamento registrou como pago */
+  registeredAmountCents: number
+  /** soma de transactions confirmadas (pending=false) com este debt_id -- o que o extrato mostra */
+  confirmedAmountCents: number
+  diffCents: number
+  paymentCount: number
+  confirmedTransactionCount: number
+  /** os dois lados que "Ver detalhes" mostra lado a lado, ate 20 cada */
+  payments: Array<{ id: number; paidOn: string; amountCents: number; notes: string | null }>
+  confirmedTransactions: Array<{ id: number; postedOn: string; description: string; amountCents: number }>
+}
+
+export type DebtSuggestedMatch = ReconciliationCandidate & { debtId: number; debtName: string }
+
+export type DebtReconciliationQueue = {
+  suggestedMatches: DebtSuggestedMatch[]
+  valueMismatches: DebtValueMismatch[]
+  assumptions: Record<string, unknown>
+}
+
+/**
+ * A fila de conciliacao de Endividamento: dois tipos de item, nenhum
+ * motor de matching novo.
+ *
+ * "Match sugerido" e reconciliationCandidates() -- a MESMA funcao que ja
+ * alimenta o card "Possiveis conciliacoes" do Painel -- filtrada as
+ * pendencias ligadas a uma divida (pending.debtId != null). Confirmar ou
+ * rejeitar aqui usa as MESMAS rotas que o Painel ja usa
+ * (confirmReconciliation / dismissReconciliation): nenhuma escrita nova,
+ * so uma leitura filtrada e reaproveitada.
+ *
+ * "Divergencia de valor" e novo, mas nao e um matcher: compara os DOIS
+ * lados que hoje registram "isso foi pago" -- debt_payments (o log manual
+ * que installmentsPaid le, o que "Registrar pagamento" em Endividamento
+ * grava) contra transactions confirmadas (pending=false) com este
+ * debt_id (o que o extrato realmente mostra, o que a Home/Lancamentos
+ * leem). Comparado em SOMA por divida, nunca pareado pagamento a
+ * pagamento: debt_payments nao guarda o id da transacao que liquidou
+ * (so debtId/kind/paidOn/amountCents), entao casar um pagamento
+ * especifico com uma linha especifica seria adivinhar uma correspondencia
+ * que o dado nao registra. A soma e o unico numero que os dois lados
+ * derivam de forma comparavel -- e foi assim, comparando somas, que a
+ * revisao de 03/09/2026 achou a divida 8 com um lancamento confirmado sem
+ * nenhum debt_payments correspondente.
+ */
+export async function debtReconciliationQueue(): Promise<DebtReconciliationQueue> {
+  const candidates = await reconciliationCandidates()
+  const debtCandidates = candidates.filter(
+    (c): c is ReconciliationCandidate & { pending: { debtId: number } } => c.pending.debtId !== null,
+  )
+
+  const debtIds = [...new Set(debtCandidates.map((c) => c.pending.debtId))]
+  const debtNames = debtIds.length
+    ? new Map(
+        (await db.select({ id: debts.id, name: debts.name }).from(debts).where(inArray(debts.id, debtIds))).map(
+          (d) => [d.id, d.name] as const,
+        ),
+      )
+    : new Map<number, string>()
+
+  const suggestedMatches: DebtSuggestedMatch[] = debtCandidates.map((c) => ({
+    ...c,
+    debtId: c.pending.debtId,
+    debtName: debtNames.get(c.pending.debtId) ?? c.pending.description,
+  }))
+
+  const rows = await db.execute<{
+    debtId: number
+    debtName: string
+    registeredAmountCents: number
+    confirmedAmountCents: number
+    paymentCount: number
+    confirmedTransactionCount: number
+  }>(sql`
+    select
+      d.id as "debtId",
+      d.name as "debtName",
+      coalesce(p.total, 0) as "registeredAmountCents",
+      coalesce(t.total, 0) as "confirmedAmountCents",
+      coalesce(p.count, 0) as "paymentCount",
+      coalesce(t.count, 0) as "confirmedTransactionCount"
+    from debts d
+    left join (
+      select debt_id, sum(amount_cents) as total, count(*) as count
+      from debt_payments where kind = 'payment' group by debt_id
+    ) p on p.debt_id = d.id
+    left join (
+      select debt_id, sum(abs(amount_cents)) as total, count(*) as count
+      from transactions where debt_id is not null and pending = false group by debt_id
+    ) t on t.debt_id = d.id
+    where coalesce(p.total, 0) > 0 or coalesce(t.total, 0) > 0
+  `)
+
+  const mismatchedIds = rows
+    .filter((r) => r.registeredAmountCents !== r.confirmedAmountCents)
+    .map((r) => r.debtId)
+
+  const [paymentRows, transactionRows] = mismatchedIds.length
+    ? await Promise.all([
+        db
+          .select({
+            debtId: debtPayments.debtId,
+            id: debtPayments.id,
+            paidOn: debtPayments.paidOn,
+            amountCents: debtPayments.amountCents,
+            notes: debtPayments.notes,
+          })
+          .from(debtPayments)
+          .where(and(inArray(debtPayments.debtId, mismatchedIds), eq(debtPayments.kind, 'payment')))
+          .orderBy(desc(debtPayments.paidOn)),
+        db
+          .select({
+            debtId: transactions.debtId,
+            id: transactions.id,
+            postedOn: transactions.postedOn,
+            description: transactions.description,
+            amountCents: transactions.amountCents,
+          })
+          .from(transactions)
+          .where(and(inArray(transactions.debtId, mismatchedIds), eq(transactions.pending, false)))
+          .orderBy(desc(transactions.postedOn)),
+      ])
+    : [[], []]
+
+  const valueMismatches: DebtValueMismatch[] = rows
+    .filter((r) => r.registeredAmountCents !== r.confirmedAmountCents)
+    .map((r) => ({
+      ...r,
+      diffCents: r.confirmedAmountCents - r.registeredAmountCents,
+      payments: paymentRows.filter((p) => p.debtId === r.debtId).map(({ debtId: _debtId, ...rest }) => rest),
+      confirmedTransactions: transactionRows
+        .filter((t) => t.debtId === r.debtId)
+        .map(({ debtId: _debtId, ...rest }) => rest),
+    }))
+
+  return {
+    suggestedMatches,
+    valueMismatches,
+    assumptions: {
+      matchSugerido:
+        'mesma engrenagem do card "Possiveis conciliacoes" do Painel (reconciliationCandidates), filtrada as pendencias ligadas a uma divida',
+      divergenciaDeValor:
+        'compara a soma de debt_payments (o que Endividamento registrou como pago) contra a soma de transactions confirmadas com este debt_id (o que o extrato realmente mostra) -- nunca pareado pagamento a pagamento, porque debt_payments nao guarda o id da transacao que liquidou',
+      nenhumaAcaoAutomatica: 'nenhuma divida muda de status por uma sugestao nao confirmada -- so confirm-match/dismiss, os mesmos usados pelo Painel',
+    },
+  }
 }

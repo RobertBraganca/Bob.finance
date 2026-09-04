@@ -37,6 +37,7 @@ const FinancialEnginePage = lazy(() =>
   import('./pages/FinancialEngine').then((m) => ({ default: m.FinancialEnginePage })),
 )
 const PricingPage = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.PricingPage })))
+const PartnersPage = lazy(() => import('./pages/Partners').then((m) => ({ default: m.PartnersPage })))
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })))
 
 /** Fallback do Suspense enquanto o chunk da rota baixa — só aparece na
@@ -93,6 +94,7 @@ const FEATURE_BY_PATH: Record<string, string> = {
   '/saude': 'financial-health',
   '/motor': 'financial-engine',
   '/precificacao': 'pricing',
+  '/parceiros': 'partners',
   '/importar': 'import',
   '/categorias': 'categories',
   '/ajustes': 'settings',
@@ -142,6 +144,7 @@ export function App() {
               <Route path="/saude" element={<FinancialHealthPage />} />
               <Route path="/motor" element={<FinancialEnginePage />} />
               <Route path="/precificacao" element={<PricingPage />} />
+              <Route path="/parceiros" element={<PartnersPage />} />
               <Route path="/importar" element={<ImportPage />} />
               <Route path="/categorias" element={<CategoriesPage />} />
               <Route path="/ajustes" element={<SettingsPage />} />

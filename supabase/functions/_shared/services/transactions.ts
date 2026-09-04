@@ -268,6 +268,8 @@ export type ManualEntry = {
   source?: 'manual' | 'daily' | 'adjustment'
   /** the approved quote this revenue came from, if any */
   sourceQuoteId?: number | null
+  /** the partner platform this withdrawal came from, if any (services/partners.ts) */
+  partnerPlatformId?: number | null
   /**
    * Parcela ainda a receber/pagar. Segue `decisions/0003`: uma pendência é
    * uma linha REAL em `transactions` com `pending = true`, nunca uma tabela
@@ -302,6 +304,11 @@ export async function createTransaction(entry: ManualEntry) {
         categorizedBy: entry.categoryId ? 'manual' : 'none',
         dedupeHash: hash,
         sourceQuoteId: entry.sourceQuoteId ?? null,
+        partnerPlatformId: entry.partnerPlatformId ?? null,
+        // `notes` estava no tipo `ManualEntry` desde sempre e NUNCA era
+        // gravado — nenhum chamador passava o campo, então a perda nunca
+        // apareceu. O saque de parceiro é o primeiro a usá-lo (03/09/2026).
+        notes: entry.notes ?? null,
         pending: entry.pending ?? false,
       })
       .returning()

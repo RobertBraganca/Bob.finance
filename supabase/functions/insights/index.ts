@@ -16,6 +16,7 @@ import * as healthService from '../_shared/services/financialHealth.ts'
 import * as goalsService from '../_shared/services/goals.ts'
 import * as investments from '../_shared/services/investments.ts'
 import * as monthlyClosingService from '../_shared/services/monthlyClosing.ts'
+import * as partners from '../_shared/services/partners.ts'
 import * as quotesService from '../_shared/services/quotes.ts'
 import * as simulatorService from '../_shared/services/simulator.ts'
 import { ledgerBounds } from '../_shared/services/transactions.ts'
@@ -65,6 +66,10 @@ app.use('*', requireAdmin)
 
 app.onError((error, c) => {
   if (error instanceof ZodError) return c.json({ error: 'dados inválidos', issues: error.issues }, 400)
+  // Saque acima do saldo, nome de plataforma duplicado: estado do dado de
+  // entrada, não falha de servidor — mesmo 422 que a function pricing dá
+  // para PricingError.
+  if (error instanceof partners.PartnerError) return c.json({ error: error.message }, 422)
   console.error(error)
   return c.json({ error: error instanceof Error ? error.message : 'erro interno' }, 500)
 })
@@ -240,8 +245,12 @@ app.get('/home/banners', async (c) => c.json({ banners: await goalsService.homeB
  * ---------------------------------------------------------------- */
 app.get('/debts', async (c) => {
   const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(c.req.query())
-  const [overview, trend] = await Promise.all([debtService.debtOverview(query), debtService.debtTrend()])
-  return c.json({ ...overview, trend })
+  const [overview, trend, closedDebts] = await Promise.all([
+    debtService.debtOverview(query),
+    debtService.debtTrend(),
+    debtService.listClosedDebts(),
+  ])
+  return c.json({ ...overview, trend, closedDebts })
 })
 
 app.post('/debts', async (c) => {
@@ -334,6 +343,14 @@ app.get('/debts/projection', async (c) => {
     .parse(c.req.query())
   return c.json(await debtService.paydownComparison(query.extraMonthlyCents, query.strategy))
 })
+
+/**
+ * Fila de conciliacao (specs/debt-reconciliation). Confirmar/rejeitar um
+ * match sugerido usa as mesmas rotas /cash-flow/pending/:id/confirm-match
+ * e /cash-flow/reconciliation-candidates/dismiss ja registradas abaixo
+ * para o card "Possiveis conciliacoes" do Painel -- nenhuma escrita nova.
+ */
+app.get('/debts/reconciliation', async (c) => c.json(await cashFlowService.debtReconciliationQueue()))
 
 /* ---------------------------------------------------------------- *
  * Credit cards
@@ -1014,6 +1031,91 @@ app.post('/simulate/decumulation', async (c) => {
     })
     .parse(await c.req.json())
   return c.json(await simulatorService.simulateDecumulation(body))
+})
+
+/* ---------------------------------------------------------------- *
+ * Receita de parceiros (services/partners.ts, decisions/0037)
+ *
+ * Prefixo `/partners`, que `src/lib/api.ts` não lista em
+ * LEDGER_PREFIXES nem trata como `/pricing` — então cai nesta function
+ * (`insights`) em produção. Nenhuma function nova para publicar.
+ * ---------------------------------------------------------------- */
+app.get('/partners', async (c) => {
+  const query = rangeQuery.parse(c.req.query())
+  return c.json(await partners.partnerOverview(await resolveRange(query)))
+})
+
+app.get('/partners/evolution', async (c) => {
+  const query = z.object({ months: z.coerce.number().int().min(2).max(60).default(12) }).parse(c.req.query())
+  return c.json(await partners.partnerEvolution(query.months))
+})
+
+app.get('/partners/commissions', async (c) => {
+  const query = z.object({ platformId: z.coerce.number().int().positive().optional() }).parse(c.req.query())
+  return c.json({ commissions: await partners.listCommissions(query.platformId) })
+})
+
+app.post('/partners/platforms', async (c) => {
+  const body = z
+    .object({
+      name: z.string().min(1).max(80),
+      minWithdrawalCents: z.number().int().min(0).optional(),
+      notes: z.string().max(500).nullable().optional(),
+    })
+    .parse(await c.req.json())
+  return c.json(await partners.createPlatform(body))
+})
+
+app.patch('/partners/platforms/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const body = z
+    .object({
+      name: z.string().min(1).max(80).optional(),
+      minWithdrawalCents: z.number().int().min(0).optional(),
+      notes: z.string().max(500).nullable().optional(),
+      active: z.boolean().optional(),
+    })
+    .parse(await c.req.json())
+  const platform = await partners.updatePlatform(id, body)
+  if (!platform) return c.json({ error: 'plataforma não encontrada' }, 404)
+  return c.json(platform)
+})
+
+app.delete('/partners/platforms/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  return c.json(await partners.deletePlatform(id))
+})
+
+app.post('/partners/commissions', async (c) => {
+  const body = z
+    .object({
+      platformId: z.number().int().positive(),
+      earnedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      amountCents: z.number().int().positive(),
+      notes: z.string().max(500).nullable().optional(),
+    })
+    .parse(await c.req.json())
+  return c.json(await partners.addCommission(body))
+})
+
+app.delete('/partners/commissions/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  return c.json(await partners.deleteCommission(id))
+})
+
+/** O único caminho que escreve em `transactions`: gera a entrada real na conta de destino. */
+app.post('/partners/platforms/:id/withdraw', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const body = z
+    .object({
+      accountId: z.number().int().positive(),
+      amountCents: z.number().int().positive(),
+      postedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      categoryId: z.number().int().positive().nullable().optional(),
+      notes: z.string().max(500).nullable().optional(),
+    })
+    .parse(await c.req.json())
+  return c.json(await partners.withdraw({ platformId: id, ...body }))
 })
 
 Deno.serve(app.fetch)

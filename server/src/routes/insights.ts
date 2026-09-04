@@ -13,6 +13,7 @@ import * as healthService from '../services/financialHealth'
 import * as goalsService from '../services/goals'
 import * as investments from '../services/investments'
 import * as monthlyClosingService from '../services/monthlyClosing'
+import * as partners from '../services/partners'
 import * as quotesService from '../services/quotes'
 import { ledgerBounds } from '../services/transactions'
 import { accountFlows } from '../services/transfers'
@@ -243,8 +244,12 @@ export async function insightsRoutes(app: FastifyInstance) {
    * ---------------------------------------------------------------- */
   app.get('/debts', async (req) => {
     const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.query)
-    const [overview, trend] = await Promise.all([debtService.debtOverview(query), debtService.debtTrend()])
-    return { ...overview, trend }
+    const [overview, trend, closedDebts] = await Promise.all([
+      debtService.debtOverview(query),
+      debtService.debtTrend(),
+      debtService.listClosedDebts(),
+    ])
+    return { ...overview, trend, closedDebts }
   })
 
   app.post('/debts', async (req) => {
@@ -338,6 +343,14 @@ export async function insightsRoutes(app: FastifyInstance) {
       .parse(req.query)
     return debtService.paydownComparison(query.extraMonthlyCents, query.strategy)
   })
+
+  /**
+   * Fila de conciliacao (specs/debt-reconciliation). Confirmar/rejeitar um
+   * match sugerido usa as mesmas rotas /cash-flow/pending/:id/confirm-match
+   * e /cash-flow/reconciliation-candidates/dismiss ja registradas abaixo
+   * para o card "Possiveis conciliacoes" do Painel -- nenhuma escrita nova.
+   */
+  app.get('/debts/reconciliation', async () => cashFlowService.debtReconciliationQueue())
 
   /* ---------------------------------------------------------------- *
    * Credit cards
@@ -1110,5 +1123,111 @@ export async function insightsRoutes(app: FastifyInstance) {
       .object({ pendingId: z.number().int().positive(), matchId: z.number().int().positive() })
       .parse(req.body)
     return cashFlowService.dismissReconciliation(body.pendingId, body.matchId)
+  })
+
+  /* ---------------------------------------------------------------- *
+   * Receita de parceiros (services/partners.ts, decisions/0037)
+   *
+   * Prefixo `/partners`, que `src/lib/api.ts` não lista em
+   * LEDGER_PREFIXES nem trata como `/pricing` — então cai na function
+   * `insights` em produção, que é justamente este arquivo. Nenhuma
+   * function nova para publicar.
+   * ---------------------------------------------------------------- */
+  app.get('/partners', async (req) => {
+    const query = rangeQuery.parse(req.query)
+    return partners.partnerOverview(await resolveRange(query))
+  })
+
+  app.get('/partners/evolution', async (req) => {
+    const query = z.object({ months: z.coerce.number().int().min(2).max(60).default(12) }).parse(req.query)
+    return partners.partnerEvolution(query.months)
+  })
+
+  app.get('/partners/commissions', async (req) => {
+    const query = z.object({ platformId: z.coerce.number().int().positive().optional() }).parse(req.query)
+    return { commissions: await partners.listCommissions(query.platformId) }
+  })
+
+  app.post('/partners/platforms', async (req, reply) => {
+    const body = z
+      .object({
+        name: z.string().min(1).max(80),
+        minWithdrawalCents: z.number().int().min(0).optional(),
+        notes: z.string().max(500).nullable().optional(),
+      })
+      .parse(req.body)
+    try {
+      return await partners.createPlatform(body)
+    } catch (error) {
+      if (error instanceof partners.PartnerError) return reply.code(422).send({ error: error.message })
+      throw error
+    }
+  })
+
+  app.patch('/partners/platforms/:id', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    const body = z
+      .object({
+        name: z.string().min(1).max(80).optional(),
+        minWithdrawalCents: z.number().int().min(0).optional(),
+        notes: z.string().max(500).nullable().optional(),
+        active: z.boolean().optional(),
+      })
+      .parse(req.body)
+    try {
+      const platform = await partners.updatePlatform(id, body)
+      if (!platform) return reply.code(404).send({ error: 'plataforma não encontrada' })
+      return platform
+    } catch (error) {
+      if (error instanceof partners.PartnerError) return reply.code(422).send({ error: error.message })
+      throw error
+    }
+  })
+
+  app.delete('/partners/platforms/:id', async (req) => {
+    const { id } = idParam.parse(req.params)
+    return partners.deletePlatform(id)
+  })
+
+  app.post('/partners/commissions', async (req, reply) => {
+    const body = z
+      .object({
+        platformId: z.number().int().positive(),
+        earnedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        amountCents: z.number().int().positive(),
+        notes: z.string().max(500).nullable().optional(),
+      })
+      .parse(req.body)
+    try {
+      return await partners.addCommission(body)
+    } catch (error) {
+      if (error instanceof partners.PartnerError) return reply.code(422).send({ error: error.message })
+      throw error
+    }
+  })
+
+  app.delete('/partners/commissions/:id', async (req) => {
+    const { id } = idParam.parse(req.params)
+    return partners.deleteCommission(id)
+  })
+
+  /** O único caminho que escreve em `transactions`: gera a entrada real na conta de destino. */
+  app.post('/partners/platforms/:id/withdraw', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    const body = z
+      .object({
+        accountId: z.number().int().positive(),
+        amountCents: z.number().int().positive(),
+        postedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        categoryId: z.number().int().positive().nullable().optional(),
+        notes: z.string().max(500).nullable().optional(),
+      })
+      .parse(req.body)
+    try {
+      return await partners.withdraw({ platformId: id, ...body })
+    } catch (error) {
+      if (error instanceof partners.PartnerError) return reply.code(422).send({ error: error.message })
+      throw error
+    }
   })
 }

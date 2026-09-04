@@ -20,3 +20,18 @@ export function currentPeriod(): string {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
+
+/**
+ * Primeiro e último dia de um `YYYY-MM`, no formato que a API espera em
+ * `from`/`to`.
+ *
+ * Existe aqui porque `RecentDaily` (src/pages/Daily.tsx) já tinha essa
+ * mesma aritmética inline, e a tela de Receita de parceiros seria a
+ * segunda cópia. A versão do Diário continua no lugar de propósito: trocá-la
+ * é mexer numa página que não está em revisão agora.
+ */
+export function periodBounds(period: string): { from: string; to: string } {
+  const [y, m] = period.split('-').map(Number) as [number, number]
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  return { from: `${period}-01`, to: `${period}-${String(last).padStart(2, '0')}` }
+}

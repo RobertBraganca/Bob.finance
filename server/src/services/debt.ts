@@ -101,6 +101,44 @@ export async function listDebts(): Promise<DebtRow[]> {
     .sort((a, b) => b.balanceCents - a.balanceCents)
 }
 
+export type ClosedDebtRow = {
+  id: number
+  name: string
+  kind: string
+  installmentCount: number | null
+  closedOn: string | null
+  totalPaidCents: number
+  lastPaymentOn: string | null
+}
+
+/**
+ * Dividas com active=false — a secao "Quitadas" que closeDebtIfFullyPaid
+ * agora alimenta (e que o fechamento manual via deletePending scope='all'
+ * ja alimentava, sem nenhum lugar na UI para mostra-lo). Antes desta
+ * correcao (bug 2, 03/09/2026) nao havia nenhuma leitura de active=false
+ * em lugar nenhum do app — uma divida fechada simplesmente desaparecia,
+ * sem virar historico visivel em canto nenhum.
+ */
+export async function listClosedDebts(): Promise<ClosedDebtRow[]> {
+  const rows = await db.select().from(debts).where(eq(debts.active, false))
+  return Promise.all(
+    rows.map(async (d) => {
+      const stats = await db.execute<{ total: number; lastPaidOn: string | null }>(sql`
+        select coalesce(sum(amount_cents), 0) as total, max(paid_on) as "lastPaidOn"
+        from debt_payments where debt_id = ${d.id} and kind = 'payment'`)
+      return {
+        id: d.id,
+        name: d.name,
+        kind: d.kind,
+        installmentCount: d.installmentCount,
+        closedOn: d.closedOn,
+        totalPaidCents: stats[0]?.total ?? 0,
+        lastPaymentOn: stats[0]?.lastPaidOn ?? null,
+      }
+    }),
+  )
+}
+
 /**
  * Materializes the debt's remaining parcelas as pending EXPENSE rows in
  * `transactions` — same mechanism cashFlow.ts uses for recurring/
@@ -131,14 +169,41 @@ export async function materializeDebtInstallments(debtId: number): Promise<{ cre
   const currentPeriod = todayIso().slice(0, 7)
   const horizon = addMonths(currentPeriod, MATERIALIZE_HORIZON_MONTHS - 1)
 
-  const existingPeriods = new Set(
-    (
-      await db
-        .select({ occurrencePeriod: transactions.occurrencePeriod, postedOn: transactions.postedOn })
-        .from(transactions)
-        .where(eq(transactions.debtId, debtId))
-    ).map((r) => r.occurrencePeriod ?? r.postedOn.slice(0, 7)),
-  )
+  const existingRows = await db
+    .select({ occurrencePeriod: transactions.occurrencePeriod, postedOn: transactions.postedOn })
+    .from(transactions)
+    .where(eq(transactions.debtId, debtId))
+  const existingPeriods = new Set(existingRows.map((r) => r.occurrencePeriod ?? r.postedOn.slice(0, 7)))
+
+  /**
+   * Ancora da parcela 0, NAO "hoje" -- bug corrigido em 03/09/2026
+   * (achado: toda divida parcelada ativa e nao paga tinha uma pendencia a
+   * mais do que installmentCount, sempre no mes corrente).
+   *
+   * Antes, o laco abaixo recomputava o periodo de cada parcela como
+   * addMonths(currentPeriod, i - installmentsPaid) -- ou seja, a parcela
+   * "proxima a pagar" era sempre remapeada para o MES EM QUE A FUNCAO
+   * RODA. Como materializeAllDebts() roda a cada carregamento do widget
+   * de pendentes da Home (GET /cash-flow/pending), uma divida com 1
+   * parcela criada em agosto e ainda nao paga ganhava uma SEGUNDA
+   * pendencia em setembro na primeira visita a Home depois da virada do
+   * mes -- sem nenhuma acao do usuario, e sem que a de agosto (ainda
+   * pendente, agora isOverdue) fosse removida. Uma divida de N parcelas
+   * acumulava uma pendencia extra a cada mes que passasse sem pagamento.
+   *
+   * A ancora certa e o periodo em que a parcela 0 ja foi (ou seria)
+   * materializada, que e FIXO por contrato -- nunca muda com o relogio.
+   * existingRows ja contem toda linha (pendente OU ja paga/confirmada)
+   * ja materializada para esta divida, entao o menor periodo ali E essa
+   * ancora. So cai de volta em currentPeriod quando nao existe nenhuma
+   * linha ainda -- a primeira chamada, no momento da criacao da divida,
+   * onde "agora" E de fato a ancora correta.
+   */
+  const anchorPeriod =
+    existingRows.reduce<string | null>((min, r) => {
+      const period = r.occurrencePeriod ?? r.postedOn.slice(0, 7)
+      return min === null || period < min ? period : min
+    }, null) ?? currentPeriod
 
   // Same rationale as cashFlow.ts's materialize(): a period the user
   // explicitly deleted from a pending widget must stay gone, not come
@@ -162,7 +227,7 @@ export async function materializeDebtInstallments(debtId: number): Promise<{ cre
     }
   } else {
     for (let i = installmentsPaid; i < debt.installmentCount; i++) {
-      const period = addMonths(currentPeriod, i - installmentsPaid)
+      const period = addMonths(anchorPeriod, i)
       if (period <= horizon) periods.push(period)
     }
   }
@@ -608,6 +673,85 @@ export async function listPayments(debtId?: number): Promise<PaymentRow[]> {
   return debtId ? query.where(eq(debtPayments.debtId, debtId)) : query
 }
 
+/**
+ * A parcela materializada mais antiga ainda pendente desta divida, se
+ * houver (ordenada por occurrencePeriod, com postedOn como desempate para
+ * as poucas linhas historicas sem occurrencePeriod). E a mesma nocao de
+ * "proxima parcela" que installmentsPaid usa para decidir o indice
+ * seguinte em materializeDebtInstallments.
+ */
+async function oldestPendingInstallment(debtId: number) {
+  return (
+    await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(and(eq(transactions.debtId, debtId), eq(transactions.pending, true)))
+      .orderBy(sql`coalesce(occurrence_period, posted_on)`)
+      .limit(1)
+  )[0] ?? null
+}
+
+/**
+ * "Registrar pagamento" em Endividamento e o settle de uma pendencia vindo
+ * da Home/Lancamentos (cashFlow.ts settlePending/confirmReconciliation)
+ * sao o MESMO evento visto de duas telas -- gravar so em debt_payments
+ * sem tocar a linha materializada deixava a parcela pendente ali para
+ * sempre: Endividamento contava "1/1 pagas" mas a Home continuava
+ * cobrando a mesma parcela em "Despesas pendentes" (bug 4, achado em
+ * 03/09/2026, reproduzido nos dados reais: divida id 11, "Fatura do
+ * cartao de credito", tinha installmentsPaid=1 e ainda assim 1 pendencia
+ * aberta em 2026-08).
+ *
+ * So aplica a kind 'payment' -- um 'charge' (novo uso/saque) nao quita
+ * nada, e nao ha pendencia nenhuma para ele assentar.
+ */
+async function settleOldestPendingInstallment(debtId: number): Promise<void> {
+  const row = await oldestPendingInstallment(debtId)
+  if (!row) return
+  await db.update(transactions).set({ pending: false }).where(eq(transactions.id, row.id))
+}
+
+/**
+ * Fecha a divida (active=false, closedOn=hoje) quando o numero de
+ * parcelas pagas alcanca installmentCount -- o MESMO efeito que
+ * deletePending's scope='all' ja produz ao fechar manualmente uma
+ * pendencia pela Home, so que aqui e automatico, disparado pelo proprio
+ * evento de pagamento (createPayment, settlePending,
+ * confirmReconciliation: os tres lugares que gravam um debtPayments de
+ * kind 'payment'), nao por uma acao separada do usuario.
+ *
+ * Sem isto uma divida totalmente paga nunca saia da lista ativa de
+ * Endividamento (bug 2, achado em 03/09/2026: nenhum caminho do codigo
+ * jamais gravava active=false por conta propria, e a UI nao tinha nenhum
+ * botao "marcar como quitada" -- confirmado nos dados reais, dividas id
+ * 11 e 13 estavam com installmentsPaid === installmentCount e ainda
+ * assim active=true).
+ *
+ * Dividas revolventes (installmentCount null -- cartao, cheque especial)
+ * nunca fecham aqui: elas nao tem um total de parcelas para esgotar, so
+ * fecham pelo caminho manual existente (deletePending scope='all').
+ *
+ * Ao fechar, tambem remove qualquer pendencia que ainda reste ligada a
+ * esta divida: uma vez quitada pelo proprio contador de parcelas, nenhuma
+ * pendencia futura dela deveria existir -- se existe, e sobra do bug 5
+ * (a mesma duplicacao que materializeDebtInstallments corrige daqui pra
+ * frente), e uma divida "quitada" que ainda cobra em Despesas pendentes
+ * seria o mesmo bug 4 outra vez, so que causado por dado velho em vez de
+ * um caminho de codigo novo.
+ */
+export async function closeDebtIfFullyPaid(debtId: number): Promise<void> {
+  const debt = (await db.select().from(debts).where(eq(debts.id, debtId)))[0]
+  if (!debt || !debt.active || debt.installmentCount === null) return
+
+  const { count: installmentsPaid } = await paymentStats(debtId)
+  if (installmentsPaid < debt.installmentCount) return
+
+  await db.update(debts).set({ active: false, closedOn: todayIso() }).where(eq(debts.id, debtId))
+  await db
+    .delete(transactions)
+    .where(and(eq(transactions.debtId, debtId), eq(transactions.pending, true)))
+}
+
 export async function createPayment(input: {
   debtId: number
   kind?: string
@@ -615,16 +759,46 @@ export async function createPayment(input: {
   amountCents: number
   notes?: string | null
 }) {
-  return (
+  const row = (
     await db
       .insert(debtPayments)
       .values({ ...input, kind: input.kind as DebtPaymentKind | undefined })
       .returning()
   )[0]!
+
+  if (row.kind === 'payment') {
+    await settleOldestPendingInstallment(input.debtId)
+    await closeDebtIfFullyPaid(input.debtId)
+  }
+
+  return row
 }
 
+/**
+ * Excluir um pagamento pode desfazer exatamente a condicao que
+ * closeDebtIfFullyPaid checou: se a divida ja estava fechada por conta
+ * daquele pagamento (installmentsPaid alcancou installmentCount), apagar
+ * o registro derruba a contagem de volta abaixo do total, e a divida
+ * precisa reabrir -- senao "excluir por engano um pagamento" deixaria a
+ * divida presa como quitada para sempre, com a proxima parcela sem
+ * nenhuma pendencia materializada.
+ */
 export async function deletePayment(id: number) {
-  return { removed: (await db.delete(debtPayments).where(eq(debtPayments.id, id))).count }
+  const row = (await db.select({ debtId: debtPayments.debtId }).from(debtPayments).where(eq(debtPayments.id, id)))[0]
+  const result = await db.delete(debtPayments).where(eq(debtPayments.id, id))
+
+  if (row) {
+    const debt = (await db.select().from(debts).where(eq(debts.id, row.debtId)))[0]
+    if (debt && !debt.active && debt.installmentCount !== null) {
+      const { count: installmentsPaid } = await paymentStats(debt.id)
+      if (installmentsPaid < debt.installmentCount) {
+        await db.update(debts).set({ active: true, closedOn: null }).where(eq(debts.id, debt.id))
+        await materializeDebtInstallments(debt.id)
+      }
+    }
+  }
+
+  return { removed: result.count }
 }
 
 /** Measured total debt over time — the actual trend, not a projection. */

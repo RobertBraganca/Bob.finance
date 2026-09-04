@@ -442,31 +442,42 @@ export function TransactionsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((row) => (
-                        <tr key={row.id} data-selected={selected.has(row.id)}>
-                          <td>
-                            <input
-                              type="checkbox"
-                              className="checkbox"
-                              checked={selected.has(row.id)}
-                              onChange={() => toggle(row.id)}
-                              aria-label={`Selecionar ${row.description}`}
-                            />
-                          </td>
-                          <td className="tabular">{fmtDate(row.postedOn)}</td>
-                          <td style={{ maxWidth: 340 }}>
-                            <div className="truncate" title={row.description}>
-                              {row.description}
-                            </div>
-                            <div className="row" style={{ gap: 'var(--sp-2)' }}>
-                              <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-                                {PROVENANCE[row.categorizedBy] ?? row.categorizedBy}
-                              </span>
-                              {row.source === 'daily' && <span className="badge">diário</span>}
-                              {row.pending && <span className="badge badge--warning">previsto</span>}
-                              {row.duplicateAccepted && <span className="badge badge--warning">duplicata aceita</span>}
-                            </div>
-                          </td>
+                      {rows.map((row) => {
+                        // Uma "fatura" (linha ligada a uma dívida, materializada por
+                        // debt.ts) já paga fica opaca para recuar visualmente da que
+                        // ainda está pendente — pedido do usuário, 03/09/2026, depois
+                        // da correção dos bugs 2/4/5, que agora fazem essa transição
+                        // (pending true -> false) acontecer de fato. Só linhas ligadas
+                        // a dívida: o resto do ledger é confirmado por padrão (é a
+                        // maioria das linhas), e apagar tudo que não é `previsto`
+                        // deixaria a tabela inteira esmaecida.
+                        const settledDebt = row.debtId !== null && !row.pending
+                        return (
+                          <tr key={row.id} data-selected={selected.has(row.id)} data-settled-debt={settledDebt}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                className="checkbox"
+                                checked={selected.has(row.id)}
+                                onChange={() => toggle(row.id)}
+                                aria-label={`Selecionar ${row.description}`}
+                              />
+                            </td>
+                            <td className="tabular">{fmtDate(row.postedOn)}</td>
+                            <td style={{ maxWidth: 340 }}>
+                              <div className="truncate" title={row.description}>
+                                {row.description}
+                              </div>
+                              <div className="row" style={{ gap: 'var(--sp-2)' }}>
+                                <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                                  {PROVENANCE[row.categorizedBy] ?? row.categorizedBy}
+                                </span>
+                                {row.source === 'daily' && <span className="badge">diário</span>}
+                                {row.pending && <span className="badge badge--warning">previsto</span>}
+                                {settledDebt && <span className="badge badge--good">paga</span>}
+                                {row.duplicateAccepted && <span className="badge badge--warning">duplicata aceita</span>}
+                              </div>
+                            </td>
                           <td>
                             <div className="row" style={{ gap: 'var(--sp-2)' }}>
                               {row.categoryColor && (
@@ -497,8 +508,9 @@ export function TransactionsPage() {
                               title="Editar lançamento"
                             />
                           </td>
-                        </tr>
-                      ))}
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
