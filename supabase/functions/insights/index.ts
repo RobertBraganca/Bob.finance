@@ -1028,9 +1028,14 @@ app.post('/simulate/decumulation', async (c) => {
       monthlyWithdrawalCents: z.number().int().positive(),
       expectedReturnBps: z.number().int().min(-10_000).max(100_000),
       horizonMonths: z.number().int().positive().max(1200).optional(),
+      // Aposentadoria: patrimônio PROJETADO de uma meta de investimento
+      // (goalProjection's projectedAtTargetCents), no lugar da carteira
+      // de hoje. Ausente em toda chamada comum.
+      startingValueCentsOverride: z.number().int().nonnegative().optional(),
     })
     .parse(await c.req.json())
-  return c.json(await simulatorService.simulateDecumulation(body))
+  const { startingValueCentsOverride, ...input } = body
+  return c.json(await simulatorService.simulateDecumulation(input, { startingValueCentsOverride }))
 })
 
 /* ---------------------------------------------------------------- *

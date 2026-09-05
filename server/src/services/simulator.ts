@@ -317,9 +317,23 @@ export type DecumulationResult = {
   assumptions: Assumptions
 }
 
+/**
+ * Ajuste hipotético do ponto de partida — ausente em toda chamada comum
+ * (parte da carteira negociável de HOJE, como sempre). A página
+ * Aposentadoria usa isto para encadear as duas fases que hoje nunca se
+ * falavam: "quanto duraria o patrimônio SE eu já tivesse o valor
+ * projetado da minha meta de aposentadoria", em vez de sempre simular a
+ * partir do saldo de hoje. Mesmo formato de `RunwayOverrides`
+ * (financialHealth.ts) e `AvailableOverrides` (financialEngine.ts).
+ */
+export type DecumulationOverrides = { startingValueCentsOverride?: number }
+
 const DEFAULT_DECUMULATION_HORIZON_MONTHS = 360
 
-export async function simulateDecumulation(input: DecumulationInput): Promise<DecumulationResult> {
+export async function simulateDecumulation(
+  input: DecumulationInput,
+  overrides: DecumulationOverrides = {},
+): Promise<DecumulationResult> {
   const horizonMonths = Math.min(Math.max(input.horizonMonths ?? DEFAULT_DECUMULATION_HORIZON_MONTHS, 1), 1200)
   const summary = await portfolioSummary()
   const monthlyReturn = Math.pow(1 + input.expectedReturnBps / 10_000, 1 / 12) - 1
@@ -336,10 +350,15 @@ export async function simulateDecumulation(input: DecumulationInput): Promise<De
    * este filtro é redundante — fica como guarda porque o número que ele
    * protege é o "seu dinheiro dura até X", e um dia de regressão silenciosa
    * aqui vale mais do que as ~45 comparações que ele custa.
+   *
+   * `startingValueCentsOverride` pula esta derivação inteira quando
+   * presente — a página Aposentadoria manda o valor PROJETADO de uma meta
+   * de investimento (`goalProjection`'s `projectedAtTargetCents`), não a
+   * carteira de hoje. Ausente em toda chamada de produção normal.
    */
-  const startingValueCents = summary.positions
-    .filter((p) => p.assetClass !== ILLIQUID_ASSET_CLASS)
-    .reduce((sum, p) => sum + p.marketValueCents, 0)
+  const startingValueCents =
+    overrides.startingValueCentsOverride ??
+    summary.positions.filter((p) => p.assetClass !== ILLIQUID_ASSET_CLASS).reduce((sum, p) => sum + p.marketValueCents, 0)
 
   const series: DecumulationPoint[] = [{ month: 0, period: startPeriod, valueCents: startingValueCents }]
   let value = startingValueCents
@@ -368,7 +387,9 @@ export async function simulateDecumulation(input: DecumulationInput): Promise<De
       tipo: 'decumulação hipotética (retirada mensal simulada)',
       valorInicialCents: startingValueCents,
       valorInicialEscopo:
-        'apenas a carteira negociável; o imobilizado fica de fora porque não se saca uma retirada mensal de um bem físico',
+        overrides.startingValueCentsOverride !== undefined
+          ? 'valor hipotético informado (ex. patrimônio projetado de uma meta de investimento), não a carteira de hoje'
+          : 'apenas a carteira negociável; o imobilizado fica de fora porque não se saca uma retirada mensal de um bem físico',
       retiradaMensalCents: input.monthlyWithdrawalCents,
       retornoEsperadoAnualBps: input.expectedReturnBps,
       horizonteMeses: horizonMonths,

@@ -279,21 +279,36 @@ export type CategorySelectGroup = {
  * `<optgroup>` picker instead of a flat "Parent / Child" string list — the
  * parent/child structure is visible at selection time, not just encoded
  * into a label.
+ *
+ * Filtra pelo `kind` de CADA opção (pai e cada filha, independentemente),
+ * nunca herdando o `kind` do pai para decidir se a árvore inteira entra —
+ * o próprio modelo de dados permite uma filha ter um `kind` diferente do
+ * pai (ex. "Reajuste de saldo", kind `transfer`, mora sob "Financeiro",
+ * kind `expense`; "Pró-labore" existe como duas categorias de `kind`
+ * diferente em ramos diferentes — ver o comentário de `dreGroupEnum` no
+ * schema). Filtrar pelo `kind` do pai excluía a árvore toda quando só a
+ * filha batia com a direção pedida: um lançamento de ENTRADA categorizado
+ * como "Reajuste de saldo" (kind `transfer`, direção-agnóstica) mostrava
+ * "Sem categoria" no seletor, mesmo com `categoryId` certo gravado no
+ * banco — achado em 04/09/2026, curto-circuitado só nesta função porque
+ * `useCategorySelectOptions` (a lista plana) já filtrava por opção, nunca
+ * por pai.
  */
 export function useCategorySelectGroups(kinds?: string[]): CategorySelectGroup[] {
   const { tree } = useCategoryIndex()
   return useMemo(
     () =>
       tree
-        .filter((parent) => (kinds ? kinds.includes(parent.kind) : true))
-        .map((parent) => ({
-          parentId: parent.id,
-          parentName: parent.name,
-          options: [
-            { value: parent.id, label: parent.name },
-            ...parent.children.map((child) => ({ value: child.id, label: child.name })),
-          ],
-        })),
+        .map((parent) => {
+          const parentMatches = !kinds || kinds.includes(parent.kind)
+          const children = parent.children.filter((child) => !kinds || kinds.includes(child.kind))
+          const options = [
+            ...(parentMatches ? [{ value: parent.id, label: parent.name }] : []),
+            ...children.map((child) => ({ value: child.id, label: child.name })),
+          ]
+          return { parentId: parent.id, parentName: parent.name, options }
+        })
+        .filter((group) => group.options.length > 0),
     [tree, kinds],
   )
 }

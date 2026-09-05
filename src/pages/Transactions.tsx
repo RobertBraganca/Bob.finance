@@ -443,17 +443,23 @@ export function TransactionsPage() {
                     </thead>
                     <tbody>
                       {rows.map((row) => {
-                        // Uma "fatura" (linha ligada a uma dívida, materializada por
-                        // debt.ts) já paga fica opaca para recuar visualmente da que
-                        // ainda está pendente — pedido do usuário, 03/09/2026, depois
-                        // da correção dos bugs 2/4/5, que agora fazem essa transição
-                        // (pending true -> false) acontecer de fato. Só linhas ligadas
-                        // a dívida: o resto do ledger é confirmado por padrão (é a
-                        // maioria das linhas), e apagar tudo que não é `previsto`
-                        // deixaria a tabela inteira esmaecida.
-                        const settledDebt = row.debtId !== null && !row.pending
+                        // Uma linha MATERIALIZADA (dívida ou previsão recorrente/
+                        // parcelada — as duas únicas origens que nascem `pending`)
+                        // já confirmada fica opaca para recuar visualmente da que
+                        // ainda está pendente, com um rótulo pela direção do dinheiro
+                        // em vez de um "paga" genérico que não fazia sentido para uma
+                        // receita. Extensão de 04/09/2026 do ajuste de 03/09 (que
+                        // cobria só `debtId`) para também cobrir `forecastId` — um
+                        // "a receber" recorrente/parcelado que chegou merece o mesmo
+                        // tratamento de uma fatura que foi paga.
+                        //
+                        // Só linhas com essa origem: o resto do ledger é confirmado
+                        // por padrão (é a maioria das linhas), e apagar tudo que não
+                        // é `previsto` deixaria a tabela inteira esmaecida.
+                        const settled = (row.debtId !== null || row.forecastId !== null) && !row.pending
+                        const settledLabel = row.direction === 'in' ? 'recebido' : 'pago'
                         return (
-                          <tr key={row.id} data-selected={selected.has(row.id)} data-settled-debt={settledDebt}>
+                          <tr key={row.id} data-selected={selected.has(row.id)} data-settled={settled}>
                             <td>
                               <input
                                 type="checkbox"
@@ -474,7 +480,7 @@ export function TransactionsPage() {
                                 </span>
                                 {row.source === 'daily' && <span className="badge">diário</span>}
                                 {row.pending && <span className="badge badge--warning">previsto</span>}
-                                {settledDebt && <span className="badge badge--good">paga</span>}
+                                {settled && <span className="badge badge--good">{settledLabel}</span>}
                                 {row.duplicateAccepted && <span className="badge badge--warning">duplicata aceita</span>}
                               </div>
                             </td>

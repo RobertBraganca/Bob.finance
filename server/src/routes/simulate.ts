@@ -50,8 +50,13 @@ export async function simulateRoutes(app: FastifyInstance) {
         monthlyWithdrawalCents: z.number().int().positive(),
         expectedReturnBps: z.number().int().min(-10_000).max(100_000),
         horizonMonths: z.number().int().positive().max(1200).optional(),
+        // Aposentadoria: patrimônio PROJETADO de uma meta de investimento
+        // (goalProjection's projectedAtTargetCents), no lugar da carteira
+        // de hoje. Ausente em toda chamada comum.
+        startingValueCentsOverride: z.number().int().nonnegative().optional(),
       })
       .parse(req.body)
-    return simulator.simulateDecumulation(body)
+    const { startingValueCentsOverride, ...input } = body
+    return simulator.simulateDecumulation(input, { startingValueCentsOverride })
   })
 }
