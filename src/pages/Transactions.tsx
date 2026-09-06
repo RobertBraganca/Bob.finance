@@ -12,6 +12,7 @@ import {
   CategorySelect,
   EmptyState,
   Icon,
+  Meter,
   Modal,
   PendingEditScopeModal,
   PendingScopeModal,
@@ -266,15 +267,6 @@ export function TransactionsPage() {
     else remove.mutate({ ids })
   }
 
-  // Segue a mesma direção marcada no filtro: Entrada mostra receitas
-  // futuras/pendentes ("a receber"), Saída mostra despesas futuras/
-  // pendentes ("a pagar") — nunca soma as duas, o mesmo par de números que
-  // já aparecia como rodapé de "Entradas"/"Saídas no filtro" acima, só num
-  // card próprio.
-  const pendingLabel = direction === 'out' ? 'A pagar' : 'A receber'
-  const pendingFoot = direction === 'out' ? 'despesas futuras/pendentes' : 'receitas futuras/pendentes'
-  const pendingCents =
-    direction === 'out' ? query.data?.pendingOutflowCents ?? 0 : query.data?.pendingInflowCents ?? 0
 
   const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.id))
   const totalPages = Math.max(1, Math.ceil((query.data?.total ?? 0) / PAGE_SIZE))
@@ -316,21 +308,25 @@ export function TransactionsPage() {
 
       <div className="page">
         <Bento>
-          <Slab span={3}>
-            <StatTile label="Entradas no filtro" value={money(query.data?.inflowCents ?? 0)} large />
-          </Slab>
-          <Slab span={3}>
-            <StatTile label="Saídas no filtro" value={money(query.data?.outflowCents ?? 0)} large />
-          </Slab>
-          <Slab span={3}>
+          <PeriodFlowCard
+            label="Receitas do período"
+            confirmedCents={query.data?.inflowCents ?? 0}
+            pendingCents={query.data?.pendingInflowCents ?? 0}
+            pendingWord="a receber"
+          />
+          <PeriodFlowCard
+            label="Despesas do período"
+            confirmedCents={query.data?.outflowCents ?? 0}
+            pendingCents={query.data?.pendingOutflowCents ?? 0}
+            pendingWord="a pagar"
+          />
+          <Slab span={4}>
             <StatTile
               label="Resultado"
               value={money((query.data?.inflowCents ?? 0) - (query.data?.outflowCents ?? 0))}
+              foot="entradas menos saídas já confirmadas"
               large
             />
-          </Slab>
-          <Slab span={3}>
-            <StatTile label={pendingLabel} value={money(pendingCents)} foot={pendingFoot} large />
           </Slab>
 
           <Card span={12} flush>
@@ -570,6 +566,51 @@ export function TransactionsPage() {
         />
       )}
     </>
+  )
+}
+
+/**
+ * Pago e pendente do mesmo período, juntos — antes eram quatro cards
+ * soltos ("Entradas", "Saídas", "Resultado", e um quarto que virava "A
+ * pagar" ou "A receber" conforme o filtro de direção, nunca os dois ao
+ * mesmo tempo), sem nenhuma ligação visual entre o que já aconteceu e o
+ * que ainda falta da mesma conta. Pedido do usuário, 04/09/2026.
+ *
+ * `Meter` aqui não julga nada (por isso `state="no_target"`, o mesmo
+ * neutro que a barra de progresso de uma meta sem alvo usa): não existe
+ * "bom" ou "ruim" em ter pendências no período, só o fato de quanto já
+ * está resolvido contra o total.
+ */
+function PeriodFlowCard({
+  label,
+  confirmedCents,
+  pendingCents,
+  pendingWord,
+}: {
+  label: string
+  confirmedCents: number
+  pendingCents: number
+  pendingWord: 'a pagar' | 'a receber'
+}) {
+  const totalCents = confirmedCents + pendingCents
+  const confirmedBps = totalCents > 0 ? Math.round((confirmedCents / totalCents) * 10_000) : 0
+
+  return (
+    <Slab span={4}>
+      <div className="stack stack--tight">
+        <div className="row row--between">
+          <span className="stat__label">{label}</span>
+          <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+            {money(totalCents)} no total
+          </span>
+        </div>
+        <span className="stat__value">{money(confirmedCents)}</span>
+        <Meter usedBps={confirmedBps} state="no_target" />
+        <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+          {pendingCents > 0 ? `${money(pendingCents)} ${pendingWord}` : `nada ${pendingWord} no período`}
+        </span>
+      </div>
+    </Slab>
   )
 }
 
