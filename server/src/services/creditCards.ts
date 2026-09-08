@@ -1,7 +1,7 @@
-import { desc, eq } from 'drizzle-orm'
+import { desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { accounts, creditCardSnapshots, creditCards } from '../db/schema'
-import { daysInMonth, todayIso } from '../core/dates'
+import { addDays, daysInMonth, todayIso } from '../core/dates'
 
 /**
  * Cards are registered metadata (limit, cycle, linked account) plus a
@@ -135,4 +135,66 @@ export async function recordSnapshot(cardId: number, asOf: string, availableLimi
     )[0]!
   }
   return (await db.insert(creditCardSnapshots).values({ cardId, asOf, availableLimitCents }).returning())[0]!
+}
+
+export type InvoiceCycle = { closingOn: string; dueOn: string; amountCents: number; transactionCount: number }
+
+/**
+ * Agrupa toda `transactions.credit_card_id = cardId` pelo ciclo de fatura
+ * que a cobre — o mesmo `nextOccurrence` que calcula "próximo fechamento
+ * a partir de hoje" (`listCards` acima) serve igual para "fechamento que
+ * cobre esta data", só trocando o "hoje" pela data do lançamento.
+ */
+async function invoiceCycles(cardId: number, closingDay: number, dueDay: number): Promise<InvoiceCycle[]> {
+  const rows = await db.execute<{ postedOn: string; amountCents: number }>(sql`
+    select posted_on as "postedOn", amount_cents as "amountCents"
+    from transactions
+    where credit_card_id = ${cardId}
+  `)
+
+  const byClosing = new Map<string, { amountCents: number; transactionCount: number }>()
+  for (const row of rows) {
+    const closingOn = nextOccurrence(closingDay, row.postedOn)
+    const bucket = byClosing.get(closingOn) ?? { amountCents: 0, transactionCount: 0 }
+    // gasto no cartão é sempre saída (amountCents negativo na ficha do
+    // lançamento) — a fatura mostra o valor gasto, não o sinal contábil.
+    bucket.amountCents += Math.abs(row.amountCents)
+    bucket.transactionCount += 1
+    byClosing.set(closingOn, bucket)
+  }
+
+  return [...byClosing.entries()]
+    .map(([closingOn, v]) => ({ closingOn, dueOn: nextOccurrence(dueDay, addDays(closingOn, 1)), ...v }))
+    .sort((a, b) => a.closingOn.localeCompare(b.closingOn))
+}
+
+/**
+ * "Fatura atual" (o ciclo cujo fechamento é o próximo a partir de hoje,
+ * mesmo que ainda não tenha nenhum lançamento) + até 12 ciclos passados
+ * fechados. Sem ligação nenhuma com Open Finance/sincronização bancária
+ * (este app não tem isso — só importação de CSV, ver nota do backlog): o
+ * atraso possível aqui é de IMPORTAÇÃO, não de sincronização ao vivo.
+ */
+export async function cardInvoices(cardId: number): Promise<{ current: InvoiceCycle; history: InvoiceCycle[] } | null> {
+  const card = (await db.select().from(creditCards).where(eq(creditCards.id, cardId)))[0]
+  if (!card) return null
+
+  const currentClosingOn = nextOccurrence(card.closingDay, todayIso())
+  const cycles = await invoiceCycles(cardId, card.closingDay, card.dueDay)
+  // Tudo com fechamento igual ou depois de hoje entra na fatura atual — não
+  // só o ciclo exato de `currentClosingOn`. Uma parcela materializada com
+  // data no futuro (rara, mas possível) cairia num ciclo mais adiante ainda;
+  // melhor somar ao "atual" do que sumir silenciosamente da tela.
+  const openCycles = cycles.filter((c) => c.closingOn >= currentClosingOn)
+  const current = openCycles.reduce<InvoiceCycle>(
+    (sum, c) => ({ ...sum, amountCents: sum.amountCents + c.amountCents, transactionCount: sum.transactionCount + c.transactionCount }),
+    {
+      closingOn: currentClosingOn,
+      dueOn: nextOccurrence(card.dueDay, addDays(currentClosingOn, 1)),
+      amountCents: 0,
+      transactionCount: 0,
+    },
+  )
+  const history = cycles.filter((c) => c.closingOn < currentClosingOn).slice(-12)
+  return { current, history }
 }

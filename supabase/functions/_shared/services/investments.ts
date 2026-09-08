@@ -1129,6 +1129,8 @@ export type PerformancePoint = {
   contributedCents: number
   valueCents: number
   gainCents: number
+  /** Cumulativo até este mês (mesma convenção de `Snapshot.dividendsCents`), não só o pago neste mês. */
+  dividendsCents: number
 }
 
 /** `and a.asset_class = X`, or nothing — composed straight into the SQL below. */
@@ -1159,6 +1161,7 @@ export async function performanceSeries(months = 24, assetClass?: string | null)
         contributedCents: snap.contributedCents,
         valueCents: snap.valueCents,
         gainCents: snap.valueCents - snap.contributedCents,
+        dividendsCents: snap.dividendsCents,
       }
     }),
   )
@@ -1168,12 +1171,17 @@ export type MonthlyReturnPoint = { period: string; returnBps: number | null }
 
 /**
  * Approximates each month's return as (end value − net contribution in
- * the month) / start value − 1: a Modified-Dietz-style simplification
- * that ignores exactly when in the month a contribution landed. Good
- * enough to compare the portfolio's shape against a benchmark; not a
- * precise time-weighted return. The first month in the series has no
- * prior value to divide by, so it comes back `null` rather than a
- * misleading 0%.
+ * the month + proventos recebidos no mês) / start value − 1: a
+ * Modified-Dietz-style simplification that ignores exactly when in the
+ * month a contribution (ou provento) landed. Good enough to compare the
+ * portfolio's shape against a benchmark; not a precise time-weighted
+ * return. The first month in the series has no prior value to divide
+ * by, so it comes back `null` rather than a misleading 0%.
+ *
+ * Proventos entraram em 07/09/2026 (achado da auditoria): antes a soma
+ * ignorava `dividendsCents` inteiramente, então um mês parado de preço
+ * mas com proventos recebidos mostrava 0% aqui — a mesma classe de bug
+ * de `rangeSummary.gainBpsInRange`, corrigida do mesmo jeito.
  */
 export async function portfolioMonthlyReturns(assetClass?: string | null): Promise<MonthlyReturnPoint[]> {
   const series = await performanceSeries(100_000, assetClass)
@@ -1181,8 +1189,11 @@ export async function portfolioMonthlyReturns(assetClass?: string | null): Promi
     if (i === 0) return { period: point.period, returnBps: null }
     const prev = series[i - 1]!
     const netContributionCents = point.contributedCents - prev.contributedCents
+    const dividendsInMonthCents = point.dividendsCents - prev.dividendsCents
     if (prev.valueCents <= 0) return { period: point.period, returnBps: null }
-    const returnBps = Math.round(((point.valueCents - netContributionCents) / prev.valueCents - 1) * 10_000)
+    const returnBps = Math.round(
+      ((point.valueCents - netContributionCents + dividendsInMonthCents) / prev.valueCents - 1) * 10_000,
+    )
     return { period: point.period, returnBps }
   })
 }
@@ -1314,6 +1325,14 @@ export async function rangeSummary(fromIso: string | null, toIso: string, assetC
   const capitalGainCents = now.valueCents - now.contributedCents
   const capitalGainInRangeCents = now.valueCents - start.valueCents - contributedInRangeCents
   const totalGainCents = capitalGainCents + now.dividendsCents
+  // "Rentabilidade (N meses)" e "Rentabilidade total" têm de somar o MESMO
+  // tipo de ganho (capital + proventos), só em janelas diferentes — bug
+  // corrigido em 07/09/2026: `gainBpsInRange` usava só `capitalGainInRangeCents`
+  // (sem proventos), enquanto `gainBpsAllTime` usava `totalGainCents` (com
+  // proventos), então uma carteira parada de valor mas com proventos
+  // recebidos no período mostrava 0% na janela e um número maior no
+  // total-time, lado a lado na mesma tela com o mesmo rótulo "Rentabilidade".
+  const totalGainInRangeCents = capitalGainInRangeCents + dividendsInRangeCents
 
   return {
     fromIso,
@@ -1327,7 +1346,7 @@ export async function rangeSummary(fromIso: string | null, toIso: string, assetC
     capitalGainInRangeCents,
     totalGainCents,
     gainBpsAllTime: now.contributedCents > 0 ? Math.round((totalGainCents / now.contributedCents) * 10_000) : null,
-    gainBpsInRange: start.valueCents > 0 ? Math.round((capitalGainInRangeCents / start.valueCents) * 10_000) : null,
+    gainBpsInRange: start.valueCents > 0 ? Math.round((totalGainInRangeCents / start.valueCents) * 10_000) : null,
     valueGrowthBpsInRange:
       start.valueCents > 0 ? Math.round(((now.valueCents - start.valueCents) / start.valueCents) * 10_000) : null,
   }

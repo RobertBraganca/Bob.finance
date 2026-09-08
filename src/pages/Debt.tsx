@@ -8,7 +8,6 @@ import {
   bpsToInput,
   centsToInput,
   money,
-  moneyCompact,
   monthsLabel,
   parseMoneyInput,
   parsePercentInput,
@@ -39,6 +38,7 @@ import {
   DebtServiceGauge,
   PayoffSummary,
 } from '../components/charts/DebtCharts'
+import { DebtHistoryChart } from '../components/charts/DebtHistoryChart'
 import { CategoryRing } from '../components/charts/CategoryRing'
 
 const KIND_LABEL: Record<string, string> = {
@@ -94,14 +94,9 @@ type PaymentRow = {
   notes: string | null
 }
 
-type ClosedDebtRow = {
-  id: number
-  name: string
-  kind: string
-  installmentCount: number | null
+type ClosedDebtRow = DebtRow & {
   closedOn: string | null
   totalPaidCents: number
-  lastPaymentOn: string | null
 }
 
 type SuggestedMatch = {
@@ -128,9 +123,13 @@ type ReconciliationQueue = {
   valueMismatches: ValueMismatch[]
 }
 
+/** Saldo medido no tempo (`debt.ts#debtTrend`) — um ponto por data em que ALGUMA dívida teve o saldo medido. */
+type TrendPoint = { asOf: string; balanceCents: number }
+
 type Overview = {
   debts: DebtRow[]
   closedDebts: ClosedDebtRow[]
+  trend: TrendPoint[]
   totalCents: number
   monthlyInterestCents: number
   minimumCents: number
@@ -213,7 +212,15 @@ export function DebtPage() {
       />
 
       <div className="page">
-        {!data ? (
+        {overview.isError ? (
+          <Card>
+            <EmptyState
+              icon="alert"
+              title="Falha ao carregar"
+              body="Não foi possível carregar as dívidas agora. Tente novamente em instantes."
+            />
+          </Card>
+        ) : !data ? (
           <Card>
             <SkeletonLines lines={3} />
           </Card>
@@ -241,7 +248,7 @@ export function DebtPage() {
         ) : (
           <Bento>
             <Slab span={6} accent>
-              <HeroFigure label="Dívida total" value={moneyCompact(data.totalCents)}>
+              <HeroFigure label="Dívida total" value={money(data.totalCents)}>
                 <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
                   <span className="kv__k">Juros por mês</span>
                   <span className="kv__v">{money(data.monthlyInterestCents)}</span>
@@ -384,6 +391,14 @@ export function DebtPage() {
               />
             </Card>
 
+            <Card
+              span={12}
+              title="Evolução da dívida"
+              subtitle="Saldo total medido ao longo do tempo, por registro de saldo, pagamento ou uso"
+            >
+              <DebtHistoryChart points={data.trend} surface="paper" />
+            </Card>
+
             <ReconciliationQueueCard
               queue={reconciliation.data}
               isLoading={reconciliation.isLoading}
@@ -475,7 +490,7 @@ export function DebtPage() {
                 span={12}
                 flush
                 title="Quitadas"
-                subtitle="Dívidas cujas parcelas foram todas pagas — saem da lista ativa automaticamente"
+                subtitle="Dívidas cujas parcelas foram todas pagas, saindo da lista ativa automaticamente"
               >
                 <div className="table-wrap">
                   <table className="table">
@@ -486,6 +501,7 @@ export function DebtPage() {
                         <th className="table__center">Parcelas</th>
                         <th className="table__num">Total pago</th>
                         <th>Quitada em</th>
+                        <th />
                       </tr>
                     </thead>
                     <tbody>
@@ -499,10 +515,30 @@ export function DebtPage() {
                           </td>
                           <td className="muted">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
                           <td className="table__center">
-                            {debt.installmentCount === null ? '-' : `${debt.installmentCount} / ${debt.installmentCount}`}
+                            <button
+                              type="button"
+                              className="badge"
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => setPaymentHistory(debt)}
+                              title="Ver histórico de pagamentos"
+                            >
+                              {debt.installmentCount === null ? '-' : `${debt.installmentCount} / ${debt.installmentCount}`}
+                            </button>
                           </td>
                           <td className="table__num">{money(debt.totalPaidCents)}</td>
                           <td className="muted">{debt.closedOn ? fmtDate(debt.closedOn) : '-'}</td>
+                          <td>
+                            <div className="row" style={{ gap: 2 }}>
+                              <Button
+                                variant="quiet"
+                                size="sm"
+                                icon="pencil"
+                                onClick={() => setEditing(debt)}
+                                title="Editar"
+                              />
+                              <DeleteDebtButton debtId={debt.id} name={debt.name} />
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -589,7 +625,7 @@ function ReconciliationQueueCard({
     <Card
       span={12}
       title="Fila de conciliação"
-      subtitle="Sugestões e divergências entre o extrato e o que está registrado — nada muda de status sem confirmação"
+      subtitle="Sugestões e divergências entre o extrato e o que está registrado; nada muda de status sem confirmação"
     >
       <div className="stack stack--loose">
         {matches.map(({ pending, match, debtName }) => (
@@ -695,7 +731,7 @@ function ValueMismatchDetailModal({ mismatch, onClose }: { mismatch: ValueMismat
           Endividamento registrou {money(mismatch.registeredAmountCents)} em {mismatch.paymentCount}{' '}
           pagamento(s); o extrato confirma {money(mismatch.confirmedAmountCents)} em{' '}
           {mismatch.confirmedTransactionCount} lançamento(s) ligado(s) a esta dívida. Os dois lados não
-          guardam qual pagamento corresponde a qual lançamento, então a comparação é pelo total — confira
+          guardam qual pagamento corresponde a qual lançamento, então a comparação é pelo total: confira
           as duas listas abaixo.
         </p>
 

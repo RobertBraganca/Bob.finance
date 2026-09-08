@@ -75,7 +75,7 @@ type RangeState = {
   anchor: string
 }
 
-type RangeContextValue = RangeState & {
+export type RangeContextValue = RangeState & {
   setPreset: (preset: RangePreset) => void
   setCustom: (from: string, to: string) => void
   setAccountId: (accountId: number | null) => void

@@ -25,11 +25,14 @@ export const normalizeSpan = (span: number): BentoSpan => (span <= 6 ? 6 : 12)
 
 export type BentoCardId =
   | 'month-mode'
+  | 'spending-pace'
+  | 'spending-heatmap'
   | 'hero'
   | 'income-expense-kpi'
   | 'accounts'
   | 'credit-cards'
   | 'reconciliation'
+  | 'subscriptions'
   | 'pending-income'
   | 'pending-expense'
   | 'income-expense-chart'
@@ -42,11 +45,14 @@ export type BentoCardId =
 
 export const BENTO_CARD_LABELS: Record<BentoCardId, string> = {
   'month-mode': 'Modo mês',
+  'spending-pace': 'Ritmo de gastos',
+  'spending-heatmap': 'Mapa de calor',
   hero: 'Resultado do período',
   'income-expense-kpi': 'Entradas e saídas (KPI)',
   accounts: 'Contas',
   'credit-cards': 'Cartões de crédito',
   reconciliation: 'Possíveis conciliações',
+  subscriptions: 'Possíveis assinaturas',
   'pending-income': 'Receitas pendentes',
   'pending-expense': 'Despesas pendentes',
   'income-expense-chart': 'Gráfico de entradas e saídas',
@@ -63,6 +69,8 @@ export type BentoCardConfig = { id: BentoCardId; span: BentoSpan; visible: boole
 /** Matches the order and spans the Home shipped with, before anyone customizes it. */
 export const DEFAULT_BENTO_LAYOUT: BentoCardConfig[] = [
   { id: 'month-mode', span: 12, visible: true },
+  { id: 'spending-pace', span: 6, visible: true },
+  { id: 'spending-heatmap', span: 6, visible: true },
   { id: 'hero', span: 6, visible: true },
   /**
    * Meia largura, para PAREAR com o hero — que de outro modo fica sozinho
@@ -83,6 +91,7 @@ export const DEFAULT_BENTO_LAYOUT: BentoCardConfig[] = [
   { id: 'accounts', span: 6, visible: true },
   { id: 'credit-cards', span: 6, visible: true },
   { id: 'reconciliation', span: 12, visible: true },
+  { id: 'subscriptions', span: 12, visible: true },
   { id: 'pending-income', span: 6, visible: true },
   { id: 'pending-expense', span: 6, visible: true },
   { id: 'income-expense-chart', span: 12, visible: true },

@@ -222,6 +222,14 @@
   letter-spacing: -0.025em;
   line-height: 1.05;
   font-variant-numeric: proportional-nums;
+  /* O valor exato (não mais o `moneyCompact` truncado) pode ser mais
+     longo que a coluna prevê num grid `auto-fit` estreito — sem isto, o
+     texto não quebra, vaza por cima da fatia vizinha e as duas ficam
+     ilegíveis coladas uma na outra (achado de 07/09/2026, revisão do
+     usuário no Painel). Quebra a qualquer ponto, não só em espaço: "R$
+     11.364,31" só tem um espaço, e quebrar só ali ainda estouraria uma
+     coluna de 150px. */
+  overflow-wrap: anywhere;
 }
 
 .stat__value--lg {
@@ -1013,6 +1021,16 @@
 }
 .table tbody tr[data-settled='true']:hover td {
   opacity: 0.8;
+}
+
+/* Só aparece com "Mostrar ocultos" marcado (a query já exclui ocultos por
+   padrão) — recuo mais forte que `data-settled` porque esta linha nem
+   deveria estar na lista normalmente, é uma exceção sendo revisada. */
+.table tbody tr[data-hidden='true'] td {
+  opacity: 0.4;
+}
+.table tbody tr[data-hidden='true']:hover td {
+  opacity: 0.7;
 }
 
 /* Existia só como `style={{ textAlign: 'center' }}` repetido célula a

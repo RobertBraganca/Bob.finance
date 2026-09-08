@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useMeta, useRange } from '../lib/store'
-import { bps, money, moneyCompact } from '../lib/format'
+import { bps, money } from '../lib/format'
 import {
   Bento,
   Button,
@@ -147,7 +147,7 @@ export function DrePage() {
         ) : meta.data && !meta.data.hasData ? (
           <Card>
             <EmptyState
-              icon="upload"
+              icon="sparkle"
               title="Nenhum dado importado ainda"
               body="Importe os extratos da Nubank PJ e PF para ver o resultado do período."
               action={
@@ -372,7 +372,7 @@ function ReconciliationSlab({
   return (
     <Slab span={12} accent>
       <div className="row row--between row--wrap" style={{ gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
-        <HeroFigure label={`Resultado combinado (${pjLabel} + ${pfLabel})`} value={moneyCompact(combinedCents)} />
+        <HeroFigure label={`Resultado combinado (${pjLabel} + ${pfLabel})`} value={money(combinedCents)} />
         <span
           className="row"
           style={{ maxWidth: 440, gap: 'var(--sp-2)', color: verdict.color, fontSize: 'var(--text-sm)', fontWeight: 600, alignItems: 'flex-start' }}
@@ -443,8 +443,7 @@ function BusinessSummary({
 }) {
   const expenseCents = totals.expenseCents + proLaboreCents
   const netResult = result - proLaboreCents
-  const margemBrutaBps = totals.incomeCents > 0 ? Math.round((netResult / totals.incomeCents) * 10_000) : 0
-  const taxaEconomiaBps = margemBrutaBps
+  const taxaEconomiaBps = totals.incomeCents > 0 ? Math.round((netResult / totals.incomeCents) * 10_000) : 0
 
   return (
     <div className="kv" style={{ padding: '0 var(--sp-5)', fontSize: 'var(--text-base)' }}>
@@ -458,9 +457,6 @@ function BusinessSummary({
         (−) Despesas Totais (Saídas+Custos)
       </span>
       <span className="kv__v neg">{money(expenseCents)}</span>
-
-      <span className="kv__k">% Margem Bruta</span>
-      <span className="kv__v">{bps(margemBrutaBps)}</span>
 
       <span className="kv__k" title="Média histórica da conta PJ, não afetada pelo período selecionado">
         Custo médio de serviço
@@ -553,9 +549,9 @@ function DreColumn({
         <BusinessSummary totals={totals} result={result} serviceAverages={dre.data.serviceAverages} proLaboreCents={proLaboreCents} />
       ) : (
         <div className="row row--wrap" style={{ padding: '0 var(--sp-5)', gap: 'var(--sp-4)' }}>
-          <StatTile label="Receita bruta" value={moneyCompact(totals.incomeCents)} />
-          <StatTile label="Despesas" value={moneyCompact(totals.expenseCents)} />
-          <StatTile label="Resultado" value={moneyCompact(result)} />
+          <StatTile label="Receita bruta" value={money(totals.incomeCents)} />
+          <StatTile label="Despesas" value={money(totals.expenseCents)} />
+          <StatTile label="Resultado" value={money(result)} />
         </div>
       )}
 
@@ -634,7 +630,7 @@ function StatementSection({
               </span>
             </td>
             <td className="table__num">{line.transactionCount}</td>
-            <td className="table__num">{(line.shareBps / 100).toFixed(1)}%</td>
+            <td className="table__num">{bps(line.shareBps, 1)}</td>
             <td className="table__num">{money(line.amountCents)}</td>
           </tr>
         ))

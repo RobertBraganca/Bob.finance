@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/shell/Shell'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from './components/ui/sidebar'
 import { Card, Icon, PageSkeleton } from './components/ui'
@@ -27,9 +27,6 @@ const DebtPage = lazy(() => import('./pages/Debt').then((m) => ({ default: m.Deb
 const CreditCardsPage = lazy(() => import('./pages/CreditCards').then((m) => ({ default: m.CreditCardsPage })))
 const InvestmentsPage = lazy(() => import('./pages/Investments').then((m) => ({ default: m.InvestmentsPage })))
 const PatrimonioPage = lazy(() => import('./pages/Patrimonio').then((m) => ({ default: m.PatrimonioPage })))
-const AposentadoriaPage = lazy(() =>
-  import('./pages/Aposentadoria').then((m) => ({ default: m.AposentadoriaPage })),
-)
 const FinancialHealthPage = lazy(() =>
   import('./pages/FinancialHealth').then((m) => ({ default: m.FinancialHealthPage })),
 )
@@ -90,7 +87,6 @@ const FEATURE_BY_PATH: Record<string, string> = {
   '/cartoes': 'credit-cards',
   '/investimentos': 'investments',
   '/patrimonio': 'patrimonio',
-  '/aposentadoria': 'aposentadoria',
   '/saude': 'financial-health',
   '/motor': 'financial-engine',
   '/precificacao': 'pricing',
@@ -140,7 +136,6 @@ export function App() {
               <Route path="/cartoes" element={<CreditCardsPage />} />
               <Route path="/investimentos" element={<InvestmentsPage />} />
               <Route path="/patrimonio" element={<PatrimonioPage />} />
-              <Route path="/aposentadoria" element={<AposentadoriaPage />} />
               <Route path="/saude" element={<FinancialHealthPage />} />
               <Route path="/motor" element={<FinancialEnginePage />} />
               <Route path="/precificacao" element={<PricingPage />} />
@@ -148,6 +143,10 @@ export function App() {
               <Route path="/importar" element={<ImportPage />} />
               <Route path="/categorias" element={<CategoriesPage />} />
               <Route path="/ajustes" element={<SettingsPage />} />
+              {/* Rotas absorvidas como aba em revisão de sidebar (07/09/2026) — redirect para quem
+                  não tinha o link salvo com o hash da aba nova. */}
+              <Route path="/parcelamentos" element={<Navigate to="/lancamentos" replace />} />
+              <Route path="/aposentadoria" element={<Navigate to="/investimentos" replace />} />
             </Routes>
           </Suspense>
         </div>

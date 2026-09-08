@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { useCategories, type CategoryNode } from '../lib/store'
+import { useCategories, useMeta, type CategoryNode } from '../lib/store'
+import { currentPeriod, periodBounds } from '../lib/period'
 import {
   Bento,
   Button,
@@ -9,11 +11,13 @@ import {
   CategorySelect,
   EmptyState,
   Icon,
+  PeriodNav,
   Select,
   Slab,
   StatTile,
   useToast,
 } from '../components/ui'
+import { CategoryRing, type Slice } from '../components/charts/CategoryRing'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
@@ -92,7 +96,7 @@ type Memory = {
 }
 
 export function CategoriesPage() {
-  const [tab, setTab] = useState<'tree' | 'rules' | 'memory'>('tree')
+  const [tab, setTab] = useState<'tree' | 'spending' | 'rules' | 'memory'>('tree')
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -135,15 +139,17 @@ export function CategoriesPage() {
       />
 
       <div className="page">
-        <Tabs value={tab} onValueChange={(value) => setTab(value as 'tree' | 'rules' | 'memory')}>
+        <Tabs value={tab} onValueChange={(value) => setTab(value as 'tree' | 'spending' | 'rules' | 'memory')}>
           <TabsList aria-label="Seção">
             <TabsTrigger value="tree">Árvore</TabsTrigger>
+            <TabsTrigger value="spending">Visão por gasto</TabsTrigger>
             <TabsTrigger value="rules">{`Regras (${rules.data?.rules.length ?? 0})`}</TabsTrigger>
             <TabsTrigger value="memory">{`Aprendizado (${rules.data?.memory.length ?? 0})`}</TabsTrigger>
           </TabsList>
         </Tabs>
 
         {tab === 'tree' && <CategoryTree />}
+        {tab === 'spending' && <CategorySpendingView />}
         {tab === 'rules' && <RulesTable rules={rules.data?.rules ?? []} isError={rules.isError} />}
         {tab === 'memory' && <MemoryTable memory={rules.data?.memory ?? []} isError={rules.isError} />}
       </div>
@@ -237,6 +243,67 @@ function CategoryTree() {
           onClose={() => setAddingUnder(null)}
         />
       )}
+    </>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ * Spending view — anel de rosca + lista, um mês por vez.
+ * ------------------------------------------------------------------ */
+type CategorySpendingResponse = {
+  byCategory: Slice[]
+  byCategoryLeaf: Slice[]
+  incomeByCategory: Slice[]
+  incomeByCategoryLeaf: Slice[]
+}
+
+function CategorySpendingView() {
+  const navigate = useNavigate()
+  const meta = useMeta()
+  const [period, setPeriod] = useState(currentPeriod())
+  const { from, to } = periodBounds(period)
+
+  const spending = useQuery({
+    queryKey: ['category-spending', from, to],
+    queryFn: () => api.get<CategorySpendingResponse>('/dashboard', { from, to }),
+    placeholderData: (previous) => previous,
+  })
+
+  const goToCategory = (categoryId: number) => navigate(`/lancamentos?parentCategoryId=${categoryId}`)
+
+  return (
+    <>
+      <div className="row row--between" style={{ marginBottom: 'var(--sp-3)' }}>
+        <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
+          Quanto entrou e saiu por categoria-mãe, um mês por vez.
+        </p>
+        <PeriodNav period={period} onChange={setPeriod} max={meta.data?.today.slice(0, 7)} />
+      </div>
+
+      <Bento>
+        <Card span={6} title="Entradas por categoria" subtitle="Agrupado por categoria-mãe">
+          <CategoryRing
+            slices={spending.data?.incomeByCategory ?? []}
+            childSlices={spending.data?.incomeByCategoryLeaf}
+            totalLabel="Total de entradas"
+            height={220}
+            paddingAngle={5}
+            cornerRadius={6}
+            onSliceClick={goToCategory}
+          />
+        </Card>
+        <Card span={6} title="Gastos por categoria" subtitle="Agrupado por categoria-mãe">
+          <CategoryRing
+            slices={spending.data?.byCategory ?? []}
+            childSlices={spending.data?.byCategoryLeaf}
+            totalLabel="Total de saídas"
+            height={220}
+            paddingAngle={5}
+            cornerRadius={6}
+            onSliceClick={goToCategory}
+          />
+        </Card>
+      </Bento>
     </>
   )
 }

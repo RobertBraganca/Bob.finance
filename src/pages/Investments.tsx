@@ -7,7 +7,6 @@ import {
   bpsToInput,
   centsToInput,
   money,
-  moneyCompact,
   monthsLabel,
   parseMoneyInput,
   parsePercentInput,
@@ -55,6 +54,7 @@ import {
 import { ProfitabilityChart } from '../components/charts/ProfitabilityChart'
 import { DateRangePopover } from '../components/ui/DateRangePopover'
 import { GoalModal, type Goal, type Projection } from '../components/ui/GoalModal'
+import { AposentadoriaTab } from './Aposentadoria'
 
 /** Only these classes trade on B3 the way BRAPI understands — mirrors the server's set. */
 const QUOTABLE_CLASSES = new Set(['stocks', 'fii'])
@@ -99,7 +99,9 @@ type PortfolioResponse = {
 }
 
 export function InvestmentsPage() {
-  const [tab, setTab] = useState<'portfolio' | 'contribute' | 'goals' | 'profitability' | 'ledger'>('portfolio')
+  const [tab, setTab] = useState<'portfolio' | 'contribute' | 'goals' | 'profitability' | 'ledger' | 'retirement'>(
+    'portfolio',
+  )
   const [assetModal, setAssetModal] = useState(false)
   const [tradeModal, setTradeModal] = useState(false)
   const [tradePreset, setTradePreset] = useState<string | null>(null)
@@ -150,6 +152,7 @@ export function InvestmentsPage() {
             { value: 'ledger', label: 'Lançamentos' },
             { value: 'goals', label: `Metas (${data?.goals.length ?? 0})` },
             { value: 'profitability', label: 'Rentabilidade' },
+            { value: 'retirement', label: 'Aposentadoria' },
           ]}
         />
 
@@ -196,6 +199,8 @@ export function InvestmentsPage() {
           <LedgerTab positions={data.positions} allocation={data.allocation} />
         ) : tab === 'profitability' ? (
           <ProfitabilityTab />
+        ) : tab === 'retirement' ? (
+          <AposentadoriaTab />
         ) : (
           <GoalsEnvironment goals={data.goals} goalPurposes={data.goalPurposes} />
         )}
@@ -490,7 +495,7 @@ function PortfolioTab({
       <Slab span={6} accent>
         <HeroFigure
           label="Patrimônio total"
-          value={moneyCompact(data.marketValueCents)}
+          value={money(data.marketValueCents)}
           delta={summary.data?.valueGrowthBpsInRange ?? null}
           deltaLabel={`no período (${rangeLabel})`}
         >
@@ -1900,7 +1905,7 @@ function GoalsEnvironment({
                     ? `${goal.name} · ${goalPurposes.find((p) => p.value === goal.purpose)?.label ?? goal.purpose}`
                     : goal.name
                 }
-                value={moneyCompact(data.currentValueCents)}
+                value={money(data.currentValueCents)}
               >
                 <div className="stack stack--tight" style={{ marginTop: 'var(--sp-3)' }}>
                   <div className="row row--between">
@@ -1929,7 +1934,7 @@ function GoalsEnvironment({
             <Card span={6}>
               <StatTile
                 label="Aporte mensal planejado"
-                value={moneyCompact(goal.monthlyContributionCents)}
+                value={money(goal.monthlyContributionCents)}
                 foot={`retorno esperado ${bps(goal.expectedReturnBps)} a.a.`}
               />
             </Card>
@@ -1944,7 +1949,7 @@ function GoalsEnvironment({
               <StatTile
                 label="Aporte necessário na data"
                 value={
-                  data.requiredMonthlyCents === null ? '-' : moneyCompact(data.requiredMonthlyCents)
+                  data.requiredMonthlyCents === null ? '-' : money(data.requiredMonthlyCents)
                 }
                 foot={
                   goal.targetDate
@@ -1959,7 +1964,7 @@ function GoalsEnvironment({
                 value={
                   data.projectedAtTargetCents === null
                     ? '-'
-                    : moneyCompact(data.projectedAtTargetCents)
+                    : money(data.projectedAtTargetCents)
                 }
                 foot={
                   data.projectedAtTargetCents !== null

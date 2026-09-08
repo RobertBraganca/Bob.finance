@@ -43,6 +43,7 @@ import {
   IconWorldFilled,
   IconGripVertical,
   IconLogout,
+  IconEyeOff,
   type Icon as TablerIcon,
 } from '@tabler/icons-react'
 
@@ -131,6 +132,8 @@ const ICONS: Record<string, TablerIcon> = {
   grip: IconGripVertical,
   // Sem "logout" filled na Tabler — outline mantido (login/29/08/2026).
   logout: IconLogout,
+  // Sem "eye-off" filled na Tabler — outline mantido (ocultar lançamento).
+  eyeOff: IconEyeOff,
 }
 
 export type IconName = keyof typeof ICONS

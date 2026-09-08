@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { telemetry } from '../lib/telemetry'
 import { useAccounts } from '../lib/store'
-import { bps, centsToInput, money, moneyCompact, date as fmtDate, parseMoneyInput } from '../lib/format'
+import { bps, centsToInput, money, date as fmtDate, parseMoneyInput } from '../lib/format'
 import {
   Bento,
   Button,
@@ -20,6 +20,7 @@ import {
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
+import { InvoiceHistoryChart, type InvoiceHistoryPoint } from '../components/charts/InvoiceHistoryChart'
 
 export type CardRow = {
   id: number
@@ -65,7 +66,15 @@ export function CreditCardsPage() {
       />
 
       <div className="page">
-        {!cards.data ? (
+        {cards.isError ? (
+          <Card>
+            <EmptyState
+              icon="alert"
+              title="Falha ao carregar"
+              body="Não foi possível carregar os cartões agora. Tente novamente em instantes."
+            />
+          </Card>
+        ) : !cards.data ? (
           <Card>
             <SkeletonLines lines={3} />
           </Card>
@@ -92,7 +101,7 @@ export function CreditCardsPage() {
         ) : (
           <Bento>
             <Slab span={12} accent>
-              <HeroFigure label="Limite disponível" value={moneyCompact(totalAvailableCents)}>
+              <HeroFigure label="Limite disponível" value={money(totalAvailableCents)}>
                 <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
                   <span className="kv__k">Limite total</span>
                   <span className="kv__v">{money(totalLimitCents)}</span>
@@ -134,7 +143,7 @@ export function CreditCardsPage() {
                           {money(card.availableLimitCents)}
                           <br />
                           <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-                            de {money(card.creditLimitCents)} · {bps(10_000 - card.usedBps, 0)} livre
+                            de {money(card.creditLimitCents)} · {bps(Math.max(0, 10_000 - card.usedBps), 0)} livre
                           </span>
                         </td>
                         <td>
@@ -162,6 +171,8 @@ export function CreditCardsPage() {
                 </table>
               </div>
             </Card>
+
+            <CardInvoiceCard cards={data} />
           </Bento>
         )}
       </div>
@@ -196,6 +207,64 @@ function DeleteCardButton({ cardId, name }: { cardId: number; name: string }) {
       disabled={remove.isPending}
       title="Excluir cartão"
     />
+  )
+}
+
+type InvoiceCycle = { closingOn: string; dueOn: string; amountCents: number; transactionCount: number }
+
+/**
+ * Fatura atual + histórico de ciclos fechados, um cartão por vez — item 7
+ * do backlog de 07/09/2026. Sem sincronização bancária/Open Finance (este
+ * app não tem isso, só importação de CSV): o atraso possível é de
+ * IMPORTAÇÃO, não de sincronização ao vivo.
+ */
+function CardInvoiceCard({ cards }: { cards: CardRow[] }) {
+  const [cardId, setCardId] = useState<number | null>(cards[0]?.id ?? null)
+  const selected = cards.find((c) => c.id === cardId) ?? cards[0] ?? null
+
+  const invoices = useQuery({
+    queryKey: ['credit-card-invoices', selected?.id],
+    queryFn: () => api.get<{ current: InvoiceCycle; history: InvoiceCycle[] }>(`/credit-cards/${selected!.id}/invoices`),
+    enabled: selected !== null,
+  })
+
+  const historyPoints: InvoiceHistoryPoint[] = (invoices.data?.history ?? []).map((cycle) => ({
+    closingOn: cycle.closingOn,
+    amountCents: cycle.amountCents,
+    transactionCount: cycle.transactionCount,
+  }))
+
+  return (
+    <Card
+      span={12}
+      title="Fatura por cartão"
+      subtitle="Soma do que foi ligado a este cartão em Lançamentos, por ciclo de fatura"
+      actions={
+        <div style={{ minWidth: 200 }}>
+          <Select
+            value={cardId}
+            options={cards.map((c) => ({ value: c.id, label: c.name }))}
+            onChange={setCardId}
+          />
+        </div>
+      }
+    >
+      {selected && invoices.data && (
+        <div className="stack" style={{ padding: 'var(--sp-4) var(--sp-5)' }}>
+          <HeroFigure label="Fatura atual" value={money(invoices.data.current.amountCents)}>
+            <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
+              <span className="kv__k">Fecha em</span>
+              <span className="kv__v">{fmtDate(invoices.data.current.closingOn)}</span>
+              <span className="kv__k">Vence em</span>
+              <span className="kv__v">{fmtDate(invoices.data.current.dueOn)}</span>
+              <span className="kv__k">Lançamentos</span>
+              <span className="kv__v">{invoices.data.current.transactionCount}</span>
+            </div>
+          </HeroFigure>
+          <InvoiceHistoryChart points={historyPoints} surface="paper" />
+        </div>
+      )}
+    </Card>
   )
 }
 

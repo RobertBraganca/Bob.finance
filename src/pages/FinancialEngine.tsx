@@ -7,7 +7,6 @@ import {
   bpsToInput,
   centsToInput,
   money,
-  moneyCompact,
   parseMoneyInput,
   parsePercentInput,
   periodLong,
@@ -188,7 +187,7 @@ export function FinancialEnginePage() {
             <Slab span={6} accent>
               <HeroFigure
                 label="Disponível para alocação"
-                value={moneyCompact(available.data.availableCents)}
+                value={money(available.data.availableCents)}
               >
                 <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-xs)', marginTop: 'var(--sp-3)' }}>
                   {available.data.availableCents >= 0
@@ -228,7 +227,7 @@ export function FinancialEnginePage() {
               <div className="stack stack--loose">
                 <StatTile
                   label="Maior disponível já registrado"
-                  value={records.data?.highestAvailable ? moneyCompact(records.data.highestAvailable.valorCents) : '-'}
+                  value={records.data?.highestAvailable ? money(records.data.highestAvailable.valorCents) : '-'}
                   foot={records.data?.highestAvailable ? periodLong(records.data.highestAvailable.periodo) : undefined}
                 />
                 <StatTile

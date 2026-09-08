@@ -2,14 +2,14 @@ import { Fragment, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { forwardBoundsFor, useAccounts, useMeta, useRange, type Account } from '../lib/store'
+import { forwardBoundsFor, useAccounts, useMeta, useRange, type Account, type RangeContextValue } from '../lib/store'
+import { shiftPeriod, singleMonthOf } from '../lib/period'
 import { AccountModal, BalanceCheckModal } from './Settings'
 import { SimulatorModal } from '../components/ui/SimulatorModal'
 import {
   bps,
   centsToInput,
   money,
-  moneyCompact,
   parseMoneyInput,
   period as fmtPeriod,
   periodLong as fmtPeriodLong,
@@ -29,6 +29,7 @@ import {
   Button,
   Card,
   CategorySelect,
+  Delta,
   EmptyState,
   HeroFigure,
   Icon,
@@ -56,6 +57,10 @@ import { CategoryRing, type Slice } from '../components/charts/CategoryRing'
 import { NetFlowChart } from '../components/charts/NetFlowChart'
 import { AccountFlowSankey, type FlowEdge, type FlowNode, type LooseLeg } from '../components/charts/AccountFlowSankey'
 import { CARD_USAGE_BANDS, DebtServiceGauge } from '../components/charts/DebtCharts'
+import { SpendingPaceChart, type SpendingPacePoint } from '../components/charts/SpendingPaceChart'
+import { AnnualPaceChart, type AnnualPacePoint } from '../components/charts/AnnualPaceChart'
+import { SpendingHeatmap } from '../components/charts/SpendingHeatmap'
+import { AnnualSpendingHeatmap } from '../components/charts/AnnualSpendingHeatmap'
 
 type DashboardResponse = {
   range: { from: string; to: string }
@@ -149,6 +154,8 @@ type CardRow = {
  * só pros gráficos), não uma grade de retângulos iguais. */
 const DASHBOARD_SKELETON_VARIANT: Partial<Record<BentoCardId, 'lines' | 'stats' | 'block'>> = {
   'month-mode': 'stats',
+  'spending-pace': 'block',
+  'spending-heatmap': 'block',
   hero: 'stats',
   'income-expense-kpi': 'stats',
   'income-expense-chart': 'block',
@@ -254,13 +261,17 @@ export function Dashboard() {
       <Slab span={spanOf('hero')} accent>
         <HeroFigure
           label="Resultado do período"
-          value={moneyCompact(totals.netCents)}
+          value={money(totals.netCents)}
           delta={deltas.netBps}
           deltaLabel="vs. período anterior"
         />
         <div className="kv" style={{ marginTop: 'var(--sp-2)' }}>
           <span className="kv__k">Taxa de poupança</span>
-          <span className="kv__v">{bps(totals.savingsRateBps)}</span>
+          {/* Sem receita no período, "0,0%" lia como neutro em vez de "não
+              dá pra medir" (achado da auditoria de 07/09/2026) — um
+              período com despesa mas nenhuma entrada é um déficit, não
+              uma taxa de poupança de zero. */}
+          <span className="kv__v">{totals.incomeCents > 0 ? bps(totals.savingsRateBps) : '-'}</span>
           <span className="kv__k" title="Aportes menos resgates, já que varreduras automáticas RDB entram e saem constantemente e só o líquido significa algo">
             Investido no período (líquido)
           </span>
@@ -280,29 +291,31 @@ export function Dashboard() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+            // 190px, não 150: valor exato ("R$ 11.364,31"), não mais o
+            // `moneyCompact` truncado, precisa de mais coluna pra não
+            // depender só da quebra de `overflow-wrap` (07/09/2026).
+            gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
             gap: 'var(--sp-5)',
           }}
         >
           <StatTile
             label="Entradas"
-            value={moneyCompact(totals.incomeCents)}
+            value={money(totals.incomeCents)}
             delta={deltas.incomeBps}
             deltaLabel="vs. anterior"
-            spark={monthly.map((m) => m.incomeCents)}
             large
           />
           <StatTile
             label="Saídas"
-            value={moneyCompact(totals.expenseCents)}
+            value={money(totals.expenseCents)}
             delta={deltas.expenseBps}
             deltaLabel="vs. anterior"
-            spark={monthly.map((m) => m.expenseCents)}
+            deltaInvert
             large
           />
           <StatTile
             label="A receber"
-            value={moneyCompact(totals.receivableCents)}
+            value={money(totals.receivableCents)}
             delta={deltas.receivableBps}
             deltaLabel="vs. anterior"
             large
@@ -359,11 +372,19 @@ export function Dashboard() {
         </div>
       </Card>
     ),
-    'month-mode': <MonthModeCard span={spanOf('month-mode')} rangeTo={range.to} rangeAnchor={range.anchor} />,
+    'month-mode':
+      range.preset === 'max' ? (
+        <YearModeCard span={spanOf('month-mode')} rangeAnchor={range.anchor} accountId={range.accountId} />
+      ) : (
+        <MonthModeCard span={spanOf('month-mode')} rangeTo={range.to} rangeAnchor={range.anchor} accountId={range.accountId} />
+      ),
+    'spending-pace': <SpendingPaceCard span={spanOf('spending-pace')} range={range} />,
+    'spending-heatmap': <SpendingHeatmapCard span={spanOf('spending-heatmap')} range={range} />,
     'credit-cards': (
       <CreditCardsSlab cards={cards.data?.cards ?? []} isError={cards.isError} span={spanOf('credit-cards')} />
     ),
     reconciliation: <ReconciliationCard span={spanOf('reconciliation')} />,
+    subscriptions: <SubscriptionsCard span={spanOf('subscriptions')} />,
     'pending-income': <PendingCard flow="income" title="Receitas pendentes" span={spanOf('pending-income')} />,
     'pending-expense': <PendingCard flow="expense" title="Despesas pendentes" span={spanOf('pending-expense')} />,
     'income-expense-chart': (
@@ -831,10 +852,12 @@ function MonthModeCard({
   span,
   rangeTo,
   rangeAnchor,
+  accountId,
 }: {
   span: BentoSpan
   rangeTo: string
   rangeAnchor: string
+  accountId: number | null
 }) {
   // Segue o seletor de período global, sempre — nunca deriva nem substitui
   // o próprio mês. Uma versão anterior recuava um mês sempre que o fim do
@@ -853,13 +876,17 @@ function MonthModeCard({
   const isCurrentPeriod = period === currentPeriod
 
   const goals = useQuery({
-    queryKey: ['month-mode-goals', period],
-    queryFn: () => api.get<PeriodProgressLite>(`/goals/${period}`),
+    queryKey: ['month-mode-goals', period, accountId],
+    queryFn: () => api.get<PeriodProgressLite>(`/goals/${period}`, { accountId: accountId ?? undefined }),
     enabled: period !== null,
   })
 
   // Traz, num payload só, meta e realizado do mês para investimento,
   // dívida e reserva — os três já compostos por `specs/motor-financeiro`.
+  // Sem `accountId`: `/financial-engine/available` não aceita esse filtro
+  // hoje (achado da auditoria de 07/09/2026) — as outras duas chamadas
+  // deste card já respeitam a conta selecionada, esta continua olhando
+  // todas as contas até o Motor financeiro ganhar o mesmo filtro.
   const available = useQuery({
     queryKey: ['month-mode-available', period],
     queryFn: () => api.get<AvailableLite>('/financial-engine/available', { period }),
@@ -867,8 +894,8 @@ function MonthModeCard({
   })
 
   const radar = useQuery({
-    queryKey: ['financial-health-radar', period],
-    queryFn: () => api.get<RadarLite>('/financial-health/risk-radar', { period }),
+    queryKey: ['financial-health-radar', period, accountId],
+    queryFn: () => api.get<RadarLite>('/financial-health/risk-radar', { period, accountId: accountId ?? undefined }),
     enabled: period !== null,
   })
 
@@ -987,6 +1014,400 @@ function MonthModeCard({
   )
 }
 
+type YearProgressLite = {
+  goal: { incomeTargetCents: number | null; spendCapCents: number | null }
+  actual: { incomeCents: number; expenseCents: number }
+  progress: { income: { state: MeterState }; spend: { state: MeterState } }
+}
+
+type YearDestinationsLite = {
+  investment: { targetCents: number; realizedCents: number; state: MeterState }
+  debt: { targetCents: number; realizedCents: number; state: MeterState }
+  reserve: { targetCents: number; realizedCents: number; state: MeterState }
+}
+
+/**
+ * Pedido em 07/09/2026: "Modo mês" vira "Modo ano" quando o seletor de
+ * período do Painel está em "Máximo" — mesmas 5 linhas, mesmos vereditos
+ * (nunca recalculados aqui), só a fonte muda pra `/goals-year` e
+ * `/financial-engine/available-year` (specs/dashboard). Radar de risco
+ * continua olhando só o mês corrente: é um fato de "agora" (limite de
+ * cartão comprometido, desvio de carteira), não algo que um ano inteiro
+ * mudaria — mesmo motivo de "Reserva" não somar doze meses de meta.
+ */
+function YearModeCard({
+  span,
+  rangeAnchor,
+  accountId,
+}: {
+  span: BentoSpan
+  rangeAnchor: string
+  accountId: number | null
+}) {
+  const year = rangeAnchor.slice(0, 4)
+  const currentPeriod = rangeAnchor.slice(0, 7)
+
+  const goals = useQuery({
+    queryKey: ['year-mode-goals', year, accountId],
+    queryFn: () => api.get<YearProgressLite>(`/goals-year/${year}`, { accountId: accountId ?? undefined }),
+  })
+
+  const available = useQuery({
+    queryKey: ['year-mode-available', year],
+    queryFn: () => api.get<YearDestinationsLite>('/financial-engine/available-year', { year }),
+  })
+
+  const radar = useQuery({
+    queryKey: ['financial-health-radar', currentPeriod, accountId],
+    queryFn: () => api.get<RadarLite>('/financial-health/risk-radar', { period: currentPeriod, accountId: accountId ?? undefined }),
+  })
+
+  if (goals.isError || available.isError) {
+    return (
+      <Card span={span} title="Modo ano">
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar"
+          body="Não foi possível carregar os dados do ano agora. Tente novamente em instantes."
+        />
+      </Card>
+    )
+  }
+
+  if (!goals.data || !available.data) {
+    return (
+      <Card span={span} title="Modo ano">
+        <EmptyState title="Compondo o ano…" />
+      </Card>
+    )
+  }
+
+  const lines: MonthLine[] = [
+    {
+      key: 'income',
+      label: 'Receita',
+      realizedCents: goals.data.actual.incomeCents,
+      targetCents: goals.data.goal.incomeTargetCents,
+      higherIsBetter: true,
+      state: goals.data.progress.income.state,
+    },
+    {
+      key: 'spend',
+      label: 'Gasto',
+      realizedCents: goals.data.actual.expenseCents,
+      targetCents: goals.data.goal.spendCapCents,
+      higherIsBetter: false,
+      state: goals.data.progress.spend.state,
+    },
+    {
+      key: 'investment',
+      label: 'Investimento',
+      realizedCents: available.data.investment.realizedCents,
+      targetCents: available.data.investment.targetCents,
+      higherIsBetter: true,
+      state: available.data.investment.state,
+    },
+    {
+      key: 'debt',
+      label: 'Dívida',
+      realizedCents: available.data.debt.realizedCents,
+      targetCents: available.data.debt.targetCents,
+      higherIsBetter: true,
+      state: available.data.debt.state,
+    },
+    {
+      key: 'reserve',
+      label: 'Reserva',
+      realizedCents: available.data.reserve.realizedCents,
+      targetCents: available.data.reserve.targetCents,
+      higherIsBetter: true,
+      state: available.data.reserve.state,
+    },
+  ]
+
+  const foraDaFaixa = (radar.data?.rules ?? []).filter((r) => r.outsideRange)
+  const atencao = foraDaFaixa.length > 0
+  const semRadar = !radar.data
+
+  return (
+    <Card
+      span={span}
+      title="Modo ano"
+      subtitle={`${year} · em andamento`}
+      actions={
+        semRadar ? undefined : (
+          <span className={`badge ${atencao ? 'badge--warning' : 'badge--good'}`}>
+            <Icon name={atencao ? 'alert' : 'check'} size={11} strokeWidth={2.4} />
+            {atencao ? 'Atenção' : 'No caminho'}
+          </span>
+        )
+      }
+    >
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+          gap: 'var(--sp-4)',
+        }}
+      >
+        {lines.map((line) => (
+          <div key={line.key} style={{ minWidth: 0 }}>
+            <MonthLineTile line={line} />
+          </div>
+        ))}
+      </div>
+      {atencao && (
+        <p className="chart__note">
+          {foraDaFaixa.length === 1 ? 'Um indicador está' : `${foraDaFaixa.length} indicadores estão`} fora
+          da faixa configurada no Radar de risco: {foraDaFaixa.map((r) => r.label).join(', ')}.
+        </p>
+      )}
+    </Card>
+  )
+}
+
+type RangeSubset = Pick<RangeContextValue, 'preset' | 'from' | 'to' | 'anchor' | 'accountId'>
+
+/**
+ * Item 7 do backlog de 07/09/2026 ("a Home falta um gráfico de abertura").
+ *
+ * Um único mês em foco (`singleMonthOf`) dá o gráfico original: dia a dia,
+ * mês corrente contra anterior. Qualquer outra seleção (3m/6m/12m/ano/
+ * máximo, ou um intervalo personalizado que não é um mês inteiro) não tem
+ * um "mês corrente" pra desenhar — vira o mesmo gráfico um grau mais
+ * grosso, ano corrente contra anterior, mês a mês (generalização de
+ * 07/09/2026: antes este card ignorava o seletor de período do topo por
+ * completo e sempre mostrava o mês corrente, não importava o que
+ * estivesse selecionado ali).
+ */
+function SpendingPaceCard({ span, range }: { span: BentoSpan; range: RangeSubset }) {
+  const singleMonth = singleMonthOf(range)
+  return singleMonth ? (
+    <MonthlyPaceCard span={span} period={singleMonth} anchor={range.anchor} accountId={range.accountId} />
+  ) : (
+    <AnnualPaceCard span={span} anchor={range.anchor} accountId={range.accountId} />
+  )
+}
+
+function MonthlyPaceCard({
+  span,
+  period,
+  anchor,
+  accountId,
+}: {
+  span: BentoSpan
+  period: string
+  anchor: string
+  accountId: number | null
+}) {
+  const previousPeriod = shiftPeriod(period, -1)
+  const isCurrentMonth = period === anchor.slice(0, 7)
+  const cutoffDay = isCurrentMonth ? Number(anchor.slice(8, 10)) : daysInMonthOf(period)
+
+  const current = useQuery({
+    queryKey: ['daily-series', period, accountId],
+    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number }> }>('/analytics/daily', { period, accountId: accountId ?? undefined }),
+  })
+  const previous = useQuery({
+    queryKey: ['daily-series', previousPeriod, accountId],
+    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number }> }>('/analytics/daily', { period: previousPeriod, accountId: accountId ?? undefined }),
+  })
+
+  const points: SpendingPacePoint[] = []
+  let currentDeltaBps: number | null = null
+  let currentDeltaCents: number | null = null
+
+  if (current.data && previous.data) {
+    const maxDays = Math.max(current.data.days.length, previous.data.days.length)
+    let runningCurrent = 0
+    let runningPrevious = 0
+    for (let i = 0; i < maxDays; i++) {
+      const dayOfMonth = i + 1
+      const currentDay = current.data.days[i]
+      const previousDay = previous.data.days[i]
+      const isFuture = dayOfMonth > cutoffDay
+      if (currentDay && !isFuture) runningCurrent += currentDay.expenseCents
+      if (previousDay) runningPrevious += previousDay.expenseCents
+      points.push({
+        dayOfMonth,
+        currentCents: currentDay && !isFuture ? runningCurrent : null,
+        previousCents: previousDay ? runningPrevious : null,
+      })
+      if (dayOfMonth === cutoffDay) {
+        currentDeltaCents = runningCurrent - runningPrevious
+        currentDeltaBps = runningPrevious > 0 ? Math.round((currentDeltaCents / runningPrevious) * 10_000) : null
+      }
+    }
+  }
+
+  return (
+    <Card
+      span={span}
+      title="Ritmo de gastos"
+      subtitle="Gasto acumulado do mês, dia a dia, contra o mesmo ponto do mês passado"
+      actions={
+        currentDeltaCents !== null ? (
+          <div className="stack" style={{ gap: 0, alignItems: 'flex-end' }}>
+            <span className="tabular" style={{ fontSize: 'var(--text-sm)' }}>
+              {currentDeltaCents >= 0 ? '+' : ''}
+              {money(currentDeltaCents)}
+              <span className="muted"> {currentDeltaCents >= 0 ? 'acima' : 'abaixo'}</span>
+            </span>
+            <Delta bps={currentDeltaBps} label="vs mês passado" invert />
+          </div>
+        ) : undefined
+      }
+    >
+      {!current.data || !previous.data ? (
+        <SkeletonBlock height={220} />
+      ) : (
+        <SpendingPaceChart points={points} surface="paper" />
+      )}
+    </Card>
+  )
+}
+
+/**
+ * Correção de 07/09/2026 (mesmo dia da primeira versão): "mês a mês contra
+ * o ano passado" não é um acumulado subindo o ano inteiro (isso confundia
+ * "ritmo" com "resultado do ano") — é cada mês comparado ao MESMO mês do
+ * ano anterior, lado a lado. O card ainda resume "quanto já gastei este
+ * ano contra o mesmo trecho do ano passado" no canto (útil pra manter),
+ * mas o gráfico em si virou duas colunas por mês, não uma linha corrida.
+ */
+function AnnualPaceCard({ span, anchor, accountId }: { span: BentoSpan; anchor: string; accountId: number | null }) {
+  const currentYear = Number(anchor.slice(0, 4))
+  const previousYear = currentYear - 1
+  const cutoffMonth = Number(anchor.slice(5, 7))
+
+  const current = useQuery({
+    queryKey: ['monthly-series', currentYear, accountId],
+    queryFn: () =>
+      api.get<{ series: Array<{ period: string; expenseCents: number }> }>('/analytics/monthly', {
+        from: `${currentYear}-01-01`,
+        to: `${currentYear}-12-31`,
+        accountId: accountId ?? undefined,
+      }),
+  })
+  const previous = useQuery({
+    queryKey: ['monthly-series', previousYear, accountId],
+    queryFn: () =>
+      api.get<{ series: Array<{ period: string; expenseCents: number }> }>('/analytics/monthly', {
+        from: `${previousYear}-01-01`,
+        to: `${previousYear}-12-31`,
+        accountId: accountId ?? undefined,
+      }),
+  })
+
+  const points: AnnualPacePoint[] = []
+  let currentDeltaBps: number | null = null
+  let currentDeltaCents: number | null = null
+
+  if (current.data && previous.data) {
+    const currentByMonth = new Map(current.data.series.map((m) => [m.period.slice(5, 7), m.expenseCents]))
+    const previousByMonth = new Map(previous.data.series.map((m) => [m.period.slice(5, 7), m.expenseCents]))
+    // Resumo do canto: só o trecho já decorrido dos dois anos (Jan..mês
+    // corrente) — comparar contra o ano passado INTEIRO inflaria o "ano
+    // passado" com meses que este ano ainda nem chegou.
+    let ytdCurrent = 0
+    let ytdPreviousThroughCutoff = 0
+    for (let monthIndex = 1; monthIndex <= 12; monthIndex++) {
+      const key = String(monthIndex).padStart(2, '0')
+      const isFuture = monthIndex > cutoffMonth
+      const currentMonthCents = currentByMonth.get(key) ?? 0
+      const previousMonthCents = previousByMonth.get(key) ?? 0
+      if (!isFuture) {
+        ytdCurrent += currentMonthCents
+        ytdPreviousThroughCutoff += previousMonthCents
+      }
+      points.push({
+        monthIndex,
+        currentCents: isFuture ? null : currentMonthCents,
+        previousCents: previousMonthCents,
+      })
+    }
+    currentDeltaCents = ytdCurrent - ytdPreviousThroughCutoff
+    currentDeltaBps = ytdPreviousThroughCutoff > 0 ? Math.round((currentDeltaCents / ytdPreviousThroughCutoff) * 10_000) : null
+  }
+
+  return (
+    <Card
+      span={span}
+      title="Ritmo de gastos"
+      subtitle="Gasto por mês, este ano contra o mesmo mês do ano passado"
+      actions={
+        currentDeltaCents !== null ? (
+          <div className="stack" style={{ gap: 0, alignItems: 'flex-end' }}>
+            <span className="tabular" style={{ fontSize: 'var(--text-sm)' }}>
+              {currentDeltaCents >= 0 ? '+' : ''}
+              {money(currentDeltaCents)}
+              <span className="muted"> {currentDeltaCents >= 0 ? 'acima' : 'abaixo'}</span>
+            </span>
+            <Delta bps={currentDeltaBps} label="vs ano passado até aqui" invert />
+          </div>
+        ) : undefined
+      }
+    >
+      {!current.data || !previous.data ? (
+        <SkeletonBlock height={220} />
+      ) : (
+        <AnnualPaceChart points={points} surface="paper" />
+      )}
+    </Card>
+  )
+}
+
+/**
+ * Item 8 do backlog de 07/09/2026: mesma rota do item 7, só o mês corrente.
+ * Mesma generalização de `SpendingPaceCard` (07/09/2026): sem um único mês
+ * em foco, vira um mapa de calor por mês do ano em vez de por dia do mês.
+ */
+function SpendingHeatmapCard({ span, range }: { span: BentoSpan; range: RangeSubset }) {
+  const singleMonth = singleMonthOf(range)
+  return singleMonth ? (
+    <MonthlyHeatmapCard span={span} period={singleMonth} accountId={range.accountId} />
+  ) : (
+    <AnnualHeatmapCard span={span} anchor={range.anchor} accountId={range.accountId} />
+  )
+}
+
+function MonthlyHeatmapCard({ span, period, accountId }: { span: BentoSpan; period: string; accountId: number | null }) {
+  const current = useQuery({
+    queryKey: ['daily-series', period, accountId],
+    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number; transactionCount: number }> }>('/analytics/daily', { period, accountId: accountId ?? undefined }),
+  })
+
+  return (
+    <Card span={span} title="Mapa de calor" subtitle="Gasto confirmado por dia do mês">
+      {!current.data ? <SkeletonBlock height={220} /> : <SpendingHeatmap days={current.data.days} surface="paper" />}
+    </Card>
+  )
+}
+
+function AnnualHeatmapCard({ span, anchor, accountId }: { span: BentoSpan; anchor: string; accountId: number | null }) {
+  const year = Number(anchor.slice(0, 4))
+  const current = useQuery({
+    queryKey: ['monthly-series', year, accountId],
+    queryFn: () =>
+      api.get<{ series: Array<{ period: string; expenseCents: number }> }>('/analytics/monthly', {
+        from: `${year}-01-01`,
+        to: `${year}-12-31`,
+        accountId: accountId ?? undefined,
+      }),
+  })
+
+  return (
+    <Card span={span} title="Mapa de calor" subtitle="Gasto confirmado por mês do ano">
+      {!current.data ? <SkeletonBlock height={220} /> : <AnnualSpendingHeatmap months={current.data.series} surface="paper" />}
+    </Card>
+  )
+}
+
+function daysInMonthOf(period: string): number {
+  const [y, m] = period.split('-').map(Number) as [number, number]
+  return new Date(Date.UTC(y, m, 0)).getUTCDate()
+}
+
 function MonthLineTile({ line }: { line: MonthLine }) {
   const hasTarget = line.targetCents !== null && line.targetCents > 0
   const usedBps = hasTarget
@@ -997,7 +1418,7 @@ function MonthLineTile({ line }: { line: MonthLine }) {
     <div className="stack stack--tight">
       <span className="stat__label">{line.label}</span>
       <span className="tabular" style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>
-        {moneyCompact(line.realizedCents)}
+        {money(line.realizedCents)}
       </span>
       {hasTarget ? (
         <>
@@ -1007,7 +1428,7 @@ function MonthLineTile({ line }: { line: MonthLine }) {
               para dar. */}
           <Meter usedBps={Math.min(usedBps, 10_000)} state={line.state} />
           <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-            {line.higherIsBetter ? 'de' : 'do teto de'} {moneyCompact(line.targetCents!)} ({bps(usedBps, 0)})
+            {line.higherIsBetter ? 'de' : 'do teto de'} {money(line.targetCents!)} ({bps(usedBps, 0)})
           </span>
         </>
       ) : (
@@ -1218,7 +1639,7 @@ function PendingCard({ flow, title, span }: { flow: 'income' | 'expense'; title:
           </div>
         }
       >
-        <StatTile label={flow === 'income' ? 'Ainda não caiu na conta' : 'Ainda não saiu da conta'} value={moneyCompact(totalCents)} large />
+        <StatTile label={flow === 'income' ? 'Ainda não caiu na conta' : 'Ainda não saiu da conta'} value={money(totalCents)} large />
         {overdueCount > 0 && (
           <p className="chart__note" style={{ marginTop: 'var(--sp-2)' }}>
             <span className="badge badge--critical">Atrasado</span> {overdueCount} de período(s) anterior(es) ainda{' '}
@@ -1785,6 +2206,96 @@ function ReconciliationCard({ span }: { span: BentoSpan }) {
                 icon="x"
                 title="Não é o mesmo, remover esta sugestão"
                 onClick={() => dismiss.mutate({ pendingId: pending.id, matchId: match.id })}
+              />
+            </span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+type SubscriptionCandidate = {
+  signature: string
+  description: string
+  occurrences: number
+  avgAmountCents: number
+  lastPostedOn: string
+  accountId: number
+  categoryId: number | null
+}
+
+/**
+ * Item 8 do backlog de 07/09/2026: sugestão de assinatura recorrente por
+ * padrão de comerciante — mesmo padrão de sugestão revisável de
+ * `ReconciliationCard` acima, nunca aplicação automática (decisions/0003).
+ * "Aceitar" vira uma previsão recorrente de verdade (Motor financeiro/
+ * Painel passam a mostrá-la); "Não é assinatura" descarta e nunca mais
+ * sugere este comerciante.
+ */
+function SubscriptionsCard({ span }: { span: BentoSpan }) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+
+  const candidates = useQuery({
+    queryKey: ['subscription-candidates'],
+    queryFn: () => api.get<{ candidates: SubscriptionCandidate[] }>('/subscriptions/candidates'),
+  })
+
+  const confirm = useMutation({
+    mutationFn: (signature: string) => api.post('/subscriptions/confirm', { signature }),
+    onSuccess: () => {
+      toast('Virou uma previsão recorrente')
+      queryClient.invalidateQueries()
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao confirmar', 'error'),
+  })
+
+  const dismiss = useMutation({
+    mutationFn: (signature: string) => api.post('/subscriptions/dismiss', { signature }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['subscription-candidates'] }),
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
+  })
+
+  const rows = candidates.data?.candidates ?? []
+  if (rows.length === 0) return null
+
+  return (
+    <Card
+      span={span}
+      muted
+      title="Possíveis assinaturas"
+      subtitle="Mesmo valor, todo mês, no mesmo comerciante: confirme se é uma assinatura"
+    >
+      <div className="stack stack--tight">
+        {rows.map((candidate) => (
+          <div key={candidate.signature} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div className="truncate">
+                <strong>{candidate.description}</strong>
+              </div>
+              <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                {candidate.occurrences}x, última em {fmtDate(candidate.lastPostedOn)}
+              </div>
+            </div>
+            <span className="row" style={{ gap: 'var(--sp-2)' }}>
+              <strong className="tabular">{money(candidate.avgAmountCents)}</strong>
+              <Button
+                size="sm"
+                variant="primary"
+                icon="check"
+                disabled={confirm.isPending}
+                onClick={() => confirm.mutate(candidate.signature)}
+              >
+                É assinatura
+              </Button>
+              <Button
+                variant="quiet"
+                size="sm"
+                icon="x"
+                title="Não é uma assinatura, remover esta sugestão"
+                disabled={dismiss.isPending}
+                onClick={() => dismiss.mutate(candidate.signature)}
               />
             </span>
           </div>

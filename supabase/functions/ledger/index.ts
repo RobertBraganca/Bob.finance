@@ -350,6 +350,8 @@ app.get('/transactions', async (c) => {
       uncategorized: z.coerce.boolean().optional(),
       search: z.string().optional(),
       source: z.string().optional(),
+      includeHidden: z.coerce.boolean().optional(),
+      sort: z.enum(['date_desc', 'date_asc', 'amount_desc', 'amount_asc']).optional(),
       limit: z.coerce.number().int().min(1).max(2000).optional(),
       offset: z.coerce.number().int().min(0).optional(),
     })
@@ -398,6 +400,26 @@ app.post('/transactions/categorize', async (c) => {
     })
     .parse(await c.req.json())
   return c.json(await txnService.setCategory(body.ids, body.categoryId, { learn: body.learn, saveAsRule: body.saveAsRule }))
+})
+
+app.post('/transactions/hide', async (c) => {
+  const body = z
+    .object({
+      ids: z.array(z.number().int().positive()).min(1),
+      hidden: z.boolean(),
+    })
+    .parse(await c.req.json())
+  return c.json(await txnService.setHidden(body.ids, body.hidden))
+})
+
+app.post('/transactions/credit-card', async (c) => {
+  const body = z
+    .object({
+      ids: z.array(z.number().int().positive()).min(1),
+      creditCardId: z.number().int().positive().nullable(),
+    })
+    .parse(await c.req.json())
+  return c.json(await txnService.setCreditCard(body.ids, body.creditCardId))
 })
 
 app.post('/transactions/delete', async (c) => {

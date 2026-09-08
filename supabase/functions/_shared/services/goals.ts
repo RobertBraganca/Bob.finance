@@ -181,6 +181,101 @@ export async function getPeriodProgress(period: string, accountId?: number | nul
   }
 }
 
+export type YearProgress = {
+  year: string
+  isCurrent: boolean
+  monthsElapsed: number
+  goal: {
+    incomeTargetCents: number | null
+    spendCapCents: number | null
+  }
+  actual: {
+    incomeCents: number
+    expenseCents: number
+    investedCents: number
+  }
+  progress: {
+    income: { targetCents: number | null; actualCents: number; achievedBps: number | null; state: GoalState }
+    spend: { capCents: number | null; spentCents: number; usedBps: number | null; state: GoalState }
+  }
+}
+
+/**
+ * Item pedido em 07/09/2026: "Modo mês" (specs/dashboard) vira "Modo ano"
+ * quando o seletor de período do Painel está em "Máximo" — soma o
+ * realizado de cada mês já decorrido do ano (`getPeriodProgress` por mês)
+ * e soma a META de cada mês que TEM meta configurada (um mês sem meta não
+ * conta como meta zero, nem pra baixo nem pra cima — mesma regra de "sem
+ * meta configurada" que uma meta mensal ausente já lê como `no_target`).
+ * Sem meta em nenhum mês do ano, o alvo anual também é `null`, não zero.
+ */
+export async function getYearProgress(year: string, accountId?: number | null): Promise<YearProgress> {
+  const today = todayIso()
+  const currentYear = today.slice(0, 4)
+  const monthsElapsed = year === currentYear ? Number(today.slice(5, 7)) : year < currentYear ? 12 : 0
+  const periods = Array.from({ length: monthsElapsed }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`)
+  const isCurrent = year === currentYear
+
+  // Sequencial de propósito, não Promise.all — mesmo achado de
+  // `goalHistory` logo abaixo: `getPeriodProgress` sozinho já dispara 5
+  // queries concorrentes, e rodar várias chamadas dela ao mesmo tempo
+  // (até 12, um ano inteiro) empilha o suficiente pro pooler de transação
+  // desta Edge Function travar sem erro (nunca reproduzido no server
+  // Node/pooler de sessão, onde este mesmo arquivo usa Promise.all).
+  const perMonth: PeriodProgress[] = []
+  for (const period of periods) {
+    perMonth.push(await getPeriodProgress(period, accountId))
+  }
+
+  const actual = perMonth.reduce(
+    (sum, p) => ({
+      incomeCents: sum.incomeCents + p.actual.incomeCents,
+      expenseCents: sum.expenseCents + p.actual.expenseCents,
+      investedCents: sum.investedCents + p.actual.investedCents,
+    }),
+    { incomeCents: 0, expenseCents: 0, investedCents: 0 },
+  )
+
+  const incomeTargets = perMonth.map((p) => p.goal.incomeTargetCents).filter((v): v is number => v !== null)
+  const incomeTargetCents = incomeTargets.length > 0 ? incomeTargets.reduce((a, b) => a + b, 0) : null
+
+  // O mês em andamento pesa proporcional aos dias já passados (mesma ideia
+  // de `elapsedShare` que `getPeriodProgress` usa por mês); os meses já
+  // fechados entram com o teto cheio. Sem isso, um cap mensal de
+  // R$1.000 em setembro (mês 9, ainda no dia 7) já contaria os R$1.000
+  // inteiros no "esperado até aqui" do ano, mesmo faltando 23 dias — o
+  // mesmo estouro-de-pace que a versão mensal evita dia a dia.
+  const spendPaceCents = perMonth.reduce((sum, p) => {
+    if (p.goal.spendCapCents === null) return sum
+    const share = p.isCurrent ? p.daysElapsed / p.daysTotal : 1
+    return sum + p.goal.spendCapCents * share
+  }, 0)
+  const spendCaps = perMonth.map((p) => p.goal.spendCapCents).filter((v): v is number => v !== null)
+  const spendCapCents = spendCaps.length > 0 ? spendCaps.reduce((a, b) => a + b, 0) : null
+
+  return {
+    year,
+    isCurrent,
+    monthsElapsed,
+    goal: { incomeTargetCents, spendCapCents },
+    actual,
+    progress: {
+      income: {
+        targetCents: incomeTargetCents,
+        actualCents: actual.incomeCents,
+        achievedBps: incomeTargetCents ? Math.round((actual.incomeCents / incomeTargetCents) * 10_000) : null,
+        state: targetState(actual.incomeCents, incomeTargetCents, isCurrent),
+      },
+      spend: {
+        capCents: spendCapCents,
+        spentCents: actual.expenseCents,
+        usedBps: spendCapCents ? Math.round((actual.expenseCents / spendCapCents) * 10_000) : null,
+        state: spendCapCents ? capState(actual.expenseCents, spendCapCents, Math.round(spendPaceCents), isCurrent) : 'no_target',
+      },
+    },
+  }
+}
+
 /** A cap is about staying UNDER; pace decides "on track" vs "at risk". */
 function capState(spent: number, cap: number, pace: number, isCurrent: boolean): GoalState {
   if (cap <= 0) return 'no_target'

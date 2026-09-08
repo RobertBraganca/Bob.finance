@@ -19,6 +19,7 @@ import * as monthlyClosingService from '../_shared/services/monthlyClosing.ts'
 import * as partners from '../_shared/services/partners.ts'
 import * as quotesService from '../_shared/services/quotes.ts'
 import * as simulatorService from '../_shared/services/simulator.ts'
+import * as subscriptionsService from '../_shared/services/subscriptions.ts'
 import { ledgerBounds } from '../_shared/services/transactions.ts'
 import { accountFlows } from '../_shared/services/transfers.ts'
 
@@ -237,6 +238,13 @@ app.get('/goals-history', async (c) => {
   return c.json(await goalsService.goalHistory(query.months))
 })
 
+/** "Modo ano" (specs/dashboard): mesma coisa de `/goals/:period`, agregada pro ano inteiro. */
+app.get('/goals-year/:year', async (c) => {
+  const { year } = z.object({ year: z.string().regex(/^\d{4}$/) }).parse(c.req.param())
+  const query = z.object({ accountId: z.coerce.number().int().positive().optional() }).parse(c.req.query())
+  return c.json(await goalsService.getYearProgress(year, query.accountId ?? null))
+})
+
 /** "Termômetro mensal" — avisos dispensáveis do Painel, ver goals.ts. */
 app.get('/home/banners', async (c) => c.json({ banners: await goalsService.homeBanners() }))
 
@@ -403,6 +411,14 @@ app.post('/credit-cards/:id/snapshot', async (c) => {
   return c.json(await creditCardsService.recordSnapshot(id, body.asOf, body.availableLimitCents))
 })
 
+/** Fatura atual (ciclo aberto) + histórico de ciclos fechados — ver `cardInvoices`. */
+app.get('/credit-cards/:id/invoices', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const result = await creditCardsService.cardInvoices(id)
+  if (!result) return c.json({ message: 'cartão não encontrado' }, 404)
+  return c.json(result)
+})
+
 /* ---------------------------------------------------------------- *
  * Saúde financeira
  * ---------------------------------------------------------------- */
@@ -497,6 +513,12 @@ app.put('/financial-health/settings', async (c) => {
 app.get('/financial-engine/available', async (c) => {
   const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(c.req.query())
   return c.json(await engineService.availableForAllocation(await resolvePeriod(query.period)))
+})
+
+/** "Modo ano" (specs/dashboard): Investimento/Dívida/Reserva agregados pro ano inteiro. */
+app.get('/financial-engine/available-year', async (c) => {
+  const query = z.object({ year: z.string().regex(/^\d{4}$/) }).parse(c.req.query())
+  return c.json(await engineService.yearlyDestinationsProgress(query.year))
 })
 
 /** Recordes observacionais — estudo de viabilidade #5, 29/08/2026. */
@@ -918,6 +940,32 @@ app.patch('/cash-flow/forecasts/:id', async (c) => {
 app.delete('/cash-flow/forecasts/:id', async (c) => {
   const { id } = idParam.parse(c.req.param())
   return c.json(await cashFlowService.deleteForecast(id))
+})
+
+/** Cada compra parcelada, já agregada (total/pago/restante) — ver `listInstallments`. */
+app.get('/cash-flow/installments', async (c) => {
+  const query = z.object({ includeInactive: z.coerce.boolean().default(false) }).parse(c.req.query())
+  return c.json({ installments: await cashFlowService.listInstallments(query.includeInactive) })
+})
+
+/*
+ * Assinaturas — sugestão de recorrência por padrão de comerciante, nunca
+ * aplicação automática (decisions/0003). Ver services/subscriptions.
+ */
+app.get('/subscriptions/candidates', async (c) =>
+  c.json({ candidates: await subscriptionsService.detectSubscriptionCandidates() }),
+)
+
+app.post('/subscriptions/dismiss', async (c) => {
+  const body = z.object({ signature: z.string().min(1) }).parse(await c.req.json())
+  return c.json(await subscriptionsService.dismissSubscription(body.signature))
+})
+
+app.post('/subscriptions/confirm', async (c) => {
+  const body = z.object({ signature: z.string().min(1) }).parse(await c.req.json())
+  const forecast = await subscriptionsService.confirmSubscription(body.signature)
+  if (!forecast) return c.json({ message: 'sugestão não encontrada' }, 404)
+  return c.json(forecast)
 })
 
 /**

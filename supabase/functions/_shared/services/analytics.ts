@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
 import { addDays, addMonths, dayRange, periodBounds, periodOf, periodRange, todayIso } from '../core/dates.ts'
+import { merchantSignature } from '../core/normalize.ts'
 
 /**
  * Every number on every dashboard is produced here, by aggregating the
@@ -422,13 +423,31 @@ export async function receivable(range: Range, opts: { includeFuture?: boolean }
 export async function dashboard(range: Range, opts: { includeFutureReceivables?: boolean } = {}) {
   const current = await totals(range)
 
-  // The comparable previous window: same number of months, immediately before.
-  const months = periodRange(periodOf(range.from), periodOf(range.to)).length
-  const previousRange: Range = {
-    from: periodBounds(addMonths(periodOf(range.from), -months)).start,
-    to: periodBounds(addMonths(periodOf(range.to), -months)).end,
-    accountId: range.accountId ?? null,
-  }
+  /**
+   * A janela anterior comparável. A maioria dos presets (mtd/3m/6m/12m/
+   * ytd/max) sempre alinha em mês cheio, então "mesmo número de meses,
+   * imediatamente antes" é a comparação certa. Mas um recorte "custom"
+   * (`RangeFilter`) pode ser qualquer intervalo de dias — achado da
+   * auditoria de 07/09/2026: um recorte de 27 dias virava `months=2`
+   * (arredondado pra cima em `periodRange`) e comparava contra uma janela
+   * de 61 dias, produzindo um "+X% vs. anterior" sem sentido nenhum.
+   * Só entra no ramo de mês cheio quando o próprio recorte já É um mês
+   * cheio (from = dia 1, to = último dia); caso contrário desloca pelo
+   * mesmo número de DIAS do recorte atual.
+   */
+  const isFullMonthRange =
+    range.from === periodBounds(periodOf(range.from)).start && range.to === periodBounds(periodOf(range.to)).end
+  const previousRange: Range = isFullMonthRange
+    ? {
+        from: periodBounds(addMonths(periodOf(range.from), -periodRange(periodOf(range.from), periodOf(range.to)).length)).start,
+        to: periodBounds(addMonths(periodOf(range.to), -periodRange(periodOf(range.from), periodOf(range.to)).length)).end,
+        accountId: range.accountId ?? null,
+      }
+    : {
+        from: addDays(range.from, -dayRange(range.from, range.to).length),
+        to: addDays(range.from, -1),
+        accountId: range.accountId ?? null,
+      }
   const [previous, currentReceivableCents, previousReceivableCents, monthly, byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf, netFlow, topMerchantsList] =
     await Promise.all([
       totals(previousRange),
@@ -482,25 +501,39 @@ export function deltaBps(current: number, previous: number): number | null {
   return Math.round(((current - previous) / Math.abs(previous)) * 10_000)
 }
 
+/**
+ * Agrupado por `merchantSignature`, não `lower(description)` (achado da
+ * auditoria de 07/09/2026) — a mesma normalização usada em toda regra/
+ * memória de categorização do app. Duas compras do mesmo comerciante com
+ * descrições que só diferem por um número (ex. "UBER *TRIP 384910" vs
+ * "UBER *TRIP 552013") viravam DUAS linhas aqui, cada uma com metade do
+ * gasto real, o que podia empurrar o comerciante #1 de verdade pra fora
+ * do top N. `merchantSignature` já existe só em JS (é onde toda outra
+ * agregação por comerciante do projeto também roda), então o agrupamento
+ * sai do SQL e vai pra cá.
+ */
 export async function topMerchants(range: Range, limit = 8) {
-  return db.execute<{ signature: string; amount: number; count: number }>(sql`
-    select
-      min(description) as signature,
-      coalesce(sum(-amount_cents), 0) as amount,
-      count(*) as count
-    from (
-      select t.description, t.amount_cents, ${FLOW_KIND} as flow
-      from transactions t
-      left join categories c on c.id = t.category_id
-      where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = false
-      ${accountFilter(range.accountId)}
-    ) x
-    where flow = 'expense' and amount_cents < 0
-    group by lower(description)
-    order by amount desc
-    limit ${limit}
+  const rows = await db.execute<{ description: string; amountCents: number }>(sql`
+    select t.description, t.amount_cents as "amountCents"
+    from transactions t
+    left join categories c on c.id = t.category_id
+    where t.posted_on between ${range.from} and ${range.to}
+      and t.pending = false
+      and ${FLOW_KIND} = 'expense'
+      and t.amount_cents < 0
+    ${accountFilter(range.accountId)}
   `)
+
+  const bySignature = new Map<string, { signature: string; amount: number; count: number }>()
+  for (const row of rows) {
+    const signature = merchantSignature(row.description) || row.description
+    const bucket = bySignature.get(signature) ?? { signature: row.description, amount: 0, count: 0 }
+    bucket.amount += -row.amountCents
+    bucket.count += 1
+    bySignature.set(signature, bucket)
+  }
+
+  return [...bySignature.values()].sort((a, b) => b.amount - a.amount).slice(0, limit)
 }
 
 /* ------------------------------------------------------------------ *

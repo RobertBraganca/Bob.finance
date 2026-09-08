@@ -15,6 +15,7 @@ import * as investments from '../services/investments'
 import * as monthlyClosingService from '../services/monthlyClosing'
 import * as partners from '../services/partners'
 import * as quotesService from '../services/quotes'
+import * as subscriptionsService from '../services/subscriptions'
 import { ledgerBounds } from '../services/transactions'
 import { accountFlows } from '../services/transfers'
 
@@ -236,6 +237,13 @@ export async function insightsRoutes(app: FastifyInstance) {
     return goalsService.goalHistory(query.months)
   })
 
+  /** "Modo ano" (specs/dashboard): mesma coisa de `/goals/:period`, agregada pro ano inteiro. */
+  app.get('/goals-year/:year', async (req) => {
+    const { year } = z.object({ year: z.string().regex(/^\d{4}$/) }).parse(req.params)
+    const query = z.object({ accountId: z.coerce.number().int().positive().optional() }).parse(req.query)
+    return goalsService.getYearProgress(year, query.accountId ?? null)
+  })
+
   /** "Termômetro mensal" — avisos dispensáveis do Painel, ver goals.ts. */
   app.get('/home/banners', async () => ({ banners: await goalsService.homeBanners() }))
 
@@ -403,6 +411,14 @@ export async function insightsRoutes(app: FastifyInstance) {
     return creditCardsService.recordSnapshot(id, body.asOf, body.availableLimitCents)
   })
 
+  /** Fatura atual (ciclo aberto) + histórico de ciclos fechados — ver `cardInvoices`. */
+  app.get('/credit-cards/:id/invoices', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    const result = await creditCardsService.cardInvoices(id)
+    if (!result) return reply.code(404).send({ message: 'cartão não encontrado' })
+    return result
+  })
+
   /* ---------------------------------------------------------------- *
    * Saúde financeira — Health Score, Runway, Radar de risco.
    *
@@ -537,6 +553,12 @@ export async function insightsRoutes(app: FastifyInstance) {
   app.get('/financial-engine/available', async (req) => {
     const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.query)
     return engineService.availableForAllocation(await resolvePeriod(query.period))
+  })
+
+  /** "Modo ano" (specs/dashboard): Investimento/Dívida/Reserva agregados pro ano inteiro. */
+  app.get('/financial-engine/available-year', async (req) => {
+    const query = z.object({ year: z.string().regex(/^\d{4}$/) }).parse(req.query)
+    return engineService.yearlyDestinationsProgress(query.year)
   })
 
   /** Recordes observacionais — estudo de viabilidade #5, 29/08/2026. */
@@ -1053,6 +1075,32 @@ export async function insightsRoutes(app: FastifyInstance) {
   app.delete('/cash-flow/forecasts/:id', async (req) => {
     const { id } = idParam.parse(req.params)
     return cashFlowService.deleteForecast(id)
+  })
+
+  /** Cada compra parcelada, já agregada (total/pago/restante) — ver `listInstallments`. */
+  app.get('/cash-flow/installments', async (req) => {
+    const query = z.object({ includeInactive: z.coerce.boolean().default(false) }).parse(req.query)
+    return { installments: await cashFlowService.listInstallments(query.includeInactive) }
+  })
+
+  /* ---------------------------------------------------------------- *
+   * Assinaturas — sugestão de recorrência por padrão de comerciante,
+   * nunca aplicação automática (decisions/0003). Ver services/subscriptions.
+   * ---------------------------------------------------------------- */
+  app.get('/subscriptions/candidates', async () => ({
+    candidates: await subscriptionsService.detectSubscriptionCandidates(),
+  }))
+
+  app.post('/subscriptions/dismiss', async (req) => {
+    const body = z.object({ signature: z.string().min(1) }).parse(req.body)
+    return subscriptionsService.dismissSubscription(body.signature)
+  })
+
+  app.post('/subscriptions/confirm', async (req, reply) => {
+    const body = z.object({ signature: z.string().min(1) }).parse(req.body)
+    const forecast = await subscriptionsService.confirmSubscription(body.signature)
+    if (!forecast) return reply.code(404).send({ message: 'sugestão não encontrada' })
+    return forecast
   })
 
   /** The two "pendentes" home widgets read straight from here, scoped to the exact same from/to as the rest of the dashboard. */

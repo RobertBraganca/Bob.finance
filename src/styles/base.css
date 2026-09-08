@@ -77,10 +77,16 @@ svg {
 .hero-figure {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: var(--text-hero);
+  /* Antes um `--text-hero` fixo (48px, nunca encolhia): com o valor exato
+     em vez do `moneyCompact` truncado, um número como "R$ 1.782.501,08"
+     nunca cabia num Slab de meia largura estreito — só `overflow-wrap`
+     abaixo não bastava, ele só quebra a linha DEPOIS de já estourar feio.
+     O `clamp` encolhe antes de chegar lá (07/09/2026). */
+  font-size: clamp(var(--text-2xl), 5vw, var(--text-hero));
   letter-spacing: -0.03em;
-  line-height: 1;
+  line-height: 1.05;
   font-variant-numeric: proportional-nums;
+  overflow-wrap: anywhere;
 }
 
 .numeral {

@@ -41,7 +41,7 @@ export type DebtRow = {
 }
 
 /** Latest measured balance if there is one, otherwise the opening principal. */
-async function currentBalance(debt: typeof debts.$inferSelect): Promise<number> {
+export async function currentBalance(debt: typeof debts.$inferSelect): Promise<number> {
   const snapshot = (
     await db
       .select()
@@ -101,14 +101,14 @@ export async function listDebts(): Promise<DebtRow[]> {
     .sort((a, b) => b.balanceCents - a.balanceCents)
 }
 
-export type ClosedDebtRow = {
-  id: number
-  name: string
-  kind: string
-  installmentCount: number | null
+/**
+ * Mesmo formato de `DebtRow` (para reaproveitar `DebtModal`/`DebtPaymentModal`/
+ * `DebtPaymentHistoryModal` sem nenhuma variante nova), mais os dois campos
+ * que só uma dívida quitada tem.
+ */
+export type ClosedDebtRow = DebtRow & {
   closedOn: string | null
   totalPaidCents: number
-  lastPaymentOn: string | null
 }
 
 /**
@@ -118,22 +118,45 @@ export type ClosedDebtRow = {
  * correcao (bug 2, 03/09/2026) nao havia nenhuma leitura de active=false
  * em lugar nenhum do app — uma divida fechada simplesmente desaparecia,
  * sem virar historico visivel em canto nenhum.
+ *
+ * Devolve o mesmo formato de `listDebts()` (ver `ClosedDebtRow`) — bug
+ * corrigido em 07/09/2026: a "Quitadas" nao tinha nenhuma acao (editar,
+ * ver historico, excluir) porque o formato estreito de antes nao dava pros
+ * mesmos modais da tabela ativa, so usados aqui com `DebtRow` completo.
  */
 export async function listClosedDebts(): Promise<ClosedDebtRow[]> {
-  const rows = await db.select().from(debts).where(eq(debts.active, false))
+  const rows = await db
+    .select({ debt: debts, accountName: accounts.name })
+    .from(debts)
+    .leftJoin(accounts, eq(accounts.id, debts.accountId))
+    .where(eq(debts.active, false))
   return Promise.all(
-    rows.map(async (d) => {
-      const stats = await db.execute<{ total: number; lastPaidOn: string | null }>(sql`
-        select coalesce(sum(amount_cents), 0) as total, max(paid_on) as "lastPaidOn"
+    rows.map(async ({ debt: d, accountName }) => {
+      const balanceCents = await currentBalance(d)
+      const { count: installmentsPaid, lastPaidOn } = await paymentStats(d.id)
+      const stats = await db.execute<{ total: number }>(sql`
+        select coalesce(sum(amount_cents), 0) as total
         from debt_payments where debt_id = ${d.id} and kind = 'payment'`)
       return {
         id: d.id,
         name: d.name,
         kind: d.kind,
+        institution: d.institution,
+        accountId: d.accountId,
+        accountName: accountName ?? null,
+        balanceCents,
+        aprBps: d.aprBps,
+        minimumPaymentCents: d.minimumPaymentCents,
+        scheduledPaymentCents: d.scheduledPaymentCents || d.minimumPaymentCents,
+        dueDay: d.dueDay,
+        monthlyInterestCents: Math.round(balanceCents * monthlyRate(d.aprBps)),
+        shareBps: 0,
         installmentCount: d.installmentCount,
+        installmentsPaid,
+        installmentsRemaining: d.installmentCount === null ? null : Math.max(0, d.installmentCount - installmentsPaid),
+        lastPaymentOn: lastPaidOn,
         closedOn: d.closedOn,
         totalPaidCents: stats[0]?.total ?? 0,
-        lastPaymentOn: stats[0]?.lastPaidOn ?? null,
       }
     }),
   )
@@ -193,17 +216,24 @@ export async function materializeDebtInstallments(debtId: number): Promise<{ cre
    *
    * A ancora certa e o periodo em que a parcela 0 ja foi (ou seria)
    * materializada, que e FIXO por contrato -- nunca muda com o relogio.
-   * existingRows ja contem toda linha (pendente OU ja paga/confirmada)
-   * ja materializada para esta divida, entao o menor periodo ali E essa
-   * ancora. So cai de volta em currentPeriod quando nao existe nenhuma
-   * linha ainda -- a primeira chamada, no momento da criacao da divida,
-   * onde "agora" E de fato a ancora correta.
+   * Prioridade: `debt.openedOn` (gravado no cadastro, nunca recomputado
+   * -- ver o comentario da coluna em schema.ts) e so cai para o menor
+   * periodo entre as linhas existentes numa divida antiga, de antes desta
+   * coluna passar a ser preenchida de verdade (achado de 07/09/2026:
+   * ancorar nas linhas existentes tinha o MESMO bug de "recomputa a cada
+   * chamada" que este comentario descreve acima, só que disparado por
+   * `deletePending` apagar a parcela mais antiga em vez do relógio --
+   * apagar deslocava a âncora pra frente e fabricava uma parcela extra no
+   * fim do horizonte). So cai de volta em currentPeriod quando nao existe
+   * nem `openedOn` nem nenhuma linha ainda.
    */
   const anchorPeriod =
+    debt.openedOn?.slice(0, 7) ??
     existingRows.reduce<string | null>((min, r) => {
       const period = r.occurrencePeriod ?? r.postedOn.slice(0, 7)
       return min === null || period < min ? period : min
-    }, null) ?? currentPeriod
+    }, null) ??
+    currentPeriod
 
   // Same rationale as cashFlow.ts's materialize(): a period the user
   // explicitly deleted from a pending widget must stay gone, not come
@@ -602,7 +632,7 @@ export async function createDebt(input: DebtInput) {
   const row = (
     await db
       .insert(debts)
-      .values({ ...input, kind: input.kind as DebtKind | undefined })
+      .values({ ...input, kind: input.kind as DebtKind | undefined, openedOn: todayIso() })
       .returning()
   )[0]!
   // The opening principal is also the first measured point on the trend.
@@ -629,6 +659,31 @@ export async function updateDebt(id: number, patch: Partial<DebtInput> & { activ
 export async function deleteDebt(id: number) {
   const result = await db.delete(debts).where(eq(debts.id, id))
   return { removed: result.count }
+}
+
+/**
+ * Item 1 do backlog de 07/09/2026 (docs/backlog-ideias-produto.md):
+ * "Evolução da dívida" só vale a pena se o gráfico tiver mais que um
+ * ponto. Antes disto, `debt_snapshots` só ganhava linha nova quando o
+ * usuário clicava manualmente em "Registrar saldo de hoje" — pagar uma
+ * parcela não mexia no saldo medido nenhuma vez, então a série ficava
+ * presa em 1 ponto (o principal, na criação) para a maioria das dívidas.
+ *
+ * Chamado pelos MESMOS três lugares que já gravam um `debt_payments` de
+ * pagamento/uso (`createPayment` aqui, `settlePending`/
+ * `confirmReconciliation` em cashFlow.ts) — o saldo medido acompanha o
+ * ledger de pagamentos automaticamente, sem exigir que o usuário digite o
+ * saldo do banco de novo. Continua sendo uma MEDIÇÃO, não uma segunda
+ * fonte de verdade: o próximo "Registrar saldo de hoje" manual sempre
+ * pode corrigir por cima, exatamente como já podia antes.
+ */
+export async function recordPaymentSnapshot(debtId: number, amountCents: number, kind: string): Promise<void> {
+  const debt = (await db.select().from(debts).where(eq(debts.id, debtId)))[0]
+  if (!debt) return
+  const balance = await currentBalance(debt)
+  const delta = Math.abs(amountCents)
+  const newBalance = kind === 'payment' ? Math.max(0, balance - delta) : balance + delta
+  await recordSnapshot(debtId, todayIso(), newBalance)
 }
 
 export async function recordSnapshot(debtId: number, asOf: string, balanceCents: number) {
@@ -765,6 +820,8 @@ export async function createPayment(input: {
       .values({ ...input, kind: input.kind as DebtPaymentKind | undefined })
       .returning()
   )[0]!
+
+  await recordPaymentSnapshot(input.debtId, input.amountCents, row.kind)
 
   if (row.kind === 'payment') {
     await settleOldestPendingInstallment(input.debtId)

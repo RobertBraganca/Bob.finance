@@ -8,7 +8,6 @@ import {
   centsToInput,
   date as fmtDate,
   money,
-  moneyCompact,
   parseMoneyInput,
 } from '../lib/format'
 import {
@@ -175,7 +174,7 @@ export function PartnersPage() {
           <Slab span={6} accent>
             <HeroFigure
               label="Acumulado nas plataformas"
-              value={data ? moneyCompact(data.totalBalanceCents) : '-'}
+              value={data ? money(data.totalBalanceCents) : '-'}
             >
               <div className="stack stack--tight" style={{ marginTop: 'var(--sp-4)' }}>
                 {!data ? (

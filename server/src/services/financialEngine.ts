@@ -350,6 +350,81 @@ export async function availableForAllocation(
   }
 }
 
+export type YearlyDestinationProgress = { targetCents: number; realizedCents: number; state: GoalState }
+
+export type YearlyDestinations = {
+  year: string
+  monthsElapsed: number
+  investment: YearlyDestinationProgress
+  debt: YearlyDestinationProgress
+  reserve: YearlyDestinationProgress
+}
+
+/**
+ * Item pedido em 07/09/2026: "Modo mês" (specs/dashboard) vira "Modo ano"
+ * quando o seletor de período do Painel está em "Máximo" — Investimento e
+ * Dívida somam o realizado/meta de cada mês já decorrido do ano (mesmas
+ * três fontes de `availableForAllocation`, só que por `Promise.all` mês a
+ * mês em vez de uma chamada só), igual `goalHistory` já faz pra Metas.
+ *
+ * Reserva é diferente dos outros dois: `reserve.gapCents` é o que FALTA
+ * pra completar a reserva HOJE, não uma meta mensal recorrente — não dá
+ * pra somar doze meses de "o que falta" sem inflar o alvo. Fica como
+ * snapshot atual (mesma leitura de "Modo mês"), só o realizado (aportes)
+ * soma o ano — o mesmo descompasso fluxo-contra-estoque que "Modo mês" já
+ * tinha por mês, agora por ano.
+ */
+export async function yearlyDestinationsProgress(year: string): Promise<YearlyDestinations> {
+  const today = todayIso()
+  const currentYear = today.slice(0, 4)
+  const monthsElapsed = year === currentYear ? Number(today.slice(5, 7)) : year < currentYear ? 12 : 0
+  const periods = Array.from({ length: monthsElapsed }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`)
+  const isCurrent = year === currentYear
+
+  const [perMonth, investmentGoals, reserve] = await Promise.all([
+    Promise.all(
+      periods.map(async (period) => {
+        const { start, end } = periodBounds(period)
+        const [investedCents, reserveCents, debtPaid, debt] = await Promise.all([
+          investmentContributedCents(start, end),
+          reserveContributedCents(start, end),
+          debtPaidCents(start, end),
+          debtOverview({ period }),
+        ])
+        return { investedCents, reserveCents, debtPaid, scheduledCents: debt.scheduledCents }
+      }),
+    ),
+    listGoals(),
+    reserveStatus(),
+  ])
+
+  const investmentRealizedCents = perMonth.reduce((sum, m) => sum + m.investedCents, 0)
+  const reserveRealizedCents = perMonth.reduce((sum, m) => sum + m.reserveCents, 0)
+  const debtRealizedCents = perMonth.reduce((sum, m) => sum + m.debtPaid, 0)
+  const debtTargetCents = perMonth.reduce((sum, m) => sum + m.scheduledCents, 0)
+  const investmentTargetCents = investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0) * monthsElapsed
+
+  return {
+    year,
+    monthsElapsed,
+    investment: {
+      targetCents: investmentTargetCents,
+      realizedCents: investmentRealizedCents,
+      state: targetState(investmentRealizedCents, investmentTargetCents, isCurrent),
+    },
+    debt: {
+      targetCents: debtTargetCents,
+      realizedCents: debtRealizedCents,
+      state: targetState(debtRealizedCents, debtTargetCents, isCurrent),
+    },
+    reserve: {
+      targetCents: reserve.gapCents,
+      realizedCents: reserveRealizedCents,
+      state: reserve.gapCents <= 0 ? 'met' : targetState(reserveRealizedCents, reserve.gapCents, isCurrent),
+    },
+  }
+}
+
 /**
  * Recordes observacionais do motor financeiro — estudo de viabilidade #5,
  * 29/08/2026. Nenhuma tabela nova: "maior disponível" reusa
@@ -471,7 +546,13 @@ async function proLaboreFor(
 /**
  * `includeGoals: false` responde a outra pergunta: quanto precisa entrar
  * para cobrir só o custo de existir (custos PJ, pró-labore, impostos),
- * sem as metas que o usuário escolheu perseguir.
+ * sem as metas que o usuário escolheu perseguir — reserva planejada E
+ * margem, as duas igualmente discricionárias sobre o custo real de
+ * existir. Bug corrigido em 07/09/2026: só `reservePlannedCents` zerava
+ * aqui; `marginCents` vazava pro "mínimo" mesmo com a legenda da tela
+ * (`FinancialEngine.tsx`) dizendo explicitamente "custos, pró-labore e
+ * impostos" — configurar uma margem inflava silenciosamente o número que
+ * a própria legenda prometia não incluir.
  *
  * A linha de investimento planejado é REMOVIDA, não zerada. Uma linha de
  * R$ 0,00 na composição diria "a meta foi considerada e vale zero", quando
@@ -485,7 +566,7 @@ export async function breakEven(
 ): Promise<BreakEven> {
   const includeGoals = options.includeGoals ?? true
   const { params, origins } = await resolveParams(
-    includeGoals ? overrides : { ...overrides, reservePlannedCents: 0 },
+    includeGoals ? overrides : { ...overrides, reservePlannedCents: 0, marginCents: 0 },
   )
   const { start, end } = periodBounds(period)
 

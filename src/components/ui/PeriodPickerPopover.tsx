@@ -4,6 +4,7 @@ import { Segmented } from './index'
 import { DateRangeFields, usePopoverDismiss } from './DateRangePopover'
 import { MonthGrid } from './MonthGrid'
 import { date as fmtDate, periodLong as fmtPeriodLong } from '../../lib/format'
+import { singleMonthOf } from '../../lib/period'
 import type { RangePreset } from '../../lib/store'
 
 const QUICK_PRESETS: Array<{ value: RangePreset; label: string }> = [
@@ -63,15 +64,7 @@ export function PeriodPickerPopover({
 
   // The single calendar month this selection maps to, if any — drives
   // both the trigger label and which grid cell shows as selected.
-  const selectedMonth = (() => {
-    if (preset === 'mtd') return anchor.slice(0, 7)
-    if (preset !== 'custom' || !from.endsWith('-01')) return null
-    const period = from.slice(0, 7)
-    const [y, m] = period.split('-').map(Number) as [number, number]
-    const isCurrentMonth = period === anchor.slice(0, 7)
-    const expectedTo = isCurrentMonth ? anchor : `${period}-${String(daysInMonth(y, m)).padStart(2, '0')}`
-    return to === expectedTo ? period : null
-  })()
+  const selectedMonth = singleMonthOf({ preset, from, to, anchor })
 
   const quickLabel = QUICK_PRESETS.find((p) => p.value === preset)?.label
   const triggerLabel = quickLabel ?? (selectedMonth ? fmtPeriodLong(selectedMonth) : `${fmtDate(from)} a ${fmtDate(to)}`)

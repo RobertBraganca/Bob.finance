@@ -338,6 +338,8 @@ export async function ledgerRoutes(app: FastifyInstance) {
         uncategorized: z.coerce.boolean().optional(),
         search: z.string().optional(),
         source: z.string().optional(),
+        includeHidden: z.coerce.boolean().optional(),
+        sort: z.enum(['date_desc', 'date_asc', 'amount_desc', 'amount_asc']).optional(),
         limit: z.coerce.number().int().min(1).max(2000).optional(),
         offset: z.coerce.number().int().min(0).optional(),
       })
@@ -389,6 +391,26 @@ export async function ledgerRoutes(app: FastifyInstance) {
       learn: body.learn,
       saveAsRule: body.saveAsRule,
     })
+  })
+
+  app.post('/transactions/hide', async (req) => {
+    const body = z
+      .object({
+        ids: z.array(z.number().int().positive()).min(1),
+        hidden: z.boolean(),
+      })
+      .parse(req.body)
+    return txnService.setHidden(body.ids, body.hidden)
+  })
+
+  app.post('/transactions/credit-card', async (req) => {
+    const body = z
+      .object({
+        ids: z.array(z.number().int().positive()).min(1),
+        creditCardId: z.number().int().positive().nullable(),
+      })
+      .parse(req.body)
+    return txnService.setCreditCard(body.ids, body.creditCardId)
   })
 
   app.post('/transactions/delete', async (req) => {

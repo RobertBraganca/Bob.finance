@@ -1,9 +1,9 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { cashFlowForecasts, debtPayments, debts, reconciliationDismissals, skippedOccurrences, transactions } from '../db/schema'
+import { accounts, cashFlowForecasts, categories, debtPayments, debts, reconciliationDismissals, skippedOccurrences, transactions } from '../db/schema'
 import { addMonths, daysInMonth, monthsBetween, todayIso } from '../core/dates'
 import { dedupeHash, directionOf, normalizeDescription } from '../core/normalize'
-import { closeDebtIfFullyPaid, paymentStats } from './debt'
+import { closeDebtIfFullyPaid, recordPaymentSnapshot } from './debt'
 
 /**
  * A recurring retainer or an already-agreed installment deal, unified
@@ -37,6 +37,110 @@ export async function listForecasts(): Promise<Array<ForecastRow & { nextOccurre
     .where(eq(cashFlowForecasts.active, true))
     .orderBy(cashFlowForecasts.description)
   return Promise.all(rows.map(async (row) => ({ ...row, nextOccurrencePeriod: await nextOccurrencePeriod(row) })))
+}
+
+export type InstallmentRow = {
+  id: number
+  description: string
+  direction: 'in' | 'out'
+  installmentAmountCents: number
+  installmentCount: number
+  installmentsRealized: number
+  totalCents: number
+  paidCents: number
+  remainingCents: number
+  finished: boolean
+  categoryId: number | null
+  categoryName: string | null
+  accountId: number | null
+  accountName: string | null
+  dueDay: number
+  startPeriod: string
+  active: boolean
+}
+
+/**
+ * Uma compra parcelada inteira, agregada — total/pago/restante calculados
+ * aqui (não no cliente) pelo mesmo motivo de sempre: o sinal de
+ * `amountCents` já vive no servidor, então duplicar essa conta no front
+ * arriscaria divergir dele. "Mostrar ocultos" aqui é `active = false`
+ * (forecast desativado), não um campo novo — mais simples que o caso
+ * equivalente de Lançamentos, porque este já existia.
+ *
+ * `cashFlowForecasts.installmentsRealized` NÃO é a fonte aqui — é só o
+ * valor digitado na criação (ou editado manualmente), e nada no app o
+ * avança quando uma parcela materializada é confirmada (`settlePending`/
+ * `confirmReconciliation` nunca tocam essa coluna). Medido em 07/09/2026
+ * contra dado real: uma previsão mostrava `stored: 1` com zero parcela de
+ * fato confirmada, outra mostrava `stored: 0` com uma já confirmada —
+ * divergente nos dois sentidos. A contagem real é o número de
+ * `transactions` deste forecast com `pending = false` (mesma regra de
+ * "derivação em vez de saldo guardado" do resto do projeto).
+ */
+export async function listInstallments(includeInactive = false): Promise<InstallmentRow[]> {
+  const rows = await db
+    .select({
+      id: cashFlowForecasts.id,
+      description: cashFlowForecasts.description,
+      amountCents: cashFlowForecasts.amountCents,
+      installmentCount: cashFlowForecasts.installmentCount,
+      realizedCount: sql<number>`(
+        select count(*)::int from ${transactions}
+        where ${transactions.forecastId} = ${cashFlowForecasts.id} and ${transactions.pending} = false
+      )`,
+      // Soma o valor REAL das parcelas confirmadas, não
+      // `installmentAmountCents * realizedCount` — uma parcela editada à
+      // mão (ex. desconto negociado, `manuallyEdited`) tem um valor
+      // diferente do modelo, e a multiplicação uniforme desalinhava
+      // "Pago"/"Restante" da soma de verdade (achado da auditoria de
+      // 07/09/2026).
+      paidCentsRaw: sql<number>`coalesce((
+        select sum(abs(${transactions.amountCents}))::int from ${transactions}
+        where ${transactions.forecastId} = ${cashFlowForecasts.id} and ${transactions.pending} = false
+      ), 0)`,
+      categoryId: cashFlowForecasts.categoryId,
+      categoryName: categories.name,
+      accountId: cashFlowForecasts.accountId,
+      accountName: accounts.name,
+      dueDay: cashFlowForecasts.dueDay,
+      startPeriod: cashFlowForecasts.startPeriod,
+      active: cashFlowForecasts.active,
+    })
+    .from(cashFlowForecasts)
+    .leftJoin(categories, eq(categories.id, cashFlowForecasts.categoryId))
+    .leftJoin(accounts, eq(accounts.id, cashFlowForecasts.accountId))
+    .where(
+      includeInactive
+        ? eq(cashFlowForecasts.kind, 'installment')
+        : and(eq(cashFlowForecasts.kind, 'installment'), eq(cashFlowForecasts.active, true)),
+    )
+    .orderBy(desc(cashFlowForecasts.startPeriod))
+
+  return rows.map((row) => {
+    const installmentCount = row.installmentCount ?? 0
+    const installmentAmountCents = Math.abs(row.amountCents)
+    const totalCents = installmentAmountCents * installmentCount
+    const paidCents = row.paidCentsRaw
+    return {
+      id: row.id,
+      description: row.description,
+      direction: directionOf(row.amountCents),
+      installmentAmountCents,
+      installmentCount,
+      installmentsRealized: row.realizedCount,
+      totalCents,
+      paidCents,
+      remainingCents: totalCents - paidCents,
+      finished: row.realizedCount >= installmentCount,
+      categoryId: row.categoryId,
+      categoryName: row.categoryName,
+      accountId: row.accountId,
+      accountName: row.accountName,
+      dueDay: row.dueDay,
+      startPeriod: row.startPeriod,
+      active: row.active,
+    }
+  })
 }
 
 /** One (forecast, period) occurrence not yet materialized as a transaction row. */
@@ -467,12 +571,17 @@ export async function deletePending(id: number, scope: PendingDeleteScope = 'onl
       } else if (debt.installmentCount === null) {
         await db.update(debts).set({ endPeriod: addMonths(period, -1) }).where(eq(debts.id, debt.id))
       } else {
-        // Installment debt schedules are recomputed from "now" each call
-        // (see materializeDebtInstallments), not from a fixed start period
-        // — this occurrence's index is `installmentsPaid` at this moment
-        // plus how many months out it falls.
-        const { count: installmentsPaid } = await paymentStats(debt.id)
-        const index = installmentsPaid + monthsBetween(todayIso().slice(0, 7), period)
+        // Mesma âncora fixa que `materializeDebtInstallments` usa
+        // (`debt.openedOn`, nunca "hoje" nem recomputada das linhas que
+        // sobraram) — bug corrigido em 07/09/2026: a versão anterior
+        // media a partir de `todayIso()` e ainda somava `installmentsPaid`
+        // por cima, então apagar uma parcela atrasada (com o relógio já
+        // alguns meses à frente do contrato) produzia um índice negativo,
+        // e a próxima confirmação fechava a dívida sozinha
+        // (`closeDebtIfFullyPaid` via `installmentsPaid < installmentCount`
+        // virando `false` com um `installmentCount` negativo).
+        const anchorPeriod = debt.openedOn?.slice(0, 7) ?? period
+        const index = monthsBetween(anchorPeriod, period)
         await db.update(debts).set({ installmentCount: index }).where(eq(debts.id, debt.id))
       }
     }
@@ -509,6 +618,12 @@ export async function settlePending(id: number) {
     await db
       .insert(debtPayments)
       .values({ debtId: row.debtId, kind: 'payment', paidOn: row.postedOn, amountCents: Math.abs(row.amountCents) })
+    // Mesmo saldo medido que Endividamento's "Registrar pagamento" grava
+    // (debt.ts createPayment) -- as tres entradas do pagamento tem que
+    // alimentar debt_snapshots do mesmo jeito, ou "Evolucao da divida"
+    // (item 1 do backlog de 07/09/2026) fica rica so quando o pagamento
+    // vem por uma porta e nao pela outra.
+    await recordPaymentSnapshot(row.debtId, row.amountCents, 'payment')
     // Mesma regra de fechamento que Endividamento's "Registrar pagamento"
     // aplica (debt.ts createPayment) -- as duas telas tem que fechar a
     // divida pelo mesmo criterio, ou reabrimos o bug 2 por um caminho
@@ -605,6 +720,8 @@ export async function confirmReconciliation(pendingId: number, matchId?: number)
           await db
             .insert(debtPayments)
             .values({ debtId: pendingRow.debtId, kind: 'payment', paidOn: match.postedOn, amountCents: Math.abs(match.amountCents) })
+          // Mesmo saldo medido de settlePending/createPayment.
+          await recordPaymentSnapshot(pendingRow.debtId, match.amountCents, 'payment')
           // Mesma regra de fechamento de settlePending/createPayment.
           await closeDebtIfFullyPaid(pendingRow.debtId)
         }

@@ -6,7 +6,6 @@ import {
   bps,
   date as fmtDate,
   money,
-  moneyCompact,
   parseMoneyInput,
   parsePercentInput,
   period as fmtPeriod,
@@ -29,7 +28,6 @@ import {
 } from '../components/ui'
 import { GoalModal, type Goal, type Projection } from '../components/ui/GoalModal'
 import { Input } from '../components/ui/input'
-import { PageHeader } from '../components/shell/Shell'
 import { DecumulationChart, type DecumulationPoint } from '../components/charts/DecumulationChart'
 import { GoalProjectionChart } from '../components/charts/InvestmentCharts'
 
@@ -80,7 +78,13 @@ const MILESTONE_AGES = [60, 70, 80, 90]
 
 const DEFAULTS = { withdrawal: '', expectedReturn: '5', horizonYears: '40', age: '' }
 
-export function AposentadoriaPage() {
+/**
+ * Virou aba dentro de Investimentos na revisão de sidebar de 07/09/2026
+ * (as duas fases já compartilhavam `GoalModal`/cache de meta — ver
+ * comentários abaixo). Sem `PageHeader` próprio: quem hospeda o título é
+ * `Investments.tsx`.
+ */
+export function AposentadoriaTab() {
   const meta = useMeta()
   const [withdrawal, setWithdrawal] = useState(DEFAULTS.withdrawal)
   const [expectedReturn, setExpectedReturn] = useState(DEFAULTS.expectedReturn)
@@ -169,11 +173,6 @@ export function AposentadoriaPage() {
 
   return (
     <>
-      <PageHeader
-        title="Aposentadoria"
-        subtitle="Quanto tempo o patrimônio dura sob uma retirada mensal que você define"
-      />
-
       <div className="page">
         <Bento>
           {portfolio.isLoading ? (
@@ -225,7 +224,7 @@ export function AposentadoriaPage() {
               ) : (
                 <>
                   <Slab span={5} accent>
-                    <HeroFigure label={accumGoal.name} value={moneyCompact(accumData.currentValueCents)}>
+                    <HeroFigure label={accumGoal.name} value={money(accumData.currentValueCents)}>
                       <div className="stack stack--tight" style={{ marginTop: 'var(--sp-3)' }}>
                         <div className="row row--between">
                           <span style={{ fontSize: 'var(--text-xs)', color: 'var(--on-slab-2)' }}>
@@ -254,7 +253,7 @@ export function AposentadoriaPage() {
                   <Card span={6}>
                     <StatTile
                       label="Aporte mensal planejado"
-                      value={moneyCompact(accumGoal.monthlyContributionCents)}
+                      value={money(accumGoal.monthlyContributionCents)}
                       foot={`retorno esperado ${bps(accumGoal.expectedReturnBps)} a.a.`}
                     />
                   </Card>
@@ -274,14 +273,14 @@ export function AposentadoriaPage() {
                   <Card span={6}>
                     <StatTile
                       label="Aporte necessário na data-alvo"
-                      value={accumData.requiredMonthlyCents === null ? '-' : moneyCompact(accumData.requiredMonthlyCents)}
+                      value={accumData.requiredMonthlyCents === null ? '-' : money(accumData.requiredMonthlyCents)}
                       foot={accumGoal.targetDate ? `para chegar em ${fmtDate(accumGoal.targetDate)}` : 'defina uma data-alvo'}
                     />
                   </Card>
                   <Card span={6}>
                     <StatTile
                       label="Projetado na data-alvo"
-                      value={accumData.projectedAtTargetCents === null ? '-' : moneyCompact(accumData.projectedAtTargetCents)}
+                      value={accumData.projectedAtTargetCents === null ? '-' : money(accumData.projectedAtTargetCents)}
                       foot={
                         accumData.projectedAtTargetCents !== null
                           ? accumData.projectedAtTargetCents >= accumGoal.targetValueCents
@@ -322,7 +321,7 @@ export function AposentadoriaPage() {
                 />
                 <span className="field__hint">
                   {startingPoint === 'projected'
-                    ? `Usa ${moneyCompact(projectedRetirementCents)}, o patrimônio que "${accumGoal?.name}" projeta na data-alvo, não a carteira de hoje.`
+                    ? `Usa ${money(projectedRetirementCents)}, o patrimônio que "${accumGoal?.name}" projeta na data-alvo, não a carteira de hoje.`
                     : 'Usa a carteira negociável de hoje, como se você já estivesse se aposentando.'}
                 </span>
               </div>
@@ -363,6 +362,7 @@ export function AposentadoriaPage() {
                   placeholder="40"
                   className="text-right tabular-nums"
                 />
+                <span className="field__hint">Até 100 anos.</span>
               </div>
               <Button
                 variant="primary"
@@ -372,7 +372,13 @@ export function AposentadoriaPage() {
                   setCommitted({
                     monthlyWithdrawalCents: withdrawalCents,
                     expectedReturnBps: parsePercentInput(expectedReturn) ?? 0,
-                    horizonMonths: Math.round((Number(horizonYears) || 40) * 12),
+                    // Clampado a 100 anos (1200 meses): o mesmo teto que
+                    // `simulate.ts`'s zod já aplica no servidor — sem isto,
+                    // um horizonte maior falhava a validação e o usuário só
+                    // via "Falha ao simular, tente novamente", que não
+                    // ajuda quando o problema é o valor digitado, não uma
+                    // falha passageira (achado da auditoria de 07/09/2026).
+                    horizonMonths: Math.min(1200, Math.max(1, Math.round((Number(horizonYears) || 40) * 12))),
                     startingValueCentsOverride:
                       startingPoint === 'projected' && projectedRetirementCents !== null
                         ? projectedRetirementCents
@@ -453,7 +459,7 @@ export function AposentadoriaPage() {
                   <StatTile
                     label="Sua retirada, ao ano"
                     value={withdrawalRateBps === null ? '-' : bps(withdrawalRateBps, 2)}
-                    foot={`${money(result.monthlyWithdrawalCents)} por mês sobre ${moneyCompact(result.startingValueCents)}`}
+                    foot={`${money(result.monthlyWithdrawalCents)} por mês sobre ${money(result.startingValueCents)}`}
                   />
                   <StatTile
                     label="Retorno real que você assumiu"
@@ -495,7 +501,7 @@ export function AposentadoriaPage() {
                       <div key={m.age} className="col-3">
                         <StatTile
                           label={`Aos ${m.age} anos`}
-                          value={m.valueCents === null ? 'além do horizonte' : moneyCompact(m.valueCents)}
+                          value={m.valueCents === null ? 'além do horizonte' : money(m.valueCents)}
                           foot={
                             m.valueCents === null
                               ? 'aumente o horizonte simulado'

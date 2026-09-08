@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useMeta } from '../lib/store'
 import type { IconName } from '../components/ui/Icon'
-import { bps, centsToInput, date as fmtDate, money, moneyCompact, parseMoneyInput } from '../lib/format'
+import { bps, centsToInput, date as fmtDate, money, parseMoneyInput } from '../lib/format'
 import {
   Assumptions,
   Bento,
@@ -96,7 +96,7 @@ export function PatrimonioPage() {
       <div className="page">
         <Bento>
           <Slab span={6} accent>
-            <HeroFigure label="Patrimônio líquido" value={nw ? moneyCompact(netWorthCents) : '-'}>
+            <HeroFigure label="Patrimônio líquido" value={nw ? money(netWorthCents) : '-'}>
               <div className="stack stack--tight" style={{ marginTop: 'var(--sp-4)' }}>
                 <HeroLine label="Financeiro" value={nw ? money(nw.financialCents) : '-'} />
                 <HeroLine label="Imobilizado" value={nw ? money(nw.illiquidCents) : '-'} />

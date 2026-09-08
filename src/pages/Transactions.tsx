@@ -11,22 +11,31 @@ import {
   Card,
   CategorySelect,
   EmptyState,
+  FilterSelect,
   Icon,
   Meter,
   Modal,
   PendingEditScopeModal,
   PendingScopeModal,
   Segmented,
+  Select,
   Slab,
   StatTile,
+  targetProgressState,
   TextInput,
   useToast,
   type PendingDeleteScope,
 } from '../components/ui'
 import { PageHeader, RangeFilter } from '../components/shell/Shell'
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { TransactionForm, type TransactionFormValue } from '../components/forms/TransactionForm'
 
-/** Substitui os antigos checkboxes "Entradas e saídas / Só entradas / Só saídas" — um único controle, sempre exatamente um estado ativo. */
+/**
+ * Substitui os antigos checkboxes "Entradas e saídas / Só entradas / Só
+ * saídas". `null` é "Todas Transações" — mesma convenção de `value: null`
+ * = sem filtro já usada pelo `FilterSelect` de conta (`RangeFilter`,
+ * `Shell.tsx`), não um quarto valor de string à parte.
+ */
 type DirectionFilter = 'in' | 'out' | 'transfer'
 
 type Row = {
@@ -44,9 +53,31 @@ type Row = {
   accountId: number
   accountName: string | null
   duplicateAccepted: boolean
+  hidden: boolean
   pending: boolean
   forecastId: number | null
   debtId: number | null
+  creditCardId: number | null
+}
+
+type InstallmentRow = {
+  id: number
+  description: string
+  direction: 'in' | 'out'
+  installmentAmountCents: number
+  installmentCount: number
+  installmentsRealized: number
+  totalCents: number
+  paidCents: number
+  remainingCents: number
+  finished: boolean
+  categoryId: number | null
+  categoryName: string | null
+  accountId: number | null
+  accountName: string | null
+  dueDay: number
+  startPeriod: string
+  active: boolean
 }
 
 type ListResponse = {
@@ -123,13 +154,25 @@ export function TransactionsPage() {
   const accounts = useAccounts()
   const [params, setParams] = useSearchParams()
 
+  /**
+   * Parcelamentos era uma página própria (item 6 do backlog de
+   * 07/09/2026); virou aba aqui na revisão de sidebar seguinte, mesmo
+   * padrão de consolidação já usado em Categorias ("Visão por gasto") —
+   * uma view leve o bastante para não justificar rota própria.
+   */
+  const [tab, setTab] = useState<'ledger' | 'installments'>('ledger')
+
   const [search, setSearch] = useState('')
   const [onlyUncategorized, setOnlyUncategorized] = useState(params.get('uncategorized') === '1')
-  const [direction, setDirection] = useState<DirectionFilter>('out')
+  const [direction, setDirection] = useState<DirectionFilter | null>(null)
   const [parentCategoryId, setParentCategoryId] = useState<number | null>(() => {
     const raw = params.get('parentCategoryId')
     return raw ? Number(raw) : null
   })
+  /** Item 4 do backlog de 07/09/2026: filtro de categoria "de verdade" (escolhe, não só limpa) -- independente do badge de `parentCategoryId` acima, que continua vindo só de navegação por URL. */
+  const [categoryId, setCategoryId] = useState<number | null>(null)
+  const [sort, setSort] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('date_desc')
+  const [includeHidden, setIncludeHidden] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [bulkOpen, setBulkOpen] = useState(false)
   const [editing, setEditing] = useState<Row | null>(null)
@@ -168,6 +211,9 @@ export function TransactionsPage() {
       onlyUncategorized,
       direction,
       parentCategoryId,
+      categoryId,
+      sort,
+      includeHidden,
       page,
     ],
     queryFn: () =>
@@ -180,12 +226,46 @@ export function TransactionsPage() {
         direction: direction === 'transfer' ? undefined : direction,
         categoryKind: direction === 'transfer' ? 'transfer' : undefined,
         parentCategoryId: parentCategoryId ?? undefined,
+        categoryId: categoryId ?? undefined,
+        sort,
+        includeHidden: includeHidden ? true : undefined,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
       }),
     enabled: range.ready,
     placeholderData: (previous) => previous,
   })
+
+  const [installmentStatus, setInstallmentStatus] = useState<'ongoing' | 'finished'>('ongoing')
+  const [installmentIncludeInactive, setInstallmentIncludeInactive] = useState(false)
+  const installments = useQuery({
+    queryKey: ['installments', installmentIncludeInactive],
+    queryFn: () =>
+      api.get<{ installments: InstallmentRow[] }>('/cash-flow/installments', {
+        includeInactive: installmentIncludeInactive,
+      }),
+    enabled: tab === 'installments',
+  })
+
+  /** Item 4 do backlog de 07/09/2026: um botão só, some com todo filtro de busca/categoria/ordenação -- nunca mexe no período (RangeFilter é outra coisa, já tem o próprio "Redefinir"). */
+  const clearFilters = () => {
+    setSearch('')
+    setOnlyUncategorized(false)
+    setDirection(null)
+    setParentCategoryId(null)
+    setCategoryId(null)
+    setSort('date_desc')
+    setIncludeHidden(false)
+    setPage(0)
+  }
+  const hasActiveFilters =
+    search !== '' ||
+    onlyUncategorized ||
+    direction !== null ||
+    parentCategoryId !== null ||
+    categoryId !== null ||
+    sort !== 'date_desc' ||
+    includeHidden
 
   const categorize = useMutation({
     mutationFn: (input: { ids: number[]; categoryId: number | null; saveAsRule: boolean }) =>
@@ -206,7 +286,23 @@ export function TransactionsPage() {
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao categorizar', 'error'),
   })
 
+  const setHidden = useMutation({
+    mutationFn: (input: { ids: number[]; hidden: boolean }) =>
+      api.post<{ updated: number }>('/transactions/hide', input),
+    onSuccess: (result, variables) => {
+      toast(`${result.updated} lançamento(s) ${variables.hidden ? 'ocultado(s)' : 'reexibido(s)'}`)
+      setSelected(new Set())
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao ocultar', 'error'),
+  })
+
   const rows = query.data?.rows ?? []
+
+  // Se tudo que está selecionado já está oculto, o botão vira "Reexibir"
+  // em vez de "Ocultar" — evita um segundo controle separado só pra isso.
+  const selectionAllHidden =
+    selected.size > 0 && rows.filter((row) => selected.has(row.id)).every((row) => row.hidden)
 
   // Exporta TODO o filtro atual, não só a página de 100 visível na tela —
   // chamadas com o mesmo filtro, não uma segunda fonte de dado. Em páginas
@@ -231,6 +327,14 @@ export function TransactionsPage() {
           direction: direction === 'transfer' ? undefined : direction,
           categoryKind: direction === 'transfer' ? 'transfer' : undefined,
           parentCategoryId: parentCategoryId ?? undefined,
+          // Antes faltavam aqui (achado da auditoria de 07/09/2026): sem
+          // eles, exportar com um filtro de categoria ativo baixava
+          // lançamentos de TODAS as categorias (só o total de linhas
+          // batia com a tela, o conteúdo não), e "Mostrar ocultos"
+          // desligado ainda incluía ocultos no CSV.
+          categoryId: categoryId ?? undefined,
+          includeHidden: includeHidden ? true : undefined,
+          sort,
           limit: EXPORT_PAGE_SIZE,
           offset,
         })
@@ -281,32 +385,72 @@ export function TransactionsPage() {
 
   const selectedRows = useMemo(() => rows.filter((row) => selected.has(row.id)), [rows, selected])
   const [creating, setCreating] = useState(false)
+  const [installmentModal, setInstallmentModal] = useState<InstallmentRow | 'new' | null>(null)
 
   return (
     <>
       <PageHeader
         title="Lançamentos"
-        subtitle={`${(query.data?.total ?? 0).toLocaleString('pt-BR')} no período e filtros atuais`}
+        subtitle={
+          tab === 'ledger'
+            ? `${(query.data?.total ?? 0).toLocaleString('pt-BR')} no período e filtros atuais`
+            : 'Compras e recebíveis parcelados, do total à última parcela'
+        }
         actions={
-          <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
-            <RangeFilter />
-            <Button
-              variant="quiet"
-              icon="download"
-              onClick={() => exportCsv.mutate()}
-              disabled={exportCsv.isPending || (query.data?.total ?? 0) === 0}
-              title="Exportar lançamentos do período e filtros atuais para CSV"
-            >
-              Exportar CSV
-            </Button>
-            <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
-              Novo lançamento
-            </Button>
-          </div>
+          tab === 'ledger' ? (
+            <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+              <RangeFilter />
+              <Button
+                variant="quiet"
+                icon="download"
+                onClick={() => exportCsv.mutate()}
+                disabled={exportCsv.isPending || (query.data?.total ?? 0) === 0}
+                title="Exportar lançamentos do período e filtros atuais para CSV"
+              >
+                Exportar CSV
+              </Button>
+              <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
+                Novo lançamento
+              </Button>
+            </div>
+          ) : (
+            <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+              <label className="row" style={{ gap: 'var(--sp-2)', fontSize: 'var(--text-sm)' }}>
+                <input
+                  type="checkbox"
+                  className="checkbox"
+                  checked={installmentIncludeInactive}
+                  onChange={(event) => setInstallmentIncludeInactive(event.target.checked)}
+                />
+                Mostrar ocultos
+              </label>
+              <Button variant="primary" icon="plus" onClick={() => setInstallmentModal('new')}>
+                Novo parcelamento
+              </Button>
+            </div>
+          )
         }
       />
 
       <div className="page">
+        <Tabs value={tab} onValueChange={(value) => setTab(value as 'ledger' | 'installments')}>
+          <TabsList aria-label="Seção">
+            <TabsTrigger value="ledger">Lançamentos</TabsTrigger>
+            <TabsTrigger value="installments">Parcelamentos</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {tab === 'installments' && (
+          <InstallmentsPanel
+            rows={installments.data?.installments ?? []}
+            isError={installments.isError}
+            status={installmentStatus}
+            onStatusChange={setInstallmentStatus}
+            onEdit={setInstallmentModal}
+          />
+        )}
+
+        {tab === 'ledger' && (
         <Bento>
           <PeriodFlowCard
             label="Receitas do período"
@@ -342,19 +486,45 @@ export function TransactionsPage() {
                     placeholder="Buscar por descrição, categoria ou data…"
                   />
                 </div>
-                <Segmented
-                  ariaLabel="Direção"
+                <FilterSelect
+                  icon="filter"
+                  placeholder="Todas Transações"
                   value={direction}
                   onChange={(value) => {
                     setDirection(value)
                     setPage(0)
                   }}
                   options={[
-                    { value: 'in', label: 'Entrada' },
-                    { value: 'out', label: 'Saída' },
-                    { value: 'transfer', label: 'Transferência' },
+                    { value: 'in', label: 'Entradas (Receitas)' },
+                    { value: 'out', label: 'Saídas (Despesas)' },
+                    { value: 'transfer', label: 'Transferências' },
                   ]}
                 />
+                <div style={{ minWidth: 170 }}>
+                  <CategorySelect
+                    value={categoryId}
+                    onChange={(value) => {
+                      setCategoryId(value)
+                      setPage(0)
+                    }}
+                    placeholder="Todas categorias"
+                  />
+                </div>
+                <div style={{ minWidth: 170 }}>
+                  <Select
+                    value={sort}
+                    onChange={(value) => {
+                      setSort(value ?? 'date_desc')
+                      setPage(0)
+                    }}
+                    options={[
+                      { value: 'date_desc', label: 'Data (mais recentes)' },
+                      { value: 'date_asc', label: 'Data (mais antigas)' },
+                      { value: 'amount_desc', label: 'Valor (maior primeiro)' },
+                      { value: 'amount_asc', label: 'Valor (menor primeiro)' },
+                    ]}
+                  />
+                </div>
                 <label className="row" style={{ gap: 'var(--sp-2)', fontSize: 'var(--text-sm)' }}>
                   <input
                     type="checkbox"
@@ -367,6 +537,23 @@ export function TransactionsPage() {
                   />
                   Só sem categoria
                 </label>
+                <label className="row" style={{ gap: 'var(--sp-2)', fontSize: 'var(--text-sm)' }}>
+                  <input
+                    type="checkbox"
+                    className="checkbox"
+                    checked={includeHidden}
+                    onChange={(event) => {
+                      setIncludeHidden(event.target.checked)
+                      setPage(0)
+                    }}
+                  />
+                  Mostrar ocultos
+                </label>
+                {hasActiveFilters && (
+                  <Button variant="quiet" size="sm" icon="x" onClick={clearFilters}>
+                    Limpar filtros
+                  </Button>
+                )}
                 {parentCategoryId !== null && (
                   <span className="badge badge--info row" style={{ gap: 'var(--sp-2)' }}>
                     {parentCategoryName ?? `categoria #${parentCategoryId}`}
@@ -388,6 +575,18 @@ export function TransactionsPage() {
                   onClick={() => setBulkOpen(true)}
                 >
                   Categorizar {selected.size > 0 ? `(${selected.size})` : ''}
+                </Button>
+                <Button
+                  icon="eyeOff"
+                  disabled={selected.size === 0 || setHidden.isPending}
+                  onClick={() => setHidden.mutate({ ids: [...selected], hidden: !selectionAllHidden })}
+                  title={
+                    selectionAllHidden
+                      ? 'Reexibir na lista'
+                      : 'Ocultar da lista, sem apagar nem mudar categoria'
+                  }
+                >
+                  {selectionAllHidden ? 'Reexibir' : 'Ocultar'}
                 </Button>
                 <Button
                   variant="danger"
@@ -455,7 +654,12 @@ export function TransactionsPage() {
                         const settled = (row.debtId !== null || row.forecastId !== null) && !row.pending
                         const settledLabel = row.direction === 'in' ? 'recebido' : 'pago'
                         return (
-                          <tr key={row.id} data-selected={selected.has(row.id)} data-settled={settled}>
+                          <tr
+                            key={row.id}
+                            data-selected={selected.has(row.id)}
+                            data-settled={settled}
+                            data-hidden={row.hidden}
+                          >
                             <td>
                               <input
                                 type="checkbox"
@@ -478,6 +682,7 @@ export function TransactionsPage() {
                                 {row.pending && <span className="badge badge--warning">previsto</span>}
                                 {settled && <span className="badge badge--good">{settledLabel}</span>}
                                 {row.duplicateAccepted && <span className="badge badge--warning">duplicata aceita</span>}
+                                {row.hidden && <span className="badge">oculto</span>}
                               </div>
                             </td>
                           <td>
@@ -502,13 +707,23 @@ export function TransactionsPage() {
                             {money(row.amountCents)}
                           </td>
                           <td>
-                            <Button
-                              variant="quiet"
-                              size="sm"
-                              icon="pencil"
-                              onClick={() => setEditing(row)}
-                              title="Editar lançamento"
-                            />
+                            <div className="row" style={{ gap: 'var(--sp-1)' }}>
+                              <Button
+                                variant="quiet"
+                                size="sm"
+                                icon="pencil"
+                                onClick={() => setEditing(row)}
+                                title="Editar lançamento"
+                              />
+                              <Button
+                                variant="quiet"
+                                size="sm"
+                                icon="eyeOff"
+                                disabled={setHidden.isPending}
+                                onClick={() => setHidden.mutate({ ids: [row.id], hidden: !row.hidden })}
+                                title={row.hidden ? 'Reexibir na lista' : 'Ocultar da lista'}
+                              />
+                            </div>
                           </td>
                           </tr>
                         )
@@ -543,6 +758,7 @@ export function TransactionsPage() {
             )}
           </Card>
         </Bento>
+        )}
       </div>
 
       {bulkOpen && (
@@ -558,6 +774,12 @@ export function TransactionsPage() {
 
       {editing && <EditTransactionModal row={editing} onClose={() => setEditing(null)} />}
       {creating && <NewTransactionModal onClose={() => setCreating(false)} />}
+      {installmentModal !== null && (
+        <InstallmentModal
+          installment={installmentModal === 'new' ? null : installmentModal}
+          onClose={() => setInstallmentModal(null)}
+        />
+      )}
       {scopePrompt && (
         <PendingScopeModal
           pending={remove.isPending}
@@ -566,6 +788,320 @@ export function TransactionsPage() {
         />
       )}
     </>
+  )
+}
+
+/**
+ * Aba "Parcelamentos" dentro de Lançamentos (revisão de sidebar de
+ * 07/09/2026, consolidando a antiga página própria `/parcelamentos`).
+ * Sem filtro de período/conta de propósito: uma compra parcelada é um
+ * estado corrente (quanto já foi pago de um total fixo), não um recorte
+ * de tempo — o mesmo motivo pelo qual a versão antiga nunca usou
+ * `RangeFilter`.
+ */
+function InstallmentsPanel({
+  rows,
+  isError,
+  status,
+  onStatusChange,
+  onEdit,
+}: {
+  rows: InstallmentRow[]
+  isError: boolean
+  status: 'ongoing' | 'finished'
+  onStatusChange: (status: 'ongoing' | 'finished') => void
+  onEdit: (row: InstallmentRow) => void
+}) {
+  const filtered = useMemo(
+    () => rows.filter((row) => (status === 'ongoing' ? !row.finished : row.finished)),
+    [rows, status],
+  )
+  const ongoingCount = rows.filter((row) => !row.finished).length
+  const finishedCount = rows.filter((row) => row.finished).length
+  const remainingTotalCents = rows
+    .filter((row) => !row.finished)
+    .reduce((sum, row) => sum + row.remainingCents, 0)
+
+  return (
+    <Bento>
+      <Slab span={4}>
+        <StatTile label="Em andamento" value={ongoingCount} large />
+      </Slab>
+      <Slab span={4}>
+        <StatTile label="Finalizadas" value={finishedCount} large />
+      </Slab>
+      <Slab span={4}>
+        <StatTile label="Restante a pagar/receber" value={money(remainingTotalCents)} large />
+      </Slab>
+
+      <Card
+        span={12}
+        flush
+        title="Compras parceladas"
+        actions={
+          <Segmented
+            ariaLabel="Situação"
+            value={status}
+            onChange={(value) => onStatusChange(value as 'ongoing' | 'finished')}
+            options={[
+              { value: 'ongoing', label: 'Em andamento' },
+              { value: 'finished', label: 'Finalizadas' },
+            ]}
+          />
+        }
+      >
+        {isError ? (
+          <EmptyState
+            icon="alert"
+            title="Falha ao carregar parcelamentos"
+            body="Não foi possível carregar os parcelamentos agora. Tente novamente em instantes."
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon="list"
+            title={status === 'ongoing' ? 'Nenhum parcelamento em andamento' : 'Nenhum parcelamento finalizado'}
+            body="Parcelamentos nascem de uma previsão de fluxo de caixa do tipo parcelado, criada em uma pendência do Painel."
+          />
+        ) : (
+          <div className="stack" style={{ padding: 'var(--sp-4) var(--sp-5)' }}>
+            {filtered.map((row) => {
+              const progressBps =
+                row.installmentCount > 0
+                  ? Math.round((row.installmentsRealized / row.installmentCount) * 10_000)
+                  : 0
+              return (
+                <div
+                  key={row.id}
+                  className="stack stack--tight"
+                  style={{
+                    padding: 'var(--sp-3) 0',
+                    borderBottom: '1px solid var(--line)',
+                    opacity: row.active ? 1 : 0.55,
+                  }}
+                >
+                  <div className="row row--between row--wrap">
+                    <span className="row" style={{ gap: 'var(--sp-2)', minWidth: 0 }}>
+                      <strong className="truncate">{row.description}</strong>
+                      {row.categoryName && <span className="badge">{row.categoryName}</span>}
+                      {!row.active && <span className="badge">oculto</span>}
+                    </span>
+                    <span className="row" style={{ gap: 'var(--sp-2)' }}>
+                      <span className="tabular" style={{ fontSize: 'var(--text-sm)' }}>
+                        {row.installmentsRealized} / {row.installmentCount}x de {money(row.installmentAmountCents)}
+                      </span>
+                      <Button variant="quiet" size="sm" icon="pencil" onClick={() => onEdit(row)} title="Editar" />
+                      <DeleteInstallmentButton installmentId={row.id} description={row.description} />
+                    </span>
+                  </div>
+                  <Meter usedBps={progressBps} state={targetProgressState(progressBps)} />
+                  <div className="kv">
+                    <span className="kv__k">Total</span>
+                    <span className="kv__v">{money(row.totalCents)}</span>
+                    <span className="kv__k">{row.direction === 'in' ? 'Recebido' : 'Pago'}</span>
+                    <span className="kv__v">{money(row.paidCents)}</span>
+                    <span className="kv__k">Restante</span>
+                    <span className="kv__v">{money(row.remainingCents)}</span>
+                  </div>
+                  <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                    {row.accountName ?? 'sem conta'}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
+    </Bento>
+  )
+}
+
+function DeleteInstallmentButton({ installmentId, description }: { installmentId: number; description: string }) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+
+  const remove = useMutation({
+    mutationFn: () => api.del(`/cash-flow/forecasts/${installmentId}`),
+    onSuccess: () => {
+      toast(`${description} removido`)
+      queryClient.invalidateQueries()
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
+  })
+
+  return (
+    <Button
+      variant="quiet"
+      size="sm"
+      icon="trash"
+      onClick={() => remove.mutate()}
+      disabled={remove.isPending}
+      title="Excluir parcelamento"
+    />
+  )
+}
+
+/**
+ * Item 5 do backlog de 07/09/2026 ("faltam as opções de adição de
+ * parcelamento com modal de registro, edição e exclusão"). Mesmas rotas de
+ * previsão de fluxo de caixa (`POST/PATCH/DELETE /cash-flow/forecasts`)
+ * que a Home já usa pra criar uma pendência parcelada (`PendingModal`,
+ * Dashboard.tsx) — sempre `kind: 'installment'` aqui, sem o seletor de
+ * tipo que aquele modal precisa (recorrente/parcelado/pontual), porque
+ * esta tela É a de parcelamentos.
+ *
+ * `installmentsRealized` só é lido na CRIAÇÃO (ver comentário de
+ * `listInstallments` em cashFlow.ts: nada no app avança esse número depois
+ * — a contagem real vem das `transactions` confirmadas) — por isso o
+ * campo só aparece quando `installment` é `null` (nova compra), nunca na
+ * edição de uma já existente.
+ */
+function InstallmentModal({ installment, onClose }: { installment: InstallmentRow | null; onClose: () => void }) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const accounts = useAccounts()
+
+  const [description, setDescription] = useState(installment?.description ?? '')
+  const [direction, setDirection] = useState<'in' | 'out'>(installment?.direction ?? 'out')
+  const [amount, setAmount] = useState(centsToInput(installment?.installmentAmountCents ?? null))
+  const [accountId, setAccountId] = useState<number | null>(installment?.accountId ?? null)
+  const [categoryId, setCategoryId] = useState<number | null>(installment?.categoryId ?? null)
+  const [installmentCount, setInstallmentCount] = useState(
+    installment ? String(installment.installmentCount) : '3',
+  )
+  const [installmentsRealized, setInstallmentsRealized] = useState('0')
+  const [paymentDate, setPaymentDate] = useState(() => {
+    if (!installment) return new Date().toISOString().slice(0, 10)
+    return `${installment.startPeriod}-${String(installment.dueDay).padStart(2, '0')}`
+  })
+  const [dueDay, setDueDay] = useState(String(installment?.dueDay ?? 10))
+
+  const save = useMutation({
+    mutationFn: () => {
+      const rawCents = parseMoneyInput(amount)
+      if (rawCents === null || rawCents === 0) throw new Error('informe o valor')
+      if (accountId === null) throw new Error('escolha a conta')
+      const amountCents = direction === 'in' ? Math.abs(rawCents) : -Math.abs(rawCents)
+      const count = Math.max(1, Math.round(Number(installmentCount)) || 1)
+      if (installment) {
+        return api.patch(`/cash-flow/forecasts/${installment.id}`, {
+          description: description.trim(),
+          amountCents,
+          accountId,
+          categoryId,
+          dueDay: Math.min(31, Math.max(1, Math.round(Number(dueDay)) || 10)),
+          installmentCount: count,
+        })
+      }
+      return api.post('/cash-flow/forecasts', {
+        description: description.trim(),
+        kind: 'installment',
+        amountCents,
+        accountId,
+        categoryId,
+        startPeriod: paymentDate.slice(0, 7),
+        dueDay: Number(paymentDate.slice(8, 10)),
+        installmentCount: count,
+        installmentsRealized: Math.max(0, Math.round(Number(installmentsRealized)) || 0),
+      })
+    },
+    onSuccess: () => {
+      toast(installment ? 'Parcelamento atualizado' : 'Parcelamento cadastrado')
+      queryClient.invalidateQueries()
+      onClose()
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
+  })
+
+  return (
+    <Modal
+      title={installment ? `Editar ${installment.description}` : 'Novo parcelamento'}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="quiet" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button
+            variant="primary"
+            icon="check"
+            onClick={() => save.mutate()}
+            disabled={!description.trim() || save.isPending}
+          >
+            Salvar
+          </Button>
+        </>
+      }
+    >
+      <div className="stack">
+        <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+          <div className="field" style={{ flex: 1, minWidth: 200 }}>
+            <label className="field__label">Descrição</label>
+            <TextInput value={description} onChange={setDescription} placeholder="ex. Notebook em 12x" />
+          </div>
+          <div className="field" style={{ minWidth: 170 }}>
+            <label className="field__label">Direção</label>
+            <Segmented
+              ariaLabel="Direção"
+              value={direction}
+              onChange={setDirection}
+              options={[
+                { value: 'out', label: 'Saída (compra)' },
+                { value: 'in', label: 'Entrada (a receber)' },
+              ]}
+            />
+          </div>
+        </div>
+
+        <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+          <div className="field" style={{ flex: 1, minWidth: 150 }}>
+            <label className="field__label">Valor por parcela (R$)</label>
+            <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+          </div>
+          {installment ? (
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Dia de vencimento</label>
+              <TextInput value={dueDay} onChange={setDueDay} placeholder="ex. 10" numeral />
+            </div>
+          ) : (
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Data de pagamento</label>
+              <TextInput value={paymentDate} onChange={setPaymentDate} type="date" />
+              <span className="field__hint">O dia (não o mês) se repete nas próximas parcelas.</span>
+            </div>
+          )}
+        </div>
+
+        <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+          <div className="field" style={{ flex: 1, minWidth: 170 }}>
+            <label className="field__label">Conta</label>
+            <Select
+              value={accountId}
+              placeholder="Selecione"
+              options={(accounts.data?.accounts ?? []).map((a) => ({ value: a.id, label: a.name }))}
+              onChange={setAccountId}
+            />
+          </div>
+          <div className="field" style={{ flex: 1, minWidth: 170 }}>
+            <label className="field__label">Categoria (opcional)</label>
+            <CategorySelect value={categoryId} direction={direction === 'in' ? 'in' : 'out'} onChange={setCategoryId} />
+          </div>
+        </div>
+
+        <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+          <div className="field" style={{ flex: 1, minWidth: 150 }}>
+            <label className="field__label">Total de parcelas</label>
+            <TextInput value={installmentCount} onChange={setInstallmentCount} placeholder="ex. 12" numeral />
+          </div>
+          {!installment && (
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Parcelas já confirmadas/recebidas</label>
+              <TextInput value={installmentsRealized} onChange={setInstallmentsRealized} placeholder="ex. 1" numeral />
+              <span className="field__hint">A pendência só materializa as parcelas futuras, a partir da próxima.</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -632,6 +1168,12 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
   // campo que o template governa (descrição/valor/conta) — mudar só a
   // data ou a categoria não tem o que propagar, segue direto.
   const [scopePrompt, setScopePrompt] = useState(false)
+  const [creditCardId, setCreditCardId] = useState<number | null>(row.creditCardId)
+
+  const cards = useQuery({
+    queryKey: ['credit-cards'],
+    queryFn: () => api.get<{ cards: Array<{ id: number; name: string }> }>('/credit-cards'),
+  })
 
   const [value, setValue] = useState<TransactionFormValue>({
     description: row.description,
@@ -662,6 +1204,9 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
           categoryId: value.categoryId,
           saveAsRule: false,
         })
+      }
+      if (creditCardId !== row.creditCardId) {
+        await api.post('/transactions/credit-card', { ids: [row.id], creditCardId })
       }
     },
     onSuccess: async () => {
@@ -702,6 +1247,18 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
         }
       >
         <TransactionForm value={value} onChange={(patch) => setValue((current) => ({ ...current, ...patch }))} />
+        <div className="field" style={{ marginTop: 'var(--sp-3)' }}>
+          <label className="field__label">Cartão de crédito</label>
+          <Select
+            value={creditCardId}
+            placeholder="Nenhum"
+            options={(cards.data?.cards ?? []).map((c) => ({ value: c.id, label: c.name }))}
+            onChange={setCreditCardId}
+          />
+          <span className="field__hint">
+            Liga esta compra a um cartão, para ela entrar na fatura em Cartões. Nunca é ligado sozinho.
+          </span>
+        </div>
       </Modal>
       {scopePrompt && (
         <PendingEditScopeModal

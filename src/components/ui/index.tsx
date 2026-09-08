@@ -135,6 +135,7 @@ export function Delta({
   bps,
   label,
   unit = 'percent',
+  invert = false,
 }: {
   bps: number | null
   label?: string
@@ -143,18 +144,27 @@ export function Delta({
    * `points` é diferença entre duas porcentagens: a participação de
    * parceiros saiu de 14% para 18% — isso é +4 p.p., e imprimir "+4%"
    * afirmaria outra coisa (ver `points` em lib/format.ts, que já existia
-   * para o desvio de alocação). Mesma seta, mesma cor, mesmo tamanho: só
-   * a unidade muda.
+   * para o desvio de alocação). Mesma seta, mesmo tamanho: só a unidade
+   * muda.
    */
   unit?: 'percent' | 'points'
+  /**
+   * Quando SUBIR é ruim para esta métrica (ex. despesas, dívida) — inverte
+   * só a cor boa/ruim, a seta continua mostrando a direção real da
+   * mudança (achado da auditoria de 07/09/2026: "Saídas" e "Ritmo de
+   * gastos" no Painel coloriam um aumento de gasto de verde/pra-cima, a
+   * mesma leitura de "receita subiu", quando mais gasto é o lado ruim).
+   */
+  invert?: boolean
 }) {
   if (bps === null) {
     return <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>sem base de comparação</span>
   }
   const rising = bps > 0
   const flat = bps === 0
+  const good = invert ? !rising : rising
   return (
-    <span className="delta" style={{ color: flat ? 'var(--ink-3)' : rising ? 'var(--delta-up)' : 'var(--delta-down)' }}>
+    <span className="delta" style={{ color: flat ? 'var(--ink-3)' : good ? 'var(--delta-up)' : 'var(--delta-down)' }}>
       {!flat && <Icon name={rising ? 'arrowUpRight' : 'arrowDownLeft'} size={12} strokeWidth={2.2} />}
       {unit === 'points' ? signedPoints(bps) : signedBps(bps)}
       {label && <span className="muted" style={{ fontWeight: 400 }}>{label}</span>}
@@ -172,6 +182,7 @@ export function StatTile({
   delta,
   deltaLabel,
   deltaUnit,
+  deltaInvert,
   foot,
   large,
   spark,
@@ -182,6 +193,8 @@ export function StatTile({
   deltaLabel?: string
   /** Repassado a `Delta` — ver o porquê de `points` lá. */
   deltaUnit?: 'percent' | 'points'
+  /** Repassado a `Delta` — ver o porquê de `invert` lá (subir é ruim nesta métrica). */
+  deltaInvert?: boolean
   foot?: ReactNode
   large?: boolean
   /** Série curta para a sparkline do tile: a forma do número ao longo do tempo, sem eixo nem rótulo. */
@@ -194,7 +207,7 @@ export function StatTile({
       {spark && spark.length > 1 && <Sparkline points={spark} />}
       {(delta !== undefined || foot) && (
         <span className="stat__foot">
-          {delta !== undefined && <Delta bps={delta} label={deltaLabel} unit={deltaUnit} />}
+          {delta !== undefined && <Delta bps={delta} label={deltaLabel} unit={deltaUnit} invert={deltaInvert} />}
           {foot}
         </span>
       )}

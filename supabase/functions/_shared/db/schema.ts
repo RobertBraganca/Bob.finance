@@ -357,6 +357,17 @@ export const transactions = pgTable(
     dedupeHash: text('dedupe_hash').notNull(),
     /** set when the reviewer knowingly kept a flagged duplicate */
     duplicateAccepted: boolean('duplicate_accepted').notNull().default(false),
+    /**
+     * Item 4 do backlog de 07/09/2026: um lançamento que o usuário não
+     * quer ver no dia a dia (ex. uma transferência interna repetitiva),
+     * sem apagar nem categorizar diferente — nunca mexe em nenhum total
+     * (`totals()`/`dailySeries()`/etc. não filtram por isto, só a lista de
+     * Lançamentos filtra por padrão). Distinto de `accounts.archived`
+     * (arquivar a CONTA inteira): aqui é por LANÇAMENTO, e um lançamento
+     * de uma conta arquivada continua contando como oculto só se marcado
+     * explicitamente.
+     */
+    hidden: boolean('hidden').notNull().default(false),
     notes: text('notes'),
     /**
      * A confirmed future receipt/expense the bank hasn't posted yet — a
@@ -385,6 +396,16 @@ export const transactions = pgTable(
     partnerPlatformId: int('partner_platform_id').references(() => partnerPlatforms.id, {
       onDelete: 'set null',
     }),
+    /**
+     * The credit card this purchase was made on, if any — set manually
+     * (categorizing a card is the same act as categorizing a category),
+     * never inferred automatically (item 7 do backlog de 07/09/2026).
+     * Distinct from `accountId`: that is the checking account whose
+     * statement eventually PAYS the card's bill, this is the card the
+     * purchase actually ran on. `set null` on delete: removing a card
+     * must never delete the purchases it financed.
+     */
+    creditCardId: int('credit_card_id').references(() => creditCards.id, { onDelete: 'set null' }),
     /**
      * The YYYY-MM occurrence a materialized row fills, fixed at creation
      * time — independent of `postedOn`, which the user can freely edit
@@ -450,6 +471,15 @@ export const debts = pgTable(
     /** optional last period a revolving debt still materializes a pendency for — mirrors cashFlowForecasts.endPeriod */
     endPeriod: text('end_period'),
     accountId: int('account_id').references(() => accounts.id),
+    /**
+     * A âncora FIXA da parcela 0 de uma dívida parcelada (YYYY-MM-DD, dia
+     * ignorado) — `materializeDebtInstallments` indexa toda parcela a
+     * partir daqui, nunca a partir de "hoje" nem recomputado das linhas
+     * que ainda existem (bug corrigido em 07/09/2026: apagar a parcela
+     * mais antiga movia essa âncora e fabricava uma parcela extra fora do
+     * contrato). Preenchido no cadastro; nulo só em dívida antiga de antes
+     * desta coluna existir de verdade, hoje corrigida por migração.
+     */
     openedOn: text('opened_on'),
     closedOn: text('closed_on'),
     active: boolean('active').notNull().default(true),
@@ -644,6 +674,18 @@ export const reconciliationDismissals = pgTable(
   },
   (t) => [uniqueIndex('reconciliation_dismissals_uq').on(t.pendingId, t.matchId)],
 )
+
+/**
+ * O usuário disse que esta assinatura de comerciante NÃO é uma assinatura
+ * recorrente (ou já confirmou e virou `cashFlowForecasts` — nesse caso
+ * também entra aqui, pra não sugerir de novo o que já foi aceito). Item 8
+ * do backlog de 07/09/2026: sugestão nunca vira previsão sozinha
+ * (decisions/0003), mesmo padrão de `reconciliationDismissals` acima.
+ */
+export const subscriptionDismissals = pgTable('subscription_dismissals', {
+  signature: text('signature').primaryKey(),
+  createdAt: text('created_at').notNull().default(now),
+})
 
 /** A recurring/installment occurrence the user explicitly deleted — not "not yet materialized" but "never happening". */
 export const skippedOccurrences = pgTable(

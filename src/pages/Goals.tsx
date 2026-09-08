@@ -9,7 +9,6 @@ import {
   bpsToInput,
   centsToInput,
   money,
-  moneyCompact,
   parseMoneyInput,
   parsePercentInput,
   period as fmtPeriod,
@@ -189,7 +188,7 @@ export function GoalsPage() {
             <Slab span={6} accent>
               <HeroFigure
                 label="Sobrou no mês"
-                value={moneyCompact(data.actual.netCents)}
+                value={money(data.actual.netCents)}
                 delta={null}
               >
                 <div className="row row--between" style={{ marginTop: 'var(--sp-3)' }}>

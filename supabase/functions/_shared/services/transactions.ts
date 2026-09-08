@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, like, lte, ne, or, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, like, lte, ne, or, sql, type SQL } from 'drizzle-orm'
 import { db } from '../db/client.ts'
 import { accounts, categories, categoryRules, cashFlowForecasts, debts, transactions } from '../db/schema.ts'
 import { dedupeHash, directionOf, merchantSignature, normalizeDescription } from '../core/normalize.ts'
@@ -18,6 +18,9 @@ export type TransactionFilter = {
   uncategorized?: boolean
   search?: string
   source?: string
+  /** Item 4 do backlog de 07/09/2026: por padrão, oculto some da lista. `true` traz todos, ocultos inclusive. */
+  includeHidden?: boolean
+  sort?: 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'
   limit?: number
   offset?: number
 }
@@ -99,6 +102,7 @@ export async function buildWhere(filter: TransactionFilter): Promise<SQL | undef
     )
   }
   if (filter.uncategorized) parts.push(isNull(transactions.categoryId))
+  if (!filter.includeHidden) parts.push(eq(transactions.hidden, false))
   if (filter.categoryId) parts.push(eq(transactions.categoryId, filter.categoryId))
   if (filter.parentCategoryId) {
     parts.push(
@@ -115,6 +119,26 @@ export async function buildWhere(filter: TransactionFilter): Promise<SQL | undef
     parts.push(or(...orParts)!)
   }
   return parts.length > 0 ? and(...parts) : undefined
+}
+
+/**
+ * Item 4 do backlog de 07/09/2026: nenhuma ordenação existia antes disto,
+ * nem no cliente nem na query. `id` como critério de desempate em toda
+ * opção (não só a padrão) para a paginação nunca repetir/pular uma linha
+ * entre duas datas ou dois valores empatados.
+ */
+function sortOrderBy(sort: TransactionFilter['sort']) {
+  switch (sort) {
+    case 'date_asc':
+      return [asc(transactions.postedOn), asc(transactions.id)]
+    case 'amount_desc':
+      return [desc(transactions.amountCents), desc(transactions.id)]
+    case 'amount_asc':
+      return [asc(transactions.amountCents), asc(transactions.id)]
+    case 'date_desc':
+    default:
+      return [desc(transactions.postedOn), desc(transactions.id)]
+  }
 }
 
 export async function listTransactions(filter: TransactionFilter) {
@@ -141,15 +165,17 @@ export async function listTransactions(filter: TransactionFilter) {
         accountName: accounts.name,
         notes: transactions.notes,
         duplicateAccepted: transactions.duplicateAccepted,
+        hidden: transactions.hidden,
         pending: transactions.pending,
         forecastId: transactions.forecastId,
         debtId: transactions.debtId,
+        creditCardId: transactions.creditCardId,
       })
       .from(transactions)
       .leftJoin(categories, eq(categories.id, transactions.categoryId))
       .leftJoin(accounts, eq(accounts.id, transactions.accountId))
       .where(where)
-      .orderBy(desc(transactions.postedOn), desc(transactions.id))
+      .orderBy(...sortOrderBy(filter.sort))
       .limit(limit)
       .offset(offset),
     // Confirmed and pending are summed separately — a materialized future
@@ -256,6 +282,33 @@ export async function setCategory(
   }
 
   return { updated: rows.length, learned, ruleId }
+}
+
+/** Item 4 do backlog de 07/09/2026: oculta/reexibe em lote, nunca uma segunda tabela nem um soft-delete. */
+export async function setHidden(ids: number[], hidden: boolean) {
+  if (ids.length === 0) return { updated: 0 }
+  const rows = await db
+    .update(transactions)
+    .set({ hidden, updatedAt: sql`now_iso()` })
+    .where(inArray(transactions.id, ids))
+    .returning({ id: transactions.id })
+  return { updated: rows.length }
+}
+
+/**
+ * Item 7 do backlog de 07/09/2026: liga (ou desliga, com `null`) um
+ * lançamento ao cartão de crédito em que a compra foi feita — sempre
+ * manual, nunca inferido de regra, mesmo princípio de `setCategory`
+ * antes de "aprender" existir. `creditCardId: null` desfaz a ligação.
+ */
+export async function setCreditCard(ids: number[], creditCardId: number | null) {
+  if (ids.length === 0) return { updated: 0 }
+  const rows = await db
+    .update(transactions)
+    .set({ creditCardId, updatedAt: sql`now_iso()` })
+    .where(inArray(transactions.id, ids))
+    .returning({ id: transactions.id })
+  return { updated: rows.length }
 }
 
 export type ManualEntry = {

@@ -6,7 +6,6 @@ import {
   centsToInput,
   date as fmtDate,
   money,
-  moneyCompact,
   parseMoneyInput,
   periodLong,
 } from '../lib/format'
@@ -96,7 +95,7 @@ export function DailyPage() {
           <Slab span={6} accent>
             <HeroFigure
               label={`Gasto em ${periodLong(period)}`}
-              value={moneyCompact(pace?.spentCents ?? 0)}
+              value={money(pace?.spentCents ?? 0)}
             >
               <div className="stack stack--tight" style={{ marginTop: 'var(--sp-3)' }}>
                 <div className="row row--between">
@@ -142,7 +141,7 @@ export function DailyPage() {
           <Card span={6}>
             <StatTile
               label="A receber"
-              value={moneyCompact(daily.data?.receivableCents ?? 0)}
+              value={money(daily.data?.receivableCents ?? 0)}
               foot="entradas pendentes de confirmação no período"
             />
           </Card>
@@ -154,7 +153,7 @@ export function DailyPage() {
           <Card span={6}>
             <StatTile
               label="Ritmo projetado para o mês"
-              value={moneyCompact(pace?.projectedMonthCents ?? 0)}
+              value={money(pace?.projectedMonthCents ?? 0)}
               foot={
                 pace?.capCents
                   ? pace.projectedMonthCents > pace.capCents
@@ -167,7 +166,7 @@ export function DailyPage() {
           <Card span={6}>
             <StatTile
               label="Pode gastar por dia"
-              value={pace?.dailyAllowanceCents !== null && pace?.dailyAllowanceCents !== undefined ? moneyCompact(pace.dailyAllowanceCents) : '-'}
+              value={pace?.dailyAllowanceCents !== null && pace?.dailyAllowanceCents !== undefined ? money(pace.dailyAllowanceCents) : '-'}
               foot={
                 pace && pace.daysTotal - pace.daysElapsed > 0
                   ? `nos ${pace.daysTotal - pace.daysElapsed} dias restantes`
@@ -178,14 +177,14 @@ export function DailyPage() {
           <Card span={6}>
             <StatTile
               label="Média por dia com gasto"
-              value={moneyCompact(avgPerActiveDay)}
+              value={money(avgPerActiveDay)}
               foot={`${daysWithSpend.length} dias com movimento`}
             />
           </Card>
           <Card span={6}>
             <StatTile
               label="Maior dia"
-              value={busiest ? moneyCompact(busiest.expenseCents) : '-'}
+              value={busiest ? money(busiest.expenseCents) : '-'}
               foot={busiest ? fmtDate(busiest.day) : 'sem gastos'}
             />
           </Card>
