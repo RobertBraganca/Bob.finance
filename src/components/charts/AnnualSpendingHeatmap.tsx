@@ -52,8 +52,12 @@ export function AnnualSpendingHeatmap({ months, surface = 'paper' }: { months: A
         </div>
       </div>
 
-      {/* maxWidth trava o tamanho da célula -- mesmo ajuste de `SpendingHeatmap` (08/09/2026): um mapa de calor não precisa da mesma presença visual de um gráfico. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 3, maxWidth: 220 }}>
+      {/* Célula com altura FIXA, não aspect-ratio -- a largura continua
+          esticando (`1fr`) até preencher o card, só a ALTURA que precisava
+          encolher (ajuste de 08/09/2026, mesmo de `SpendingHeatmap`: uma
+          tentativa anterior travou largura E altura, deixando um bloco
+          pequeno colado à esquerda em vez de ocupar a linha inteira). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 3 }}>
         {months.map((m) => (
           <div key={m.period} style={{ display: 'grid', gap: 3 }}>
             <div className="muted" style={{ textAlign: 'center', fontSize: 'var(--text-2xs)', fontWeight: 600 }}>
@@ -64,7 +68,7 @@ export function AnnualSpendingHeatmap({ months, surface = 'paper' }: { months: A
               onMouseLeave={() => setHovered((current) => (current?.period === m.period ? null : current))}
               title={`${labelFor(m.period)}: ${money(m.expenseCents)}`}
               style={{
-                aspectRatio: '1',
+                height: 28,
                 borderRadius: 'var(--r-sm)',
                 background: m.expenseCents > 0 ? colorFor(m.expenseCents) : 'var(--surface-muted)',
                 cursor: m.expenseCents > 0 ? 'pointer' : 'default',

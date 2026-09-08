@@ -70,11 +70,12 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
         </div>
       </div>
 
-      {/* maxWidth trava o tamanho da célula num calendário pequeno e denso
-          -- sem isso, `1fr` esticava cada célula até a largura inteira do
-          card, e um mapa de calor não precisa da mesma presença visual de
-          um gráfico (achado de 08/09/2026). */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3, maxWidth: 240 }}>
+      {/* Célula com altura FIXA, não aspect-ratio -- a largura continua
+          esticando (`1fr`) até preencher o card (era isso que já estava
+          certo), só a ALTURA que precisava encolher (ajuste de 08/09/2026:
+          uma tentativa anterior travou largura E altura, deixando um bloco
+          pequeno colado à esquerda em vez de ocupar a linha inteira). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 }}>
         {WEEKDAY_LETTERS.map((letter, i) => (
           <div
             key={i}
@@ -94,7 +95,7 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
               onMouseLeave={() => setHovered((current) => (current?.day === cell.day ? null : current))}
               title={`${cell.day}: ${money(cell.expenseCents)}`}
               style={{
-                aspectRatio: '1',
+                height: 28,
                 borderRadius: 'var(--r-sm)',
                 background: cell.transactionCount > 0 ? colorFor(cell.expenseCents) : 'var(--surface-muted)',
                 cursor: cell.transactionCount > 0 ? 'pointer' : 'default',
