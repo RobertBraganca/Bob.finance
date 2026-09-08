@@ -52,9 +52,10 @@ export function AnnualSpendingHeatmap({ months, surface = 'paper' }: { months: A
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 4 }}>
+      {/* maxWidth trava o tamanho da célula -- mesmo ajuste de `SpendingHeatmap` (08/09/2026): um mapa de calor não precisa da mesma presença visual de um gráfico. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 3, maxWidth: 220 }}>
         {months.map((m) => (
-          <div key={m.period} style={{ display: 'grid', gap: 4 }}>
+          <div key={m.period} style={{ display: 'grid', gap: 3 }}>
             <div className="muted" style={{ textAlign: 'center', fontSize: 'var(--text-2xs)', fontWeight: 600 }}>
               {labelFor(m.period)}
             </div>
@@ -75,12 +76,12 @@ export function AnnualSpendingHeatmap({ months, surface = 'paper' }: { months: A
       </div>
 
       {/* Sempre montado — mesmo bug de flicker corrigido em `SpendingHeatmap` (07/09/2026). */}
-      <div style={{ padding: 'var(--sp-3)', borderRadius: 'var(--r-card)', background: 'var(--surface-muted)', minHeight: 64 }}>
+      <div style={{ padding: 'var(--sp-2) var(--sp-3)', borderRadius: 'var(--r-card)', background: 'var(--surface-muted)', minHeight: 44 }}>
         {hovered ? (
-          <>
-            <strong>{periodLong(hovered.period)}</strong>
-            <div className="tabular">{money(hovered.expenseCents)}</div>
-          </>
+          <span className="row row--wrap" style={{ gap: 'var(--sp-2)', alignItems: 'baseline' }}>
+            <strong style={{ fontSize: 'var(--text-sm)' }}>{periodLong(hovered.period)}</strong>
+            <span className="tabular">{money(hovered.expenseCents)}</span>
+          </span>
         ) : (
           <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
             Passe o mouse sobre um mês para ver o detalhe

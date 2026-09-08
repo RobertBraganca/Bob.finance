@@ -70,7 +70,11 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+      {/* maxWidth trava o tamanho da célula num calendário pequeno e denso
+          -- sem isso, `1fr` esticava cada célula até a largura inteira do
+          card, e um mapa de calor não precisa da mesma presença visual de
+          um gráfico (achado de 08/09/2026). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3, maxWidth: 240 }}>
         {WEEKDAY_LETTERS.map((letter, i) => (
           <div
             key={i}
@@ -110,10 +114,10 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
         e pra baixo a cada troca de célula. Mantendo o container fixo e
         só trocando o CONTEÚDO de dentro, a altura nunca muda.
       */}
-      <div style={{ padding: 'var(--sp-3)', borderRadius: 'var(--r-card)', background: 'var(--surface-muted)', minHeight: 64 }}>
+      <div style={{ padding: 'var(--sp-2) var(--sp-3)', borderRadius: 'var(--r-card)', background: 'var(--surface-muted)', minHeight: 44 }}>
         {hovered ? (
-          <>
-            <strong>
+          <span className="row row--wrap" style={{ gap: 'var(--sp-2)', alignItems: 'baseline' }}>
+            <strong style={{ fontSize: 'var(--text-sm)' }}>
               {new Date(`${hovered.day}T00:00:00Z`).toLocaleDateString('pt-BR', {
                 weekday: 'long',
                 day: 'numeric',
@@ -128,11 +132,11 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
                 timeZone: 'UTC',
               })}
             </strong>
-            <div className="tabular">{money(hovered.expenseCents)}</div>
+            <span className="tabular">{money(hovered.expenseCents)}</span>
             <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
               {hovered.transactionCount} transação(ões)
             </span>
-          </>
+          </span>
         ) : (
           <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
             Passe o mouse sobre um dia para ver o detalhe

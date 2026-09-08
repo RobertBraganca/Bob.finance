@@ -59,7 +59,7 @@ export function SpendingPaceChart({
         ],
       }}
     >
-      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={200}>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={140}>
         <LineChart data={points} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
           <CartesianGrid {...gridProps(theme)} />
           <XAxis dataKey="dayOfMonth" {...axisProps(theme)} />
