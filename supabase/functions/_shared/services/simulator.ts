@@ -220,10 +220,10 @@ export async function simulateDebtPayoff(input: DebtPayoffInput): Promise<DebtPa
    * Quitar também muda o indicador de endividamento: uma dívida a menos e a
    * parcela dela fora do comprometimento de renda. O comprometimento é
    * recalculado com os mesmos termos que `debtOverview` usa (parcelas ÷
-   * renda do mês), sem nova fórmula.
+   * renda mensal típica), sem nova fórmula.
    */
   const scheduledAfterCents = Math.max(0, afterOutflow.debt.scheduledCents - debt.scheduledPaymentCents)
-  const monthlyIncomeCents = afterOutflow.debt.monthlyIncomeCents
+  const monthlyIncomeCents = afterOutflow.debt.typicalMonthlyIncomeCents
   const afterInputs: health.ScoreInputs = {
     ...afterOutflow,
     debt: {

@@ -4,10 +4,12 @@ import { api } from '../lib/api'
 import { telemetry } from '../lib/telemetry'
 import { useAccounts } from '../lib/store'
 import {
+  annualRateBpsFromMonthly,
   bps,
   bpsToInput,
   centsToInput,
   money,
+  monthlyRateBpsFromAnnual,
   monthsLabel,
   parseMoneyInput,
   parsePercentInput,
@@ -77,6 +79,8 @@ type DebtRow = {
   scheduledPaymentCents: number
   dueDay: number
   monthlyInterestCents: number
+  /** taxa mensal equivalente à efetiva anual gravada */
+  monthlyRateBps: number
   shareBps: number
   installmentCount: number | null
   installmentsPaid: number
@@ -136,6 +140,9 @@ type Overview = {
   scheduledCents: number
   weightedAprBps: number
   monthlyIncomeCents: number
+  typicalMonthlyIncomeCents: number
+  incomeWindowMonths: number
+  incomeSampleMonths: number
   debtToIncomeBps: number | null
   debtToAnnualIncomeBps: number | null
   period: string
@@ -263,7 +270,7 @@ export function DebtPage() {
             <Slab
               span={6}
               title="Renda comprometida"
-              subtitle="Parcela mensal sobre a renda daquele mês"
+              subtitle="Parcela mensal sobre a renda mensal típica"
               actions={
                 <FilterSelect
                   icon="clock"
@@ -277,9 +284,9 @@ export function DebtPage() {
                 ratioBps={data.debtToIncomeBps}
                 surface="paper"
                 caption={
-                  data.monthlyIncomeCents > 0
-                    ? `${money(data.scheduledCents)} de ${money(data.monthlyIncomeCents)} de renda em ${fmtPeriodLong(data.period)}`
-                    : `Sem renda registrada em ${fmtPeriodLong(data.period)}`
+                  data.typicalMonthlyIncomeCents > 0
+                    ? `${money(data.scheduledCents)} de ${money(data.typicalMonthlyIncomeCents)} de renda mensal típica, mediana de ${data.incomeSampleMonths} ${data.incomeSampleMonths === 1 ? 'mês' : 'meses'} com movimento até ${fmtPeriodLong(data.period)}`
+                    : `Sem receita registrada nos ${data.incomeWindowMonths} meses até ${fmtPeriodLong(data.period)}`
                 }
               />
             </Slab>
@@ -413,7 +420,7 @@ export function DebtPage() {
                       <th>Dívida</th>
                       <th>Tipo</th>
                       <th className="table__num">Saldo</th>
-                      <th className="table__num">Taxa a.a.</th>
+                      <th className="table__num">Taxa efetiva</th>
                       <th className="table__num">Juros/mês</th>
                       <th className="table__num">Mínimo</th>
                       <th className="table__num">Programado</th>
@@ -441,7 +448,12 @@ export function DebtPage() {
                         </td>
                         <td className="muted">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
                         <td className="table__num">{money(debt.balanceCents)}</td>
-                        <td className="table__num">{bps(debt.aprBps)}</td>
+                        <td className="table__num">
+                          {bps(debt.aprBps)} a.a.
+                          <span className="muted" style={{ display: 'block', fontSize: 'var(--text-2xs)' }}>
+                            {bps(debt.monthlyRateBps)} a.m.
+                          </span>
+                        </td>
                         <td className="table__num neg">{money(debt.monthlyInterestCents)}</td>
                         <td className="table__num">{money(debt.minimumPaymentCents)}</td>
                         <td className="table__num">{money(debt.scheduledPaymentCents)}</td>
@@ -818,6 +830,16 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
   const [kind, setKind] = useState(debt?.kind ?? 'credit_card')
   const [institution, setInstitution] = useState(debt?.institution ?? '')
   const [balance, setBalance] = useState(centsToInput(debt?.balanceCents ?? null))
+  /**
+   * A taxa é GRAVADA sempre como efetiva anual, mas pode ser DIGITADA ao
+   * mês, que é como cartão rotativo e cheque especial são publicados no
+   * Brasil. Sem isso, o caminho natural do usuário era multiplicar a taxa
+   * mensal por 12 e digitar o resultado como se fosse anual, o que produz
+   * uma taxa nominal onde o cálculo espera uma efetiva: 14% a.m. viram
+   * "168% a.a." e o app passa a calcular 8,55% a.m., 39% menos juro do que
+   * o real, com a projeção de quitação errando por anos.
+   */
+  const [rateBasis, setRateBasis] = useState<'annual' | 'monthly'>('annual')
   const [apr, setApr] = useState(bpsToInput(debt?.aprBps ?? null))
   const [minimum, setMinimum] = useState(centsToInput(debt?.minimumPaymentCents ?? null))
   const [scheduled, setScheduled] = useState(centsToInput(debt?.scheduledPaymentCents ?? null))
@@ -831,9 +853,11 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
   const save = useMutation({
     mutationFn: () => {
       const principalCents = parseMoneyInput(balance)
-      const aprBps = parsePercentInput(apr)
+      const typedBps = parsePercentInput(apr)
       if (principalCents === null) throw new Error('informe o saldo')
-      if (aprBps === null) throw new Error('informe a taxa anual')
+      if (typedBps === null) throw new Error('informe a taxa de juros')
+      // Uma única unidade canônica no banco, sempre: taxa efetiva anual.
+      const aprBps = rateBasis === 'monthly' ? annualRateBpsFromMonthly(Math.abs(typedBps)) : typedBps
       const installmentCount = installments.trim() ? Math.abs(Math.round(Number(installments))) : null
       const body = {
         name: name.trim(),
@@ -882,6 +906,20 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
       onClose()
     },
   })
+
+  /**
+   * Mostra a taxa na OUTRA unidade enquanto o usuário digita. É o que faz
+   * uma taxa absurda se denunciar sozinha: "180% ao ano" aparecendo como
+   * "8,88% ao mês" é imediatamente reconhecível como pequeno demais para
+   * um rotativo, enquanto "180" sozinho não diz nada.
+   */
+  const typedRateBps = parsePercentInput(apr)
+  const aprHint =
+    typedRateBps === null
+      ? 'Taxa efetiva, não nominal. Cartão rotativo passa de 14% ao mês.'
+      : rateBasis === 'annual'
+        ? `Efetiva ao ano, equivale a ${bpsToInput(monthlyRateBpsFromAnnual(Math.abs(typedRateBps)))}% ao mês.`
+        : `Gravada como ${bpsToInput(annualRateBpsFromMonthly(Math.abs(typedRateBps)))}% efetivos ao ano.`
 
   return (
     <Modal
@@ -941,9 +979,37 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
             <TextInput value={balance} onChange={setBalance} placeholder="0,00" numeral />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Taxa anual (%)</label>
-            <TextInput value={apr} onChange={setApr} placeholder="ex. 180" numeral />
-            <span className="field__hint">Nominal ao ano; cartão rotativo passa de 300%.</span>
+            <label className="field__label">Taxa de juros (%)</label>
+            <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'flex-start' }}>
+              <TextInput value={apr} onChange={setApr} placeholder="ex. 14" numeral />
+              <div style={{ width: 132, flexShrink: 0 }}>
+                <Select
+                  value={rateBasis}
+                  options={[
+                    { value: 'annual', label: 'ao ano' },
+                    { value: 'monthly', label: 'ao mês' },
+                  ]}
+                  onChange={(value) => {
+                    const next = (value as 'annual' | 'monthly') ?? 'annual'
+                    if (next === rateBasis) return
+                    // Trocar a unidade não pode mudar a taxa: converte o
+                    // que já está digitado em vez de reinterpretá-lo.
+                    const typed = parsePercentInput(apr)
+                    if (typed !== null) {
+                      setApr(
+                        bpsToInput(
+                          next === 'monthly'
+                            ? monthlyRateBpsFromAnnual(Math.abs(typed))
+                            : annualRateBpsFromMonthly(Math.abs(typed)),
+                        ),
+                      )
+                    }
+                    setRateBasis(next)
+                  }}
+                />
+              </div>
+            </div>
+            <span className="field__hint">{aprHint}</span>
           </div>
         </div>
 

@@ -9,7 +9,8 @@ import {
   targetAllocations,
 } from '../db/schema.ts'
 import { addDays, addMonths, periodBounds, periodOf, periodRange, todayIso } from '../core/dates.ts'
-import { totals } from './analytics.ts'
+import { medianCents } from '../core/money.ts'
+import { monthlyTotals, totals } from './analytics.ts'
 import { notesForAssets } from './criteria.ts'
 import type { GoalState } from './goals.ts'
 
@@ -356,13 +357,27 @@ export async function contributeToReserve(input: { amountCents: number; tradedOn
   )[0]!
 }
 
+/**
+ * Janela padrão do custo mensal de vida, em meses fechados.
+ *
+ * Era 3. Passou a 6 em 09/09/2026 junto com a troca de média por mediana:
+ * uma janela maior só piora a média (mais chance de conter um mês
+ * atípico) mas melhora a mediana (mais amostra para o centro se firmar),
+ * e 6 meses absorve a sazonalidade de receita e despesa de quem trabalha
+ * por projeto. Continua sobrescritível pelo usuário, e uma configuração
+ * já salva mantém o valor que tem.
+ */
+export const DEFAULT_LOOKBACK_MONTHS = 6
+
 export type ReserveStatus = {
   assetId: number | null
   multiple: number
   lookbackMonths: number
   monthlyLivingCostCents: number
-  /** true when monthlyLivingCostCents is the user's own number, not the computed average */
+  /** true when monthlyLivingCostCents is the user's own number, not the computed median */
   livingCostIsManual: boolean
+  /** meses da janela com movimento que entraram na mediana; 0 quando manual */
+  livingCostSampleMonths: number
   targetCents: number
   currentCents: number
   gapCents: number
@@ -375,7 +390,7 @@ async function reserveSettings(): Promise<ReserveSettingsRow> {
   const row = (await db.select().from(emergencyReserveSettings).where(eq(emergencyReserveSettings.id, 1)))[0]
   return row
     ? { multiple: row.multiple, lookbackMonths: row.lookbackMonths, manualLivingCostCents: row.manualLivingCostCents }
-    : { multiple: 6, lookbackMonths: 3, manualLivingCostCents: null }
+    : { multiple: 6, lookbackMonths: DEFAULT_LOOKBACK_MONTHS, manualLivingCostCents: null }
 }
 
 export async function setReserveSettings(patch: {
@@ -401,7 +416,7 @@ export async function setReserveSettings(patch: {
       .values({
         id: 1,
         multiple: patch.multiple ?? 6,
-        lookbackMonths: patch.lookbackMonths ?? 3,
+        lookbackMonths: patch.lookbackMonths ?? DEFAULT_LOOKBACK_MONTHS,
         manualLivingCostCents: patch.manualLivingCostCents ?? null,
       })
       .returning()
@@ -417,17 +432,39 @@ export async function reserveStatus(): Promise<ReserveStatus> {
   const { multiple, lookbackMonths, manualLivingCostCents } = await reserveSettings()
 
   let monthlyLivingCostCents: number
+  let sampleMonths = 0
   if (manualLivingCostCents !== null) {
     monthlyLivingCostCents = manualLivingCostCents
+  } else if (lookbackMonths <= 0) {
+    monthlyLivingCostCents = 0
   } else {
+    /**
+     * MEDIANA da despesa mensal da janela, não a média.
+     *
+     * Este é o número mais reaproveitado do sistema: além do alvo da
+     * reserva, ele é o divisor do Runway e do indicador de liquidez da
+     * Saúde financeira. Com média e janela curta, um único gasto atípico
+     * (IPVA, um equipamento, uma viagem) deslocava a base em uma fração
+     * direta do seu valor e contaminava os três ao mesmo tempo, por toda a
+     * janela. A mediana descarta o mês excepcional por construção, sem
+     * exigir que alguém classifique o que é excepcional.
+     *
+     * Só entram meses com movimento registrado, pelo mesmo motivo de
+     * `debtOverview`: um mês sem nenhum lançamento é ledger que não cobre
+     * aquele período, não um mês sem despesa.
+     *
+     * A janela continua misturando toda conta (PF pessoal E PJ), o que é
+     * um valor real mas pode superestimar o custo de vida PESSOAL. É
+     * exatamente por isso que a sobrescrita manual acima existe.
+     */
     const currentPeriod = todayIso().slice(0, 7)
-    const from = periodBounds(addMonths(currentPeriod, -lookbackMonths)).start
-    const to = periodBounds(addMonths(currentPeriod, -1)).end
-    // The average mixes every account (PF personal AND PJ business) — a
-    // real value, but one that can overstate PERSONAL cost of living,
-    // which is exactly why a manual override exists above.
-    const expenseCents = lookbackMonths > 0 ? (await totals({ from, to })).expenseCents : 0
-    monthlyLivingCostCents = lookbackMonths > 0 ? Math.round(expenseCents / lookbackMonths) : 0
+    const window = await monthlyTotals({
+      endPeriod: addMonths(currentPeriod, -1),
+      months: lookbackMonths,
+    })
+    const covered = window.filter((m) => m.transactionCount > 0)
+    sampleMonths = covered.length
+    monthlyLivingCostCents = medianCents(covered.map((m) => m.expenseCents))
   }
 
   const targetCents = monthlyLivingCostCents * multiple
@@ -447,6 +484,8 @@ export async function reserveStatus(): Promise<ReserveStatus> {
     lookbackMonths,
     monthlyLivingCostCents,
     livingCostIsManual: manualLivingCostCents !== null,
+    /** quantos meses da janela tinham movimento e entraram na mediana */
+    livingCostSampleMonths: sampleMonths,
     targetCents,
     currentCents,
     gapCents,

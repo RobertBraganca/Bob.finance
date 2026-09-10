@@ -2,8 +2,9 @@ import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { accounts, debtPayments, debtSnapshots, debts, skippedOccurrences, transactions } from '../db/schema'
 import { addMonths, daysInMonth, periodBounds, todayIso } from '../core/dates'
+import { medianCents, monthlyRateOf } from '../core/money'
 import { dedupeHash, directionOf, normalizeDescription } from '../core/normalize'
-import { totals } from './analytics'
+import { monthlyTotals, totals } from './analytics'
 
 /**
  * Debt is modelled as a set of balances with rates, plus an optional history
@@ -30,6 +31,13 @@ export type DebtRow = {
   dueDay: number
   /** interest accruing this month at the current balance */
   monthlyInterestCents: number
+  /**
+   * Taxa mensal equivalente à taxa efetiva anual gravada. Exposta porque é
+   * o número que o usuário reconhece de cabeça: uma dívida de cartão que
+   * aparece com 3% ao mês está com a taxa anual errada, e ver a mensal ao
+   * lado da anual é o que torna esse erro visível sem precisar de conta.
+   */
+  monthlyRateBps: number
   shareBps: number
   /** total parcelas in the contract — null for revolving debt that has none */
   installmentCount: number | null
@@ -87,6 +95,7 @@ export async function listDebts(): Promise<DebtRow[]> {
         scheduledPaymentCents: d.scheduledPaymentCents || d.minimumPaymentCents,
         dueDay: d.dueDay,
         monthlyInterestCents: Math.round(balanceCents * monthlyRate(d.aprBps)),
+        monthlyRateBps: Math.round(monthlyRate(d.aprBps) * 10_000),
         shareBps: 0,
         installmentCount: d.installmentCount,
         installmentsPaid,
@@ -150,6 +159,7 @@ export async function listClosedDebts(): Promise<ClosedDebtRow[]> {
         scheduledPaymentCents: d.scheduledPaymentCents || d.minimumPaymentCents,
         dueDay: d.dueDay,
         monthlyInterestCents: Math.round(balanceCents * monthlyRate(d.aprBps)),
+        monthlyRateBps: Math.round(monthlyRate(d.aprBps) * 10_000),
         shareBps: 0,
         installmentCount: d.installmentCount,
         installmentsPaid,
@@ -368,15 +378,36 @@ async function syncMaterializedRows(debt: typeof debts.$inferSelect): Promise<vo
 }
 
 /**
- * Nominal annual rate to an effective monthly rate. Brazilian consumer credit
- * is quoted monthly far more often than annually, but the schema stores one
- * canonical unit (annual bps) and converts here, in one place.
+ * Taxa EFETIVA anual para taxa mensal equivalente: `(1 + ia)^(1/12) - 1`.
+ *
+ * O adjetivo não é decorativo. Esta conversão só está correta se `aprBps`
+ * for uma taxa efetiva anual. Se o valor gravado for uma taxa NOMINAL com
+ * capitalização mensal, que é como o crédito ao consumidor brasileiro
+ * costuma ser anunciado ("144% ao ano com capitalização mensal" significa
+ * 12% ao mês, e portanto 289,6% efetivos ao ano), a fórmula devolve uma
+ * taxa muito menor do que a real e a projeção de quitação passa a mentir
+ * por anos.
+ *
+ * Por isso a entrada de dados aceita taxa ao mês e converte na hora
+ * (`core/money#effectiveAnnualRateBps`), em vez de confiar que o usuário
+ * fez a conversão certa de cabeça. O schema continua guardando uma única
+ * unidade canônica: taxa efetiva anual em bps.
  */
-export const monthlyRate = (aprBps: number) => Math.pow(1 + aprBps / 10_000, 1 / 12) - 1
+export const monthlyRate = (aprBps: number) => monthlyRateOf(aprBps)
 
 /* ------------------------------------------------------------------ *
  * Composition + exposure + debt-to-income
  * ------------------------------------------------------------------ */
+
+/**
+ * Meses fechados que compõem a renda típica usada como denominador do
+ * comprometimento de renda. Seis é a borda inferior da faixa de 6 a 12
+ * meses que a análise de crédito usa para renda variável: suficiente para
+ * atravessar um trimestre fraco, curto o bastante para ainda descrever a
+ * situação atual e não a de dois anos atrás.
+ */
+export const INCOME_WINDOW_MONTHS = 6
+
 export async function debtOverview(options: { period?: string } = {}) {
   const rows = await listDebts()
   const totalCents = rows.reduce((sum, d) => sum + d.balanceCents, 0)
@@ -398,10 +429,42 @@ export async function debtOverview(options: { period?: string } = {}) {
   // the last fully closed month: the current month's income is still
   // arriving, so showing it as final would understate how comprometida a
   // renda really é.
+  //
+  // Este número continua sendo o do mês de referência e continua na tela.
+  // O que ele deixou de ser, em 09/09/2026, é o DENOMINADOR do
+  // comprometimento de renda: ver `typicalMonthlyIncomeCents` abaixo.
   const period = options.period ?? addMonths(todayIso().slice(0, 7), -1)
   const { start: from, end: to } = periodBounds(period)
   const income = await totals({ from, to })
   const monthlyIncomeCents = income.incomeCents
+
+  /**
+   * Renda TÍPICA, e não a de um único mês, como denominador do
+   * comprometimento de renda.
+   *
+   * A persona do produto é autônomo/PJ com receita irregular por definição
+   * (`PRD.md` §2). Um mês com dois projetos faturados e um mês sem nenhum
+   * produzem comprometimentos que diferem por um fator de 2 ou 3 sem que
+   * nada tenha mudado na dívida, e o ruído não fica contido aqui: este
+   * número alimenta o indicador de endividamento da Saúde financeira (peso
+   * padrão de 20% no score) e uma das cinco regras do radar de risco. O
+   * score composto oscilava mês a mês por uma razão sem relação com saúde
+   * financeira nenhuma.
+   *
+   * A prática de crédito para renda variável usa média de 6 a 12 meses
+   * pelo mesmo motivo. Aqui é a MEDIANA da janela, que é robusta a um mês
+   * excepcional em qualquer das duas direções sem precisar decidir o que
+   * conta como excepcional.
+   *
+   * Só entram meses com movimento registrado no ledger. Um mês vazio é
+   * ausência de dado, não um mês sem renda, e contá-lo como zero afundaria
+   * o denominador de quem importou o extrato semana passada. Um mês com
+   * despesa e receita zero, esse sim, entra: é um mês seco de verdade e é
+   * informação real sobre renda variável.
+   */
+  const incomeWindow = await monthlyTotals({ endPeriod: period, months: INCOME_WINDOW_MONTHS })
+  const coveredMonths = incomeWindow.filter((m) => m.transactionCount > 0)
+  const typicalMonthlyIncomeCents = medianCents(coveredMonths.map((m) => m.incomeCents))
 
   const byKind = new Map<string, number>()
   for (const d of rows) byKind.set(d.kind, (byKind.get(d.kind) ?? 0) + d.balanceCents)
@@ -413,13 +476,24 @@ export async function debtOverview(options: { period?: string } = {}) {
     minimumCents,
     scheduledCents,
     weightedAprBps,
+    /** receita realizada no mês de referência, exatamente aquele mês */
     monthlyIncomeCents,
-    /** committed debt service as a share of that month's real income */
+    /** mediana da receita dos meses com movimento na janela */
+    typicalMonthlyIncomeCents,
+    /** tamanho da janela pedida */
+    incomeWindowMonths: INCOME_WINDOW_MONTHS,
+    /** quantos meses da janela realmente tinham movimento e entraram na mediana */
+    incomeSampleMonths: coveredMonths.length,
+    /** committed debt service as a share of the typical monthly income */
     debtToIncomeBps:
-      monthlyIncomeCents > 0 ? Math.round((scheduledCents / monthlyIncomeCents) * 10_000) : null,
-    /** total balance as a share of annual income (that month's income x12) */
+      typicalMonthlyIncomeCents > 0
+        ? Math.round((scheduledCents / typicalMonthlyIncomeCents) * 10_000)
+        : null,
+    /** total balance as a share of annual income (typical month x12) */
     debtToAnnualIncomeBps:
-      monthlyIncomeCents > 0 ? Math.round((totalCents / (monthlyIncomeCents * 12)) * 10_000) : null,
+      typicalMonthlyIncomeCents > 0
+        ? Math.round((totalCents / (typicalMonthlyIncomeCents * 12)) * 10_000)
+        : null,
     period,
     byKind: [...byKind.entries()]
       .map(([kind, amountCents]) => ({

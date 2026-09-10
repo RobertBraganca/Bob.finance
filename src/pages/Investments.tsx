@@ -645,6 +645,8 @@ type ReserveStatus = {
   lookbackMonths: number
   monthlyLivingCostCents: number
   livingCostIsManual: boolean
+  /** meses da janela com movimento que entraram na mediana */
+  livingCostSampleMonths: number
   targetCents: number
   currentCents: number
   gapCents: number
@@ -896,7 +898,9 @@ function ReserveCard() {
             <div className="row row--between" style={{ fontSize: 'var(--text-xs)' }}>
               <span className="muted">
                 Custo de vida usado: <strong className="tabular">{money(data.monthlyLivingCostCents)}</strong>/mês
-                {data.livingCostIsManual ? ' (informado por você)' : ` (média real, últimos ${data.lookbackMonths} meses)`}
+                {data.livingCostIsManual
+                  ? ' (informado por você)'
+                  : ` (mediana de ${data.livingCostSampleMonths} ${data.livingCostSampleMonths === 1 ? 'mês' : 'meses'} com movimento, janela de ${data.lookbackMonths})`}
               </span>
               <Button
                 variant="quiet"

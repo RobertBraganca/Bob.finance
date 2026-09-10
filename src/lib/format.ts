@@ -138,3 +138,22 @@ export const centsToInput = (cents: number | null | undefined): string =>
 
 export const bpsToInput = (value: number | null | undefined): string =>
   value === null || value === undefined ? '' : (value / 100).toFixed(2).replace('.', ',')
+
+/**
+ * Conversão entre taxa efetiva anual e taxa mensal equivalente, em bps.
+ *
+ * Espelham `server/src/core/money.ts`, e existem no frontend porque a
+ * entrada de dados precisa converter no momento em que o usuário digita:
+ * o schema guarda uma unidade canônica (efetiva anual), mas cartão
+ * rotativo e cheque especial são publicados ao mês no Brasil, e pedir que
+ * o usuário faça `(1+im)^12 - 1` de cabeça é como se produz uma taxa
+ * anual errada por um fator de dois.
+ *
+ * A conversão é a EQUIVALENTE do regime composto, nunca a proporcional
+ * (`i/12`), que só vale em juros simples.
+ */
+export const monthlyRateBpsFromAnnual = (annualBps: number): number =>
+  Math.round((Math.pow(1 + annualBps / 10_000, 1 / 12) - 1) * 10_000)
+
+export const annualRateBpsFromMonthly = (monthlyBps: number): number =>
+  Math.round((Math.pow(1 + monthlyBps / 10_000, 12) - 1) * 10_000)

@@ -112,6 +112,80 @@ export async function totals(range: Range): Promise<Totals> {
   }
 }
 
+export type MonthlyTotal = {
+  period: string
+  incomeCents: number
+  expenseCents: number
+  transactionCount: number
+}
+
+/**
+ * Receita e despesa mês a mês, numa janela que termina em `endPeriod`
+ * (inclusive). Existe para as bases de cálculo que precisam de um valor
+ * TÍPICO em vez do valor de um único mês: o custo mensal de vida que
+ * alimenta reserva, Runway e liquidez, e a renda que serve de denominador
+ * ao comprometimento de renda.
+ *
+ * `transactionCount` é o campo que faz esta função valer a pena. Ele
+ * distingue "mês sem nenhum movimento registrado" (ledger que ainda não
+ * cobre aquele período: ausência de dado) de "mês com movimento e receita
+ * zero" (um mês seco de verdade, que é informação real sobre renda
+ * variável). Só o segundo pode entrar numa mediana; tratar o primeiro
+ * como zero afundaria a base de quem acabou de importar o extrato.
+ *
+ * Uma consulta agregada só, agrupando pelo prefixo `YYYY-MM` de
+ * `posted_on` (que é texto ISO no schema), em vez de N chamadas a
+ * `totals`: além de mais barato, evita o ponto de divergência entre a
+ * árvore Fastify e a das Edge Functions, onde o pooler de transação do
+ * Supabase exigiria sequencial no lugar de `Promise.all`.
+ */
+export async function monthlyTotals(options: {
+  endPeriod: string
+  months: number
+  accountId?: number | null
+}): Promise<MonthlyTotal[]> {
+  const months = Math.max(1, Math.round(options.months))
+  const periods = periodRange(addMonths(options.endPeriod, -(months - 1)), options.endPeriod)
+  const from = periodBounds(periods[0]!).start
+  const to = periodBounds(periods[periods.length - 1]!).end
+
+  const rows = await db.execute<{
+    period: string
+    income: number
+    expense: number
+    count: number
+  }>(sql`
+      select
+        period,
+        coalesce(sum(case when flow = 'income'  and amount_cents > 0 then amount_cents else 0 end), 0) as income,
+        coalesce(sum(case when flow = 'expense' and amount_cents < 0 then -amount_cents else 0 end), 0) as expense,
+        count(*) as count
+      from (
+        select left(t.posted_on, 7) as period, t.amount_cents, ${FLOW_KIND} as flow
+        from transactions t
+        left join categories c on c.id = t.category_id
+        where t.posted_on between ${from} and ${to}
+          and t.pending = false
+        ${accountFilter(options.accountId)}
+      ) x
+      group by period
+    `)
+
+  const byPeriod = new Map(rows.map((r) => [r.period, r]))
+  // Todo mês da janela aparece na saída, inclusive os sem movimento: quem
+  // chama precisa VER o buraco para poder descartá-lo, e uma lista curta
+  // silenciosamente não diria quantos meses faltaram.
+  return periods.map((period) => {
+    const row = byPeriod.get(period)
+    return {
+      period,
+      incomeCents: row?.income ?? 0,
+      expenseCents: row?.expense ?? 0,
+      transactionCount: row?.count ?? 0,
+    }
+  })
+}
+
 export type ServiceAverages = {
   avgRevenuePerTransactionCents: number
   avgExpensePerTransactionCents: number

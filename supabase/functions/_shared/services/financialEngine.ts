@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
 import { financialEngineSettings } from '../db/schema.ts'
 import { addMonths, periodBounds, periodRange, todayIso } from '../core/dates.ts'
-import { accountBalances, totals } from './analytics.ts'
+import { accountBalances, monthlyTotals, totals } from './analytics.ts'
 import { listPending } from './cashFlow.ts'
 import { listCards } from './creditCards.ts'
 import { debtOverview } from './debt.ts'
@@ -510,6 +510,15 @@ export type BreakEven = {
   lines: BreakEvenLine[]
   billedCents: number
   differenceCents: number | null
+  /**
+   * Receita bruta dos 12 meses anteriores ao período, derivada do ledger.
+   * Não entra em nenhuma conta: existe para o usuário conferir a alíquota
+   * efetiva que ele mesmo configurou contra a faixa em que o faturamento
+   * dele realmente está.
+   */
+  rbt12Cents: number
+  /** meses da janela de 12 com movimento registrado; abaixo de 12 o RBT12 está incompleto */
+  rbt12CoveredMonths: number
   assumptions: Assumptions
 }
 
@@ -650,6 +659,36 @@ export async function breakEven(
   const breakEvenCents = reachable ? Math.round(fixedCents / (1 - taxRate)) : null
   const taxCents = breakEvenCents === null ? 0 : breakEvenCents - fixedCents
 
+  /**
+   * RBT12: receita bruta acumulada dos 12 meses ANTERIORES ao período de
+   * apuração, derivada do ledger na conta PJ. É a base sobre a qual a
+   * alíquota efetiva do Simples Nacional é calculada:
+   *
+   *   alíquotaEfetiva = (RBT12 × alíquotaNominal - parcelaADeduzir) / RBT12
+   *
+   * O sistema não calcula essa alíquota: ela depende do anexo aplicável,
+   * do Fator R e de tabelas que mudam por lei, e escolher qualquer um
+   * desses pelo usuário seria prescrever (`decisions/0010`). O que ele faz
+   * é EVIDENCIAR o RBT12 ao lado da alíquota digitada, para que uma
+   * alíquota nominal digitada no lugar da efetiva, ou uma alíquota que
+   * envelheceu enquanto o faturamento mudava de faixa, fique visível na
+   * memória de cálculo em vez de ficar embutida silenciosamente no
+   * ponto de equilíbrio e, por ele, em todo preço da Precificação.
+   *
+   * Vale registrar por ser contraintuitivo: sob o Simples o gross-up NÃO é
+   * circular. A alíquota do mês é fixada pelo RBT12, que é histórico e não
+   * inclui o mês corrente, então o imposto é de fato proporcional à
+   * receita do mês a uma taxa já conhecida, e `receita = custos / (1 - t)`
+   * continua exato. O que precisa estar certo é o `t`.
+   */
+  const rbt12Window = await monthlyTotals({
+    endPeriod: addMonths(period, -1),
+    months: 12,
+    accountId: params.pjAccountId,
+  })
+  const rbt12Cents = rbt12Window.reduce((sum, m) => sum + m.incomeCents, 0)
+  const rbt12CoveredMonths = rbt12Window.filter((m) => m.transactionCount > 0).length
+
   // The tax line is appended after the equation because its value depends on
   // the result, but it is still a line of the composition, not a footnote.
   composedLines.push({
@@ -657,10 +696,21 @@ export async function breakEven(
     label: 'Impostos estimados',
     amountCents: taxCents,
     assumptions: {
-      formula: 'alíquota configurada aplicada sobre o próprio faturamento de equilíbrio',
-      aliquotaBps: params.taxRateBps,
+      formula: 'alíquota efetiva configurada aplicada sobre o próprio faturamento de equilíbrio',
+      aliquotaEfetivaBps: params.taxRateBps,
       configurado: origins.taxRateBps !== 'default',
       origem: origins.taxRateBps,
+      rbt12Cents,
+      rbt12JanelaMeses: 12,
+      rbt12MesesComMovimento: rbt12CoveredMonths,
+      rbt12Escopo:
+        params.pjAccountId === null
+          ? 'ledger inteiro, nenhuma conta PJ informada'
+          : 'apenas a conta PJ informada',
+      nota:
+        rbt12CoveredMonths < 12
+          ? `o ledger cobre ${rbt12CoveredMonths} dos 12 meses anteriores: o RBT12 derivado está incompleto e a faixa do Simples que ele indicaria é menor que a real`
+          : 'a alíquota do Simples Nacional é efetiva e varia com o RBT12; confira se a configurada ainda corresponde a esta faixa',
     },
   })
 
@@ -672,13 +722,17 @@ export async function breakEven(
     lines: composedLines,
     billedCents,
     differenceCents: breakEvenCents === null ? null : billedCents - breakEvenCents,
+    rbt12Cents,
+    rbt12CoveredMonths,
     assumptions: {
       formula:
-        'faturamento de equilíbrio = (custos PJ + pró-labore + investimento planejado + reserva planejada + margem) ÷ (1 menos a alíquota), porque o imposto incide sobre o próprio faturamento',
+        'faturamento de equilíbrio = (custos PJ + pró-labore + investimento planejado + reserva planejada + margem) ÷ (1 menos a alíquota efetiva), porque o imposto incide sobre o próprio faturamento',
       periodo: period,
       intervalo: { from: start, to: end },
       somaDosCustosFixosCents: fixedCents,
-      aliquotaBps: params.taxRateBps,
+      aliquotaEfetivaBps: params.taxRateBps,
+      rbt12Cents,
+      rbt12MesesComMovimento: rbt12CoveredMonths,
       faturadoNoPeriodoCents: billedCents,
       parametrosUsados: params,
       // Which layer decided each parameter: o default exportado, o valor

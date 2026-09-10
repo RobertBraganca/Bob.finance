@@ -85,6 +85,10 @@ type BreakEven = {
   lines: BreakEvenLine[]
   billedCents: number
   differenceCents: number | null
+  /** receita bruta dos 12 meses anteriores, derivada do ledger */
+  rbt12Cents: number
+  /** quantos desses 12 meses têm movimento registrado */
+  rbt12CoveredMonths: number
   assumptions: AssumptionBag
 }
 
@@ -402,7 +406,21 @@ export function FinancialEnginePage() {
                     >
                       {money(breakEven.data.differenceCents ?? 0)}
                     </span>
+                    {/* O RBT12 não entra em conta nenhuma: é a base sobre a
+                        qual a alíquota efetiva do Simples é calculada, e
+                        aparece para que uma alíquota nominal digitada no
+                        lugar da efetiva, ou uma que envelheceu enquanto o
+                        faturamento mudava de faixa, fique visível. */}
+                    <span className="kv__k">RBT12 (12 meses anteriores)</span>
+                    <span className="kv__v">{money(breakEven.data.rbt12Cents)}</span>
                   </div>
+                  {breakEven.data.rbt12CoveredMonths < 12 && (
+                    <p className="chart__note">
+                      O ledger cobre {breakEven.data.rbt12CoveredMonths} dos 12 meses anteriores,
+                      então o RBT12 acima está incompleto e indica uma faixa do Simples menor que a
+                      real.
+                    </p>
+                  )}
 
                   {/* The closing sentence stays conditional, per the
                       instrumental-language table in decisions/0010. */}
@@ -517,14 +535,17 @@ function ParamsEditor({ onClose }: { onClose: () => void }) {
                   Vazio significa derivar do repasse PJ para PF pareado no período
                 </span>
               </div>
-              <div className="field" style={{ width: 150 }}>
-                <label className="field__label">Alíquota (%)</label>
+              <div className="field" style={{ width: 190 }}>
+                <label className="field__label">Alíquota efetiva (%)</label>
                 <Input
                   value={tax === undefined ? bpsToInput(current.taxRateBps) : tax}
                   onChange={(e) => setTax(e.target.value)}
                   className="text-right tabular-nums"
                 />
-                <span className="field__hint">Incide sobre o próprio faturamento</span>
+                <span className="field__hint">
+                  Incide sobre o próprio faturamento. No Simples Nacional é a alíquota efetiva,
+                  não a nominal da tabela: (RBT12 × nominal − parcela a deduzir) ÷ RBT12
+                </span>
               </div>
               <div className="field" style={{ width: 190 }}>
                 <label className="field__label">Reserva planejada (R$)</label>

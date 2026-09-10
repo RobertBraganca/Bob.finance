@@ -159,14 +159,23 @@ export function debtIndicator(input: {
   debtToIncomeBps: number | null
   debtCount: number
   scheduledCents: number
-  monthlyIncomeCents: number
+  /** renda TÍPICA (mediana da janela), que é o denominador de debtToIncomeBps */
+  typicalMonthlyIncomeCents: number
+  incomeWindowMonths: number
+  incomeSampleMonths: number
   period: string
 }): IndicatorResult {
   const assumptions: Assumptions = {
     formula: '100 menos o comprometimento de renda, chegando a 0 quando metade da renda está comprometida',
     comprometimentoBps: input.debtToIncomeBps,
     parcelasDoMesCents: input.scheduledCents,
-    rendaDoMesCents: input.monthlyIncomeCents,
+    // A renda que aparece aqui é a que REPRODUZ o comprometimento acima.
+    // Antes era a do mês de referência, que não era mais o denominador e
+    // por isso não fechava a conta na memória de cálculo.
+    rendaMensalTipicaCents: input.typicalMonthlyIncomeCents,
+    janelaDaRendaMeses: input.incomeWindowMonths,
+    mesesComMovimentoNaJanela: input.incomeSampleMonths,
+    baseDaRenda: 'mediana da receita dos meses com movimento na janela, não a receita de um único mês',
     mesDeReferencia: input.period,
     dividasAtivas: input.debtCount,
   }
@@ -174,7 +183,7 @@ export function debtIndicator(input: {
     return { scoreBps: null, assumptions: { ...assumptions, semDado: 'nenhuma dívida cadastrada' } }
   }
   if (input.debtToIncomeBps === null) {
-    return { scoreBps: null, assumptions: { ...assumptions, semDado: 'sem renda registrada no mês de referência' } }
+    return { scoreBps: null, assumptions: { ...assumptions, semDado: 'sem receita registrada na janela de referência' } }
   }
   return { scoreBps: clampBps(10_000 - input.debtToIncomeBps * 2), assumptions }
 }
@@ -382,7 +391,9 @@ export async function gatherScoreInputs(period: string, accountId: number | null
       debtToIncomeBps: debt.debtToIncomeBps,
       debtCount: debt.debts.length,
       scheduledCents: debt.scheduledCents,
-      monthlyIncomeCents: debt.monthlyIncomeCents,
+      typicalMonthlyIncomeCents: debt.typicalMonthlyIncomeCents,
+      incomeWindowMonths: debt.incomeWindowMonths,
+      incomeSampleMonths: debt.incomeSampleMonths,
       period: debt.period,
     },
     spending: {
@@ -802,9 +813,11 @@ export async function riskRadar(period: string, accountId: number | null = null)
       outsideRange: flagged(debt.debtToIncomeBps, settings.riskDebtToIncomeBps, 'above'),
       exceedsPositively: positive(debt.debtToIncomeBps, settings.riskDebtToIncomeBps, 'above'),
       assumptions: {
-        formula: 'parcelas programadas do mês ÷ renda real do mês de referência',
+        formula: 'parcelas programadas do mês ÷ renda mensal típica da janela',
         parcelasDoMesCents: debt.scheduledCents,
-        rendaDoMesCents: debt.monthlyIncomeCents,
+        rendaMensalTipicaCents: debt.typicalMonthlyIncomeCents,
+        janelaDaRendaMeses: debt.incomeWindowMonths,
+        mesesComMovimentoNaJanela: debt.incomeSampleMonths,
         mesDeReferencia: debt.period,
         dividasAtivas: debt.debts.length,
       },
