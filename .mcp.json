@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "pierre-finance": {
+      "type": "http",
+      "url": "https://pierre.finance/mcp",
+      "headers": {
+        "Authorization": "Bearer ${PIERRE_API_KEY}"
+      }
+    }
+  }
+}
