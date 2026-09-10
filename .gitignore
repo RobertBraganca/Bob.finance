@@ -20,3 +20,10 @@ supabase/.branches/
 # Arquivo real de negociações de corretora (B3), sem uso pelo código —
 # não deve ir para o git. Ver auditoria de segurança pré-push.
 src/assets/negociacao-*.xlsx
+
+.vercel
+.env*
+
+# Chaves/segredos de MCP locais (ex. PIERRE_API_KEY referenciada por
+# ${VAR} em .mcp.json, que esse é seguro de versionar) — nunca o valor real.
+.claude/settings.local.json
