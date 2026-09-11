@@ -636,6 +636,7 @@ export async function insightsRoutes(app: FastifyInstance) {
         taxRateBps: z.number().int().min(0).max(10_000).optional(),
         reservePlannedCents: z.number().int().nonnegative().optional(),
         marginCents: z.number().int().nonnegative().optional(),
+        investmentPlannedCents: z.number().int().nonnegative().nullable().optional(),
       })
       // Corpo vazio ({}) travava o update do Drizzle com "No values to
       // set" (500 em vez de 400) — achado da avaliação de uso de

@@ -387,10 +387,16 @@ export function AssetClassRing({
   const theme = themeFor(useEffectiveSurface(surface))
   const mapped = slices
     .filter((s) => s.valueCents > 0)
-    .map((s) => ({
+    .map((s, index) => ({
       categoryId: null,
       name: s.label,
-      color: seriesColor(theme, s.assetClass),
+      // Índice da fatia, não a classe em si — `seriesColor` por chave de
+      // texto faz hash mod 4, e duas classes realmente presentes ao mesmo
+      // tempo (ex. "Ações" e "Caixa") podem cair no mesmo índice por
+      // coincidência de hash, pintando duas fatias distintas da MESMA cor
+      // na mesma rosca (achado de 09/09/2026). Por posição, a rosca nunca
+      // repete cor enquanto tiver até 4 fatias — o tamanho real da paleta.
+      color: seriesColor(theme, index),
       amountCents: s.valueCents,
       shareBps: s.actualBps,
       transactionCount: 0,

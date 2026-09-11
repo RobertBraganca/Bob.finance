@@ -4,6 +4,7 @@ import { cors } from 'hono/cors'
 import { z, ZodError } from 'zod'
 import { requireAdmin } from '../_shared/auth.ts'
 import { addMonths, periodBounds, todayIso } from '../_shared/core/dates.ts'
+import { friendlyErrorMessage } from '../_shared/core/errors.ts'
 import * as analytics from '../_shared/services/analytics.ts'
 import * as benchmarksService from '../_shared/services/benchmarks.ts'
 import * as cashFlowService from '../_shared/services/cashFlow.ts'
@@ -72,7 +73,7 @@ app.onError((error, c) => {
   // para PricingError.
   if (error instanceof partners.PartnerError) return c.json({ error: error.message }, 422)
   console.error(error)
-  return c.json({ error: error instanceof Error ? error.message : 'erro interno' }, 500)
+  return c.json({ error: friendlyErrorMessage(error) }, 500)
 })
 
 app.get('/meta', async (c) => {
@@ -578,6 +579,7 @@ app.put('/financial-engine/settings', async (c) => {
       taxRateBps: z.number().int().min(0).max(10_000).optional(),
       reservePlannedCents: z.number().int().nonnegative().optional(),
       marginCents: z.number().int().nonnegative().optional(),
+      investmentPlannedCents: z.number().int().nonnegative().nullable().optional(),
     })
     // Corpo vazio ({}) travava o update do Drizzle com "No values to
     // set" (500 em vez de 400) — achado da avaliação de uso de

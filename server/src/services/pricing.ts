@@ -334,7 +334,7 @@ export async function simulate(input: SimulateInput): Promise<Simulation> {
 /* ------------------------------------------------------------------ *
  * Quotes — the only thing that persists
  * ------------------------------------------------------------------ */
-export const QUOTE_STATUSES = ['draft', 'sent', 'in_review', 'needs_changes', 'rejected', 'approved'] as const
+export const QUOTE_STATUSES = ['draft', 'sent', 'in_review', 'needs_changes', 'paused', 'rejected', 'approved'] as const
 export type QuoteStatus = (typeof QUOTE_STATUSES)[number]
 
 export type QuoteRow = {
@@ -709,6 +709,7 @@ export async function quoteAnalytics(monthsBack = 12): Promise<QuoteAnalytics> {
     'sent',
     'in_review',
     'needs_changes',
+    'paused',
     'rejected',
     'approved',
   ]
@@ -748,7 +749,7 @@ export async function quoteAnalytics(monthsBack = 12): Promise<QuoteAnalytics> {
   // ---- 3. Funil cumulativo ----
   const naoRascunho = rows.filter((r) => r.status !== 'draft')
   const analisadas = rows.filter((r) =>
-    (['in_review', 'needs_changes', 'rejected', 'approved'] as QuoteStatus[]).includes(r.status),
+    (['in_review', 'needs_changes', 'paused', 'rejected', 'approved'] as QuoteStatus[]).includes(r.status),
   )
   const aprovadasTotal = rows.filter((r) => r.status === 'approved')
   const etapas: Array<{ key: string; label: string; count: number }> = [

@@ -124,6 +124,7 @@ export const quoteStatusEnum = pgEnum('quote_status', [
   'sent',
   'in_review',
   'needs_changes',
+  'paused',
   'rejected',
   'approved',
 ])
@@ -899,6 +900,15 @@ export const financialEngineSettings = pgTable(
     pfAccountId: int('pf_account_id').references(() => accounts.id, { onDelete: 'set null' }),
     /** overrides the derived pró-labore; null keeps deriving it from the ledger */
     proLaboreCents: int('pro_labore_cents'),
+    /**
+     * Overrides the "Investimento" destination's target in `availableForAllocation`
+     * (default: sum of active investment goals' monthly contribution). Added
+     * 09/09/2026: the goal-derived sum doesn't reflect what is actually
+     * investable this month, and can read as disproportionate against real
+     * income — the user asked for a manual number here, same "vazio deriva"
+     * shape as `proLaboreCents` above.
+     */
+    investmentPlannedCents: int('investment_planned_cents'),
     taxRateBps: int('tax_rate_bps').notNull().default(0),
     reservePlannedCents: int('reserve_planned_cents').notNull().default(0),
     marginCents: int('margin_cents').notNull().default(0),

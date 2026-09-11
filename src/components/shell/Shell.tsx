@@ -45,7 +45,6 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Planejar',
     items: [
       { to: '/saude', label: 'Saúde financeira', icon: 'sparkle' },
-      { to: '/motor', label: 'Motor financeiro', icon: 'gauge' },
       { to: '/precificacao', label: 'Precificação', icon: 'calculator' },
       { to: '/parceiros', label: 'Receita de parceiros', icon: 'banknote' },
       { to: '/metas', label: 'Metas do mês', icon: 'target' },

@@ -53,6 +53,13 @@ export type BreakEvenParams = {
   reservePlannedCents: number
   /** the margin the user wants on top of everything else */
   marginCents: number
+  /**
+   * Overrides the "Investimento" destination's target in
+   * `availableForAllocation` (default: soma do aporte mensal das metas
+   * ativas). `null` continua derivando das metas — a soma nem sempre
+   * reflete quanto dá pra investir de verdade no mês (achado de 09/09/2026).
+   */
+  investmentPlannedCents: number | null
 }
 
 export const DEFAULT_BREAK_EVEN_PARAMS: BreakEvenParams = {
@@ -62,6 +69,7 @@ export const DEFAULT_BREAK_EVEN_PARAMS: BreakEvenParams = {
   taxRateBps: 0,
   reservePlannedCents: 0,
   marginCents: 0,
+  investmentPlannedCents: null,
 }
 
 /** Where a parameter's value came from, reported alongside the result. */
@@ -77,6 +85,7 @@ export async function getSettings(): Promise<BreakEvenParams> {
     taxRateBps: row.taxRateBps,
     reservePlannedCents: row.reservePlannedCents,
     marginCents: row.marginCents,
+    investmentPlannedCents: row.investmentPlannedCents,
   }
 }
 
@@ -233,6 +242,7 @@ export async function availableForAllocation(
   // `listGoals` already returns only the active ones.
   const investmentGoals = await listGoals()
   const debt = await debtOverview({ period })
+  const settings = await getSettings()
 
   // O delta entra ANTES das subtrações, porque o que a hipótese muda é
   // quanto existe em conta, não quanto está comprometido.
@@ -245,7 +255,12 @@ export async function availableForAllocation(
   const availableCents =
     consolidatedBalanceCents - futureCommitmentsCents - provisionedCardBillCents - alreadyAllocatedCents
 
-  const investmentTargetCents = investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0)
+  const investmentGoalsTargetCents = investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0)
+  // Achado de 09/09/2026: a soma das metas ativas nem sempre reflete o que
+  // dá pra investir de verdade no mês (pode ficar desproporcional à renda
+  // real) — `investmentPlannedCents`, quando configurado, substitui a soma
+  // inteira, mesmo formato "vazio deriva" de `proLaboreCents`.
+  const investmentTargetCents = settings.investmentPlannedCents ?? investmentGoalsTargetCents
   const isCurrentPeriod = period === todayIso().slice(0, 7)
 
   const unorderedDestinations: Destination[] = [
@@ -274,11 +289,19 @@ export async function availableForAllocation(
       realizedCents: investmentRealizedCents,
       differenceCents: investmentTargetCents - investmentRealizedCents,
       state: targetState(investmentRealizedCents, investmentTargetCents, isCurrentPeriod),
-      assumptions: {
-        formula: 'meta = soma do aporte mensal das metas de investimento ativas; realizado = compras do período fora da reserva',
-        metasAtivas: investmentGoals.length,
-        origem: 'specs/investments (investment_goals)',
-      },
+      assumptions:
+        settings.investmentPlannedCents !== null
+          ? {
+              formula: 'meta = valor informado manualmente nos parâmetros; realizado = compras do período fora da reserva',
+              investimentoPlanejadoCents: settings.investmentPlannedCents,
+              somaDasMetasAtivasCents: investmentGoalsTargetCents,
+              origem: 'configurado nos parâmetros do motor financeiro',
+            }
+          : {
+              formula: 'meta = soma do aporte mensal das metas de investimento ativas; realizado = compras do período fora da reserva',
+              metasAtivas: investmentGoals.length,
+              origem: 'specs/investments (investment_goals)',
+            },
     },
     {
       key: 'debt',
@@ -400,16 +423,21 @@ export async function yearlyDestinationsProgress(year: string): Promise<YearlyDe
     perMonth.push({ investedCents, reserveCents, debtPaid, scheduledCents: debt.scheduledCents })
   }
 
-  const [investmentGoals, reserve] = await Promise.all([
+  const [investmentGoals, reserve, settings] = await Promise.all([
     listGoals(),
     reserveStatus(),
+    getSettings(),
   ])
 
   const investmentRealizedCents = perMonth.reduce((sum, m) => sum + m.investedCents, 0)
   const reserveRealizedCents = perMonth.reduce((sum, m) => sum + m.reserveCents, 0)
   const debtRealizedCents = perMonth.reduce((sum, m) => sum + m.debtPaid, 0)
   const debtTargetCents = perMonth.reduce((sum, m) => sum + m.scheduledCents, 0)
-  const investmentTargetCents = investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0) * monthsElapsed
+  // Mesmo override de `availableForAllocation`: um valor mensal planejado
+  // substitui a soma das metas, cada mês do ano decorrido pesando igual.
+  const investmentMonthlyTargetCents =
+    settings.investmentPlannedCents ?? investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0)
+  const investmentTargetCents = investmentMonthlyTargetCents * monthsElapsed
 
   return {
     year,
@@ -592,7 +620,8 @@ export async function breakEven(
     reserveStatus(),
   ])
   const proLabore = await proLaboreFor(period, params, origins.proLaboreCents)
-  const plannedInvestmentCents = investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0)
+  const investmentGoalsTargetCents = investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0)
+  const plannedInvestmentCents = params.investmentPlannedCents ?? investmentGoalsTargetCents
 
   const lines: BreakEvenLine[] = [
     {
@@ -616,11 +645,19 @@ export async function breakEven(
       key: 'planned_investment',
       label: 'Investimento planejado',
       amountCents: plannedInvestmentCents,
-      assumptions: {
-        formula: 'soma do aporte mensal das metas de investimento ativas',
-        metasAtivas: investmentGoals.length,
-        origem: 'specs/investments (investment_goals)',
-      },
+      assumptions:
+        params.investmentPlannedCents !== null
+          ? {
+              formula: 'valor informado manualmente nos parâmetros do motor financeiro',
+              investimentoPlanejadoCents: params.investmentPlannedCents,
+              somaDasMetasAtivasCents: investmentGoalsTargetCents,
+              origem: 'configurado nos parâmetros do motor financeiro',
+            }
+          : {
+              formula: 'soma do aporte mensal das metas de investimento ativas',
+              metasAtivas: investmentGoals.length,
+              origem: 'specs/investments (investment_goals)',
+            },
     },
     {
       key: 'planned_reserve',

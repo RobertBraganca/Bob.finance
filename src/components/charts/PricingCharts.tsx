@@ -5,6 +5,14 @@ import { useEffectiveSurface } from '../../lib/theme'
 import { ChartFrame, makeTooltip } from './frame'
 import { CategoryRing, type Slice } from './CategoryRing'
 
+export type QuoteFunnelStage = {
+  key: string
+  label: string
+  count: number
+  shareBps: number
+  dropFromPreviousCount: number
+}
+
 export type QuoteStatusSlice = {
   status: string
   count: number
@@ -44,11 +52,15 @@ const STATUS_COLOR: Record<string, string> = {
   sent: 'var(--seq-450)',
   in_review: 'var(--seq-600)',
   needs_changes: 'var(--status-warning)',
+  // Pausada não é veredito nem etapa do caminho de aprovação — é o
+  // caminho simplesmente parado. Fecha a rampa sequencial (mais escuro
+  // que in_review), em vez de brigar por um hue reservado que não é dela.
+  paused: 'var(--seq-700)',
   rejected: 'var(--status-critical)',
   approved: 'var(--status-good)',
 }
 
-const STATUS_ORDER = ['draft', 'sent', 'in_review', 'needs_changes', 'rejected', 'approved']
+const STATUS_ORDER = ['draft', 'sent', 'in_review', 'needs_changes', 'paused', 'rejected', 'approved']
 
 /**
  * Rosca de cotações por status, sobre o mesmo componente de anel que
@@ -194,6 +206,75 @@ export function QuoteSentVsApprovedChart({
           <Bar dataKey="approvedCents" name="Aprovado" fill={theme.expense} radius={MARK.barRadius} />
         </BarChart>
       </ResponsiveContainer>
+    </ChartFrame>
+  )
+}
+
+/**
+ * Funil de propostas: Criadas -> Enviadas -> Em análise ou além -> Aprovadas.
+ * `services/pricing.ts#quoteAnalytics` já calcula essas 4 etapas por
+ * inferência de status (não existe log de transição) desde sempre — só
+ * nunca tinha um lugar na tela (achado de 09/09/2026, ao reorganizar
+ * Precificação). Barra à mão, não Recharts: sem eixo/grade/tooltip
+ * cartesiano para justificar a biblioteca, mesma linha de `SpendingHeatmap`.
+ */
+export function QuoteFunnelChart({ stages, surface = 'paper' }: { stages: QuoteFunnelStage[]; surface?: Surface }) {
+  const theme = themeFor(useEffectiveSurface(surface))
+  const hasData = stages.some((s) => s.count > 0)
+  const maxCount = Math.max(1, ...stages.map((s) => s.count))
+
+  return (
+    <ChartFrame
+      isEmpty={!hasData}
+      emptyTitle="Nenhuma cotação ainda"
+      emptyBody="Salve uma cotação para o funil aparecer aqui."
+      table={{
+        caption: 'Cotações por etapa do funil',
+        rows: stages,
+        columns: [
+          { header: 'Etapa', value: (row) => row.label },
+          { header: 'Cotações', value: (row) => String(row.count), align: 'right' },
+          { header: 'Participação', value: (row) => bps(row.shareBps, 0), align: 'right' },
+          { header: 'Queda desde a etapa anterior', value: (row) => String(row.dropFromPreviousCount), align: 'right' },
+        ],
+      }}
+      note="Etapas inferidas do status atual de cada cotação, não de um histórico de transições — uma cotação que já foi rejeitada e depois reaprovada conta como aprovada, não como reprovada no caminho."
+    >
+      <div className="stack stack--tight">
+        {stages.map((stage, i) => (
+          <div key={stage.key} className="stack" style={{ gap: 4 }}>
+            <div className="row row--between" style={{ fontSize: 'var(--text-sm)' }}>
+              <span>{stage.label}</span>
+              <span className="tabular">
+                <strong>{stage.count}</strong>
+                <span className="muted"> · {bps(stage.shareBps, 0)}</span>
+              </span>
+            </div>
+            <div
+              style={{
+                height: 10,
+                borderRadius: 999,
+                background: 'var(--surface-muted)',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${maxCount > 0 ? (stage.count / maxCount) * 100 : 0}%`,
+                  background: theme.primary,
+                  borderRadius: 999,
+                }}
+              />
+            </div>
+            {i > 0 && stage.dropFromPreviousCount > 0 && (
+              <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                {stage.dropFromPreviousCount} não passaram desta etapa
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
     </ChartFrame>
   )
 }
