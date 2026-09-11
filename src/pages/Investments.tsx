@@ -55,11 +55,12 @@ import { ProfitabilityChart } from '../components/charts/ProfitabilityChart'
 import { DateRangePopover } from '../components/ui/DateRangePopover'
 import { GoalModal, type Goal, type Projection } from '../components/ui/GoalModal'
 import { AposentadoriaTab } from './Aposentadoria'
+import { ProventosTab } from './Proventos'
 
 /** Only these classes trade on B3 the way BRAPI understands — mirrors the server's set. */
 const QUOTABLE_CLASSES = new Set(['stocks', 'fii'])
 
-type Position = {
+export type Position = {
   assetId: number
   name: string
   ticker: string | null
@@ -99,9 +100,9 @@ type PortfolioResponse = {
 }
 
 export function InvestmentsPage() {
-  const [tab, setTab] = useState<'portfolio' | 'contribute' | 'goals' | 'profitability' | 'ledger' | 'retirement'>(
-    'portfolio',
-  )
+  const [tab, setTab] = useState<
+    'portfolio' | 'contribute' | 'goals' | 'profitability' | 'ledger' | 'proventos' | 'retirement'
+  >('portfolio')
   const [assetModal, setAssetModal] = useState(false)
   const [tradeModal, setTradeModal] = useState(false)
   const [tradePreset, setTradePreset] = useState<string | null>(null)
@@ -150,6 +151,7 @@ export function InvestmentsPage() {
             { value: 'portfolio', label: 'Carteira' },
             { value: 'contribute', label: 'Aportar' },
             { value: 'ledger', label: 'Lançamentos' },
+            { value: 'proventos', label: 'Proventos' },
             { value: 'goals', label: `Metas (${data?.goals.length ?? 0})` },
             { value: 'profitability', label: 'Rentabilidade' },
             { value: 'retirement', label: 'Aposentadoria' },
@@ -197,6 +199,8 @@ export function InvestmentsPage() {
           <ContributionPlanner goals={data.goals} />
         ) : tab === 'ledger' ? (
           <LedgerTab positions={data.positions} allocation={data.allocation} />
+        ) : tab === 'proventos' ? (
+          <ProventosTab positions={data.positions} classes={data.assetClasses} />
         ) : tab === 'profitability' ? (
           <ProfitabilityTab />
         ) : tab === 'retirement' ? (
@@ -1276,9 +1280,13 @@ type TradeRow = {
   quantity: number
   unitPriceCents: number
   feesCents: number
+  dividendType: string | null
+  exDate: string | null
 }
 
 const TRADE_KIND_LABEL: Record<string, string> = { buy: 'Compra', sell: 'Venda', dividend: 'Provento' }
+/** JSCP tem 15% retido na fonte; Dividendos são isentos — só se aplica a lançamentos kind='dividend'. */
+export const DIVIDEND_TYPE_LABEL: Record<string, string> = { dividendo: 'Dividendos', jscp: 'JSCP' }
 
 /**
  * Aba "Lançamentos": tabela dedicada de `assetTrades` (compra/venda/provento
@@ -1363,6 +1371,8 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
                   <th>Data</th>
                   <th>Ativo</th>
                   <th>Tipo</th>
+                  <th>Tipo de provento</th>
+                  <th>Data Com</th>
                   <th className="table__num">Qtd.</th>
                   <th className="table__num">Preço</th>
                   <th className="table__num">Taxas</th>
@@ -1375,6 +1385,10 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
                     <td>{fmtDate(t.tradedOn)}</td>
                     <td>{t.assetName}</td>
                     <td className="muted">{TRADE_KIND_LABEL[t.kind] ?? t.kind}</td>
+                    <td className="muted">
+                      {t.kind !== 'dividend' ? '-' : (DIVIDEND_TYPE_LABEL[t.dividendType ?? ''] ?? 'Não informado')}
+                    </td>
+                    <td className="muted">{t.kind === 'dividend' && t.exDate ? fmtDate(t.exDate) : '-'}</td>
                     <td className="table__num">{fmtQuantity(t.quantity)}</td>
                     <td className="table__num">{money(t.unitPriceCents)}</td>
                     <td className="table__num">{money(t.feesCents)}</td>
@@ -1526,6 +1540,8 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
   const [quantity, setQuantity] = useState(fmtQuantity(trade.quantity))
   const [price, setPrice] = useState(centsToInput(trade.unitPriceCents))
   const [fees, setFees] = useState(centsToInput(trade.feesCents))
+  const [dividendType, setDividendType] = useState<string | null>(trade.dividendType)
+  const [exDate, setExDate] = useState(trade.exDate ?? '')
 
   const priceCents = parseMoneyInput(price)
   const feesCents = parseMoneyInput(fees)
@@ -1541,12 +1557,15 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
       const qty = Number(quantity.replace(',', '.'))
       if (unitPriceCents === null) throw new Error('informe o preço')
       if (!Number.isFinite(qty) || qty <= 0) throw new Error('informe a quantidade')
+      if (kind === 'dividend' && dividendType === null) throw new Error('selecione o tipo de provento')
       return api.patch(`/investments/trades/${trade.id}`, {
         kind,
         tradedOn,
         quantity: qty,
         unitPriceCents: Math.abs(unitPriceCents),
         feesCents: Math.abs(parseMoneyInput(fees) ?? 0),
+        dividendType: kind === 'dividend' ? dividendType : null,
+        exDate: kind === 'dividend' && exDate.trim() !== '' ? exDate : null,
       })
     },
     onSuccess: () => {
@@ -1577,7 +1596,7 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Data da transação</label>
+            <label className="field__label">{kind === 'dividend' ? 'Data de pagamento' : 'Data da transação'}</label>
             <TextInput value={tradedOn} onChange={setTradedOn} type="date" />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 130 }}>
@@ -1585,6 +1604,28 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
             <TextInput value={quantity} onChange={setQuantity} numeral />
           </div>
         </div>
+
+        {kind === 'dividend' && (
+          <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Tipo de provento</label>
+              <Select
+                value={dividendType}
+                placeholder="Selecione"
+                options={[
+                  { value: 'dividendo', label: 'Dividendos' },
+                  { value: 'jscp', label: 'JSCP' },
+                ]}
+                onChange={setDividendType}
+              />
+              <span className="field__hint">JSCP tem 15% retido na fonte; Dividendos são isentos</span>
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Data Com (opcional)</label>
+              <TextInput value={exDate} onChange={setExDate} type="date" />
+            </div>
+          </div>
+        )}
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
@@ -2090,26 +2131,30 @@ function TradeKindToggle({ kind, onChange }: { kind: string; onChange: (kind: st
   )
 }
 
-function TradeModal({
+export function TradeModal({
   classes,
   positions,
   initialAssetClass,
+  initialKind,
   onClose,
 }: {
   classes: Array<{ value: string; label: string }>
   positions: Position[]
   initialAssetClass?: string | null
+  initialKind?: string
   onClose: () => void
 }) {
   const toast = useToast()
   const queryClient = useQueryClient()
-  const [kind, setKind] = useState('buy')
+  const [kind, setKind] = useState(initialKind ?? 'buy')
   const [assetClass, setAssetClass] = useState<string | null>(initialAssetClass ?? null)
   const [assetId, setAssetId] = useState<number | null>(null)
   const [tradedOn, setTradedOn] = useState(() => new Date().toISOString().slice(0, 10))
   const [quantity, setQuantity] = useState('1')
   const [price, setPrice] = useState('')
   const [fees, setFees] = useState('')
+  const [dividendType, setDividendType] = useState<string | null>(null)
+  const [exDate, setExDate] = useState('')
 
   const availableAssets = assetClass === null ? [] : positions.filter((p) => p.assetClass === assetClass)
   const quantityCents = Number(quantity.replace(',', '.'))
@@ -2127,6 +2172,7 @@ function TradeModal({
       if (assetId === null) throw new Error('escolha o ativo')
       if (unitPriceCents === null) throw new Error('informe o preço')
       if (!Number.isFinite(qty) || qty <= 0) throw new Error('informe a quantidade')
+      if (kind === 'dividend' && dividendType === null) throw new Error('selecione o tipo de provento')
       return api.post('/investments/trades', {
         assetId,
         kind,
@@ -2134,6 +2180,8 @@ function TradeModal({
         quantity: qty,
         unitPriceCents: Math.abs(unitPriceCents),
         feesCents: Math.abs(parseMoneyInput(fees) ?? 0),
+        dividendType: kind === 'dividend' ? dividendType : null,
+        exDate: kind === 'dividend' && exDate.trim() !== '' ? exDate : null,
       })
     },
     onSuccess: () => {
@@ -2195,7 +2243,7 @@ function TradeModal({
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Data da transação</label>
+            <label className="field__label">{kind === 'dividend' ? 'Data de pagamento' : 'Data da transação'}</label>
             <TextInput value={tradedOn} onChange={setTradedOn} type="date" />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 130 }}>
@@ -2203,6 +2251,28 @@ function TradeModal({
             <TextInput value={quantity} onChange={setQuantity} numeral />
           </div>
         </div>
+
+        {kind === 'dividend' && (
+          <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Tipo de provento</label>
+              <Select
+                value={dividendType}
+                placeholder="Selecione"
+                options={[
+                  { value: 'dividendo', label: 'Dividendos' },
+                  { value: 'jscp', label: 'JSCP' },
+                ]}
+                onChange={setDividendType}
+              />
+              <span className="field__hint">JSCP tem 15% retido na fonte; Dividendos são isentos</span>
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Data Com (opcional)</label>
+              <TextInput value={exDate} onChange={setExDate} type="date" />
+            </div>
+          </div>
+        )}
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
