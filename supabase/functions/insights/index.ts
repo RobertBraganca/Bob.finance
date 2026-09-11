@@ -4,6 +4,7 @@ import { cors } from 'hono/cors'
 import { z, ZodError } from 'zod'
 import { requireAdmin } from '../_shared/auth.ts'
 import { addMonths, periodBounds, todayIso } from '../_shared/core/dates.ts'
+import { friendlyErrorMessage } from '../_shared/core/errors.ts'
 import * as analytics from '../_shared/services/analytics.ts'
 import * as benchmarksService from '../_shared/services/benchmarks.ts'
 import * as cashFlowService from '../_shared/services/cashFlow.ts'
@@ -72,7 +73,7 @@ app.onError((error, c) => {
   // para PricingError.
   if (error instanceof partners.PartnerError) return c.json({ error: error.message }, 422)
   console.error(error)
-  return c.json({ error: error instanceof Error ? error.message : 'erro interno' }, 500)
+  return c.json({ error: friendlyErrorMessage(error) }, 500)
 })
 
 app.get('/meta', async (c) => {
@@ -578,6 +579,7 @@ app.put('/financial-engine/settings', async (c) => {
       taxRateBps: z.number().int().min(0).max(10_000).optional(),
       reservePlannedCents: z.number().int().nonnegative().optional(),
       marginCents: z.number().int().nonnegative().optional(),
+      investmentPlannedCents: z.number().int().nonnegative().nullable().optional(),
     })
     // Corpo vazio ({}) travava o update do Drizzle com "No values to
     // set" (500 em vez de 400) — achado da avaliação de uso de
@@ -678,6 +680,8 @@ app.post('/investments/trades', async (c) => {
       quantity: z.number().positive(),
       unitPriceCents: z.number().int().nonnegative(),
       feesCents: z.number().int().nonnegative().default(0),
+      dividendType: z.enum(['dividendo', 'jscp']).nullable().optional(),
+      exDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
     })
     .parse(await c.req.json())
   return c.json(await investments.createTrade(body))
@@ -693,6 +697,8 @@ app.patch('/investments/trades/:id', async (c) => {
       quantity: z.number().positive().optional(),
       unitPriceCents: z.number().int().nonnegative().optional(),
       feesCents: z.number().int().nonnegative().optional(),
+      dividendType: z.enum(['dividendo', 'jscp']).nullable().optional(),
+      exDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
     })
     .parse(await c.req.json())
   return c.json(await investments.updateTrade(id, body))
@@ -870,6 +876,72 @@ app.put('/investments/reserve', async (c) => {
     })
     .parse(await c.req.json())
   return c.json(await investments.setReserveSettings(body))
+})
+
+/* ---------------------------------------------------------------- *
+ * Proventos (dividendos e JSCP): tudo derivado de asset_trades
+ * (kind='dividend'), zero rota nova de escrita — o lançamento continua
+ * sendo POST/PATCH /investments/trades.
+ * ---------------------------------------------------------------- */
+// Sem GET separado: a meta já viaja embutida em `/investments/proventos/resumo`
+// (`monthlyTargetCents`/`progressBps`) — não existe uma tela que só precise
+// do valor cru da meta sem o resto do resumo.
+app.put('/investments/passive-income-settings', async (c) => {
+  const body = z.object({ monthlyTargetCents: z.number().int().nonnegative().nullable() }).parse(await c.req.json())
+  return c.json(await investments.setProventosSettings(body))
+})
+
+app.get('/investments/proventos/resumo', async (c) => c.json(await investments.proventosResumo()))
+
+app.get('/investments/proventos/evolucao', async (c) => {
+  const query = z
+    .object({
+      months: z.coerce.number().int().positive().max(1200).optional(),
+      granularity: z.enum(['monthly', 'annual']).default('monthly'),
+      assetClass: z.enum(investments.ASSET_CLASSES).optional(),
+      assetId: z.coerce.number().int().positive().optional(),
+    })
+    .parse(c.req.query())
+  return c.json({
+    evolucao: await investments.proventosEvolucao({
+      months: query.months,
+      granularity: query.granularity,
+      assetClass: query.assetClass ?? null,
+      assetId: query.assetId ?? null,
+    }),
+  })
+})
+
+app.get('/investments/proventos/historico', async (c) => {
+  const query = z
+    .object({
+      assetClass: z.enum(investments.ASSET_CLASSES).optional(),
+      assetId: z.coerce.number().int().positive().optional(),
+    })
+    .parse(c.req.query())
+  return c.json({
+    historico: await investments.proventosHistorico({
+      assetClass: query.assetClass ?? null,
+      assetId: query.assetId ?? null,
+    }),
+  })
+})
+
+app.get('/investments/proventos', async (c) => {
+  const query = z
+    .object({
+      year: z.string().regex(/^\d{4}$/).optional(),
+      assetClass: z.enum(investments.ASSET_CLASSES).optional(),
+      assetId: z.coerce.number().int().positive().optional(),
+    })
+    .parse(c.req.query())
+  return c.json({
+    proventos: await investments.listProventos({
+      year: query.year ?? null,
+      assetClass: query.assetClass ?? null,
+      assetId: query.assetId ?? null,
+    }),
+  })
 })
 
 app.post('/investments/reserve/contribute', async (c) => {

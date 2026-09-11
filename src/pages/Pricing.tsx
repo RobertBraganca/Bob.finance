@@ -2,8 +2,10 @@ import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import {
+  QuoteFunnelChart,
   QuoteSentVsApprovedChart,
   QuoteStatusRing,
+  type QuoteFunnelStage,
   type QuotePeriodPoint,
   type QuoteStatusSlice,
 } from '../components/charts/PricingCharts'
@@ -35,7 +37,7 @@ import {
 } from '../components/ui'
 import { PageHeader } from '../components/shell/Shell'
 
-const QUOTE_STATUSES = ['draft', 'sent', 'in_review', 'needs_changes', 'rejected', 'approved'] as const
+const QUOTE_STATUSES = ['draft', 'sent', 'in_review', 'needs_changes', 'paused', 'rejected', 'approved'] as const
 type QuoteStatus = (typeof QUOTE_STATUSES)[number]
 
 /** Tom da pill de status: aprovada é o único desfecho bom, rejeitada o único ruim; o resto é caminho, não veredito. */
@@ -44,6 +46,7 @@ const QUOTE_STATUS_TONE: Record<QuoteStatus, 'good' | 'warning' | 'critical' | '
   sent: 'neutral',
   in_review: 'neutral',
   needs_changes: 'warning',
+  paused: 'neutral',
   rejected: 'critical',
   approved: 'good',
 }
@@ -53,6 +56,7 @@ const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
   sent: 'Enviada',
   in_review: 'Em revisão',
   needs_changes: 'Em ajuste',
+  paused: 'Pausada',
   rejected: 'Reprovada',
   approved: 'Aprovada',
 }
@@ -127,7 +131,8 @@ type PricingSettings = { availableHoursPerMonth: number; billablePercentageBps: 
 type DirectCostDraft = { label: string; value: string }
 
 export function PricingPage() {
-  const [tab, setTab] = useState<'simular' | 'historico' | 'parametros'>('simular')
+  const [tab, setTab] = useState<'negocios' | 'parametros'>('negocios')
+  const [simulating, setSimulating] = useState(false)
 
   return (
     <>
@@ -135,22 +140,40 @@ export function PricingPage() {
         title="Precificação"
         subtitle="Quanto cobrar por um projeto, a partir do seu próprio custo de operar"
         actions={
-          <Segmented
-            ariaLabel="Seção"
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: 'simular', label: 'Simular' },
-              { value: 'historico', label: 'Histórico' },
-              { value: 'parametros', label: 'Parâmetros' },
-            ]}
-          />
+          <div className="row" style={{ gap: 'var(--sp-2)' }}>
+            <Segmented
+              ariaLabel="Seção"
+              value={tab}
+              onChange={setTab}
+              options={[
+                { value: 'negocios', label: 'Negócios' },
+                { value: 'parametros', label: 'Parâmetros' },
+              ]}
+            />
+            <Button variant="primary" icon="plus" onClick={() => setSimulating(true)}>
+              Nova cotação
+            </Button>
+          </div>
         }
       />
-      <div className="page">
-        {tab === 'simular' ? <SimulateTab /> : tab === 'historico' ? <QuotesTab /> : <ParamsTab />}
-      </div>
+      <div className="page">{tab === 'negocios' ? <QuotesTab /> : <ParamsTab />}</div>
+      {simulating && <SimulateModal onClose={() => setSimulating(false)} />}
     </>
+  )
+}
+
+/**
+ * A simulação inteira (`SimulateTab`, mesmo componente de sempre) dentro de
+ * um modal em vez de ocupar uma aba própria — pedido do usuário de
+ * 09/09/2026 ("a parte de simulação de projeto vira um botão de
+ * simulação"). `SimulateTab` não muda nada por dentro: o modal só dá a
+ * moldura (título, fechar) em volta do mesmo Bento de sempre.
+ */
+function SimulateModal({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal title="Nova cotação" onClose={onClose} wide>
+      <SimulateTab />
+    </Modal>
   )
 }
 
@@ -508,6 +531,7 @@ function QuotesTab() {
       api.get<{
         byStatus: QuoteStatusSlice[]
         byPeriod: QuotePeriodPoint[]
+        funnel: QuoteFunnelStage[]
         totalCount: number
         assumptions: Record<string, unknown>
       }>('/pricing/quotes/analytics'),
@@ -538,6 +562,24 @@ function QuotesTab() {
 
   return (
     <Bento>
+      {/*
+        Funil primeiro, span inteiro: é o resumo mais "de cima" da tela —
+        quantas cotações avançam de etapa em etapa — antes de entrar nos
+        dois cards de meia largura (por status, por mês) e na lista em si.
+        Dado que `quoteAnalytics` já calculava e a UI nunca mostrava
+        (achado de 09/09/2026, ao reorganizar Precificação em painel de
+        negócios).
+      */}
+      <Card span={12} title="Funil de propostas" subtitle="Quantas cotações avançam de etapa em etapa" assumptions={analytics.data?.assumptions}>
+        {analytics.isError ? (
+          <EmptyState icon="alert" title="Falha ao carregar" body="Não foi possível carregar o funil agora." />
+        ) : !analytics.data ? (
+          <SkeletonLines lines={4} />
+        ) : (
+          <QuoteFunnelChart stages={analytics.data.funnel} surface="paper" />
+        )}
+      </Card>
+
       {/*
         Os dois cards de resumo vêm ANTES da tabela: o card de detalhe é a
         lista, e uma tela se lê do agregado para o item. Os dois em meia

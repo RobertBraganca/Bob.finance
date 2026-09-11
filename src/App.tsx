@@ -30,9 +30,6 @@ const PatrimonioPage = lazy(() => import('./pages/Patrimonio').then((m) => ({ de
 const FinancialHealthPage = lazy(() =>
   import('./pages/FinancialHealth').then((m) => ({ default: m.FinancialHealthPage })),
 )
-const FinancialEnginePage = lazy(() =>
-  import('./pages/FinancialEngine').then((m) => ({ default: m.FinancialEnginePage })),
-)
 const PricingPage = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.PricingPage })))
 const PartnersPage = lazy(() => import('./pages/Partners').then((m) => ({ default: m.PartnersPage })))
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })))
@@ -88,7 +85,6 @@ const FEATURE_BY_PATH: Record<string, string> = {
   '/investimentos': 'investments',
   '/patrimonio': 'patrimonio',
   '/saude': 'financial-health',
-  '/motor': 'financial-engine',
   '/precificacao': 'pricing',
   '/parceiros': 'partners',
   '/importar': 'import',
@@ -137,7 +133,6 @@ export function App() {
               <Route path="/investimentos" element={<InvestmentsPage />} />
               <Route path="/patrimonio" element={<PatrimonioPage />} />
               <Route path="/saude" element={<FinancialHealthPage />} />
-              <Route path="/motor" element={<FinancialEnginePage />} />
               <Route path="/precificacao" element={<PricingPage />} />
               <Route path="/parceiros" element={<PartnersPage />} />
               <Route path="/importar" element={<ImportPage />} />
@@ -147,6 +142,7 @@ export function App() {
                   não tinha o link salvo com o hash da aba nova. */}
               <Route path="/parcelamentos" element={<Navigate to="/lancamentos" replace />} />
               <Route path="/aposentadoria" element={<Navigate to="/investimentos" replace />} />
+              <Route path="/motor" element={<Navigate to="/saude" replace />} />
             </Routes>
           </Suspense>
         </div>

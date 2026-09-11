@@ -11,6 +11,7 @@ import * as categoriesService from '../_shared/services/categories.ts'
 import * as categorization from '../_shared/services/categorization.ts'
 import * as importsService from '../_shared/services/imports.ts'
 import * as txnService from '../_shared/services/transactions.ts'
+import { friendlyErrorMessage } from '../_shared/core/errors.ts'
 
 /**
  * Porta de server/src/routes/ledger.ts (Fastify) para Hono/Deno.Serve —
@@ -29,7 +30,7 @@ app.use('*', requireAdmin)
 app.onError((error, c) => {
   if (error instanceof ZodError) return c.json({ error: 'dados inválidos', issues: error.issues }, 400)
   console.error(error)
-  return c.json({ error: error instanceof Error ? error.message : 'erro interno' }, 500)
+  return c.json({ error: friendlyErrorMessage(error) }, 500)
 })
 
 /* ---------------------------------------------------------------- *

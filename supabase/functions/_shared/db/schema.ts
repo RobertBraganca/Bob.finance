@@ -104,6 +104,8 @@ export const assetClassKindEnum = pgEnum('asset_class_kind', [
 ])
 export const forecastKindEnum = pgEnum('forecast_kind', ['recurring', 'installment', 'single'])
 export const tradeKindEnum = pgEnum('trade_kind', ['buy', 'sell', 'dividend'])
+/** Tributação diferente: JSCP tem 15% retido na fonte, Dividendos são isentos. Só se aplica a kind='dividend'. */
+export const dividendTypeEnum = pgEnum('dividend_type', ['dividendo', 'jscp'])
 export const benchmarkCodeEnum = pgEnum('benchmark_code', ['CDI', 'IPCA', 'IBOV', 'IFIX', 'SMLL', 'IDIV', 'IVVB11'])
 export const benchmarkSourceEnum = pgEnum('benchmark_source', ['bcb', 'brapi_etf'])
 export const investmentGoalPurposeEnum = pgEnum('investment_goal_purpose', [
@@ -124,6 +126,7 @@ export const quoteStatusEnum = pgEnum('quote_status', [
   'sent',
   'in_review',
   'needs_changes',
+  'paused',
   'rejected',
   'approved',
 ])
@@ -629,6 +632,16 @@ export const emergencyReserveSettings = pgTable(
   () => [check('emergency_reserve_settings_singleton', sql`id = 1`)],
 )
 
+/** Meta mensal de proventos (dividendos/JSCP), comparada contra o total pago dos últimos 12 meses. Null = sem meta configurada. */
+export const passiveIncomeSettings = pgTable(
+  'passive_income_settings',
+  {
+    id: singletonId(),
+    monthlyTargetCents: int('monthly_target_cents'),
+  },
+  () => [check('passive_income_settings_singleton', sql`id = 1`)],
+)
+
 /**
  * A recurring retainer or an already-agreed installment deal — the
  * template that materializes real rows into `transactions` (pending =
@@ -745,6 +758,10 @@ export const assetTrades = pgTable(
     quantity: doublePrecision('quantity').notNull().default(0),
     unitPriceCents: int('unit_price_cents').notNull().default(0),
     feesCents: int('fees_cents').notNull().default(0),
+    /** Só para kind='dividend': decide a tributação (JSCP 15% retido, Dividendos isento). Null para buy/sell. */
+    dividendType: dividendTypeEnum('dividend_type'),
+    /** "Data Com" — data-limite pra ter direito ao provento. Opcional mesmo para dividend. */
+    exDate: text('ex_date'),
     createdAt: text('created_at').notNull().default(now),
   },
   (t) => [index('asset_trades_asset_idx').on(t.assetId, t.tradedOn)],
@@ -899,6 +916,15 @@ export const financialEngineSettings = pgTable(
     pfAccountId: int('pf_account_id').references(() => accounts.id, { onDelete: 'set null' }),
     /** overrides the derived pró-labore; null keeps deriving it from the ledger */
     proLaboreCents: int('pro_labore_cents'),
+    /**
+     * Overrides the "Investimento" destination's target in `availableForAllocation`
+     * (default: sum of active investment goals' monthly contribution). Added
+     * 09/09/2026: the goal-derived sum doesn't reflect what is actually
+     * investable this month, and can read as disproportionate against real
+     * income — the user asked for a manual number here, same "vazio deriva"
+     * shape as `proLaboreCents` above.
+     */
+    investmentPlannedCents: int('investment_planned_cents'),
     taxRateBps: int('tax_rate_bps').notNull().default(0),
     reservePlannedCents: int('reserve_planned_cents').notNull().default(0),
     marginCents: int('margin_cents').notNull().default(0),

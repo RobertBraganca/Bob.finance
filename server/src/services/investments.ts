@@ -6,6 +6,7 @@ import {
   assets,
   emergencyReserveSettings,
   investmentGoals,
+  passiveIncomeSettings,
   targetAllocations,
 } from '../db/schema'
 import { addDays, addMonths, periodBounds, periodOf, periodRange, todayIso } from '../core/dates'
@@ -67,6 +68,7 @@ export const ALLOCATABLE_ASSET_CLASSES = ASSET_CLASSES.filter(
 
 type AssetClass = (typeof assets.$inferSelect)['assetClass']
 type TradeKind = (typeof assetTrades.$inferSelect)['kind']
+type DividendType = (typeof assetTrades.$inferSelect)['dividendType']
 type GoalPurpose = (typeof investmentGoals.$inferSelect)['purpose']
 
 export const ASSET_CLASS_LABELS: Record<string, string> = {
@@ -1594,6 +1596,8 @@ export async function listTrades(assetId?: number) {
       quantity: assetTrades.quantity,
       unitPriceCents: assetTrades.unitPriceCents,
       feesCents: assetTrades.feesCents,
+      dividendType: assetTrades.dividendType,
+      exDate: assetTrades.exDate,
     })
     .from(assetTrades)
     .innerJoin(assets, eq(assets.id, assetTrades.assetId))
@@ -1608,11 +1612,17 @@ export async function createTrade(input: {
   quantity: number
   unitPriceCents: number
   feesCents?: number
+  dividendType?: string | null
+  exDate?: string | null
 }) {
   return (
     await db
       .insert(assetTrades)
-      .values({ ...input, kind: input.kind as TradeKind | undefined })
+      .values({
+        ...input,
+        kind: input.kind as TradeKind | undefined,
+        dividendType: input.dividendType as DividendType | undefined,
+      })
       .returning()
   )[0]!
 }
@@ -1627,13 +1637,19 @@ export async function updateTrade(
     quantity?: number
     unitPriceCents?: number
     feesCents?: number
+    dividendType?: string | null
+    exDate?: string | null
   },
 ) {
   return (
     (
       await db
         .update(assetTrades)
-        .set({ ...patch, kind: patch.kind as TradeKind | undefined })
+        .set({
+          ...patch,
+          kind: patch.kind as TradeKind | undefined,
+          dividendType: patch.dividendType as DividendType | undefined,
+        })
         .where(eq(assetTrades.id, id))
         .returning()
     )[0] ?? null
@@ -1642,6 +1658,227 @@ export async function updateTrade(
 
 export async function deleteTrade(id: number) {
   return { removed: (await db.delete(assetTrades).where(eq(assetTrades.id, id))).count }
+}
+
+/* ------------------------------------------------------------------ *
+ * Proventos: dividendos e JSCP, pagos ou a receber — tudo derivado de
+ * asset_trades (kind='dividend'), nunca uma tabela separada.
+ * ------------------------------------------------------------------ */
+
+/**
+ * "Pago" quando a data de pagamento já passou (ou é hoje), "a_receber"
+ * quando é futura — a mesma regra em toda leitura de proventos, nunca
+ * duplicada com uma nuance diferente. É também o que HABILITA lançar um
+ * provento já anunciado mas ainda não pago: basta a data de pagamento ser
+ * futura. Função (não const): `todayIso()` precisa ser reavaliado a cada
+ * chamada, o processo não reinicia todo dia.
+ */
+const proventoStatusExpr = () => sql`case when t.traded_on <= ${todayIso()} then 'pago' else 'a_receber' end`
+
+/** 15% retido na fonte só em JSCP; Dividendos (ou tipo não informado) não têm retenção. */
+const proventoNetExpr = sql`case when t.dividend_type = 'jscp' then round(t.quantity * t.unit_price_cents * 0.85) else round(t.quantity * t.unit_price_cents) end`
+
+async function proventosSettingsRow(): Promise<{ monthlyTargetCents: number | null }> {
+  const row = (await db.select().from(passiveIncomeSettings).where(eq(passiveIncomeSettings.id, 1)))[0]
+  return { monthlyTargetCents: row?.monthlyTargetCents ?? null }
+}
+
+export async function setProventosSettings(patch: {
+  monthlyTargetCents: number | null
+}): Promise<{ monthlyTargetCents: number | null }> {
+  const existing = (await db.select().from(passiveIncomeSettings).where(eq(passiveIncomeSettings.id, 1)))[0]
+  if (existing) {
+    const updated = (
+      await db.update(passiveIncomeSettings).set(patch).where(eq(passiveIncomeSettings.id, 1)).returning()
+    )[0]!
+    return { monthlyTargetCents: updated.monthlyTargetCents }
+  }
+  const created = (
+    await db
+      .insert(passiveIncomeSettings)
+      .values({ id: 1, monthlyTargetCents: patch.monthlyTargetCents })
+      .returning()
+  )[0]!
+  return { monthlyTargetCents: created.monthlyTargetCents }
+}
+
+export type ProventosResumo = {
+  avgMonthlyCents: number
+  total12mCents: number
+  totalWalletCents: number
+  monthlyTargetCents: number | null
+  progressBps: number | null
+  distribution: Array<{ assetId: number; ticker: string | null; name: string; totalCents: number; shareBps: number }>
+}
+
+/**
+ * Resumo do card principal da aba Proventos: média/12m/total, meta (se
+ * configurada) e distribuição por ativo — sempre só o PAGO, "a receber"
+ * nunca entra numa soma que descreve o que já entrou na conta.
+ */
+export async function proventosResumo(): Promise<ProventosResumo> {
+  const endPeriod = periodOf(todayIso())
+  const { start } = periodBounds(addMonths(endPeriod, -11))
+
+  const [totalWalletRows, total12mRows, distributionRows, settings] = await Promise.all([
+    db.execute<{ total: number }>(sql`
+      select coalesce(sum(round(t.quantity * t.unit_price_cents)), 0) as total
+      from asset_trades t
+      where t.kind = 'dividend' and (${proventoStatusExpr()}) = 'pago'
+    `),
+    db.execute<{ total: number }>(sql`
+      select coalesce(sum(round(t.quantity * t.unit_price_cents)), 0) as total
+      from asset_trades t
+      where t.kind = 'dividend' and t.traded_on >= ${start} and (${proventoStatusExpr()}) = 'pago'
+    `),
+    db.execute<{ assetId: number; ticker: string | null; name: string; total: number }>(sql`
+      select a.id as "assetId", a.ticker, a.name, coalesce(sum(round(t.quantity * t.unit_price_cents)), 0) as total
+      from asset_trades t
+      join assets a on a.id = t.asset_id
+      where t.kind = 'dividend' and t.traded_on >= ${start} and (${proventoStatusExpr()}) = 'pago'
+      group by a.id, a.ticker, a.name
+      having sum(round(t.quantity * t.unit_price_cents)) > 0
+      order by total desc
+    `),
+    proventosSettingsRow(),
+  ])
+
+  const total12mCents = total12mRows[0]?.total ?? 0
+  const totalWalletCents = totalWalletRows[0]?.total ?? 0
+  const avgMonthlyCents = Math.round(total12mCents / 12)
+  const monthlyTargetCents = settings.monthlyTargetCents
+  const progressBps =
+    monthlyTargetCents && monthlyTargetCents > 0
+      ? Math.round((avgMonthlyCents / monthlyTargetCents) * 10_000)
+      : null
+
+  const distributionTotal = distributionRows.reduce((sum, r) => sum + r.total, 0)
+  const distribution = distributionRows.map((r) => ({
+    assetId: r.assetId,
+    ticker: r.ticker,
+    name: r.name,
+    totalCents: r.total,
+    shareBps: distributionTotal > 0 ? Math.round((r.total / distributionTotal) * 10_000) : 0,
+  }))
+
+  return { avgMonthlyCents, total12mCents, totalWalletCents, monthlyTargetCents, progressBps, distribution }
+}
+
+export type ProventoEvolutionPoint = { period: string; paidCents: number; pendingCents: number }
+
+/**
+ * Série mensal ou anual de proventos pagos x a receber — única visão que
+ * mostra as duas ao lado uma da outra, porque é a pergunta que ela
+ * responde; em todo outro lugar desta área "a receber" fica de fora.
+ */
+export async function proventosEvolucao(
+  options: {
+    months?: number
+    granularity?: 'monthly' | 'annual'
+    assetClass?: string | null
+    assetId?: number | null
+  } = {},
+): Promise<ProventoEvolutionPoint[]> {
+  const granularity = options.granularity ?? 'monthly'
+  // Sem limite de meses no modo anual (mesmo sentinela usado por
+  // `performanceSeries(100_000, ...)` em `portfolioMonthlyReturns` acima):
+  // uma janela de "últimos 12 meses" não faz sentido pra uma pergunta em anos.
+  const months = options.months ?? (granularity === 'annual' ? 100_000 : 12)
+  const { start } = periodBounds(addMonths(periodOf(todayIso()), -(months - 1)))
+
+  const rows = await db.execute<{ bucket: string; paid: number; pending: number }>(sql`
+    select
+      ${granularity === 'annual' ? sql`substr(t.traded_on, 1, 4)` : sql`substr(t.traded_on, 1, 7)`} as bucket,
+      coalesce(sum(case when (${proventoStatusExpr()}) = 'pago' then round(t.quantity * t.unit_price_cents) else 0 end), 0) as paid,
+      coalesce(sum(case when (${proventoStatusExpr()}) = 'a_receber' then round(t.quantity * t.unit_price_cents) else 0 end), 0) as pending
+    from asset_trades t
+    join assets a on a.id = t.asset_id
+    where t.kind = 'dividend'
+      and t.traded_on >= ${start}
+      ${options.assetClass ? sql`and a.asset_class = ${options.assetClass}` : sql``}
+      ${options.assetId ? sql`and t.asset_id = ${options.assetId}` : sql``}
+    group by bucket
+    order by bucket
+  `)
+
+  return rows.map((r) => ({ period: r.bucket, paidCents: r.paid, pendingCents: r.pending }))
+}
+
+export type ProventoHistoricoRow = { year: string; months: number[]; avgCents: number; totalCents: number }
+
+/** Pivot ano×mês (Jan-Dez, média, total) para "Histórico mensal" — só pago, mesma regra do resumo. */
+export async function proventosHistorico(
+  options: { assetClass?: string | null; assetId?: number | null } = {},
+): Promise<ProventoHistoricoRow[]> {
+  const rows = await db.execute<{ year: string; month: string; total: number }>(sql`
+    select substr(t.traded_on, 1, 4) as year, substr(t.traded_on, 6, 2) as month,
+      coalesce(sum(round(t.quantity * t.unit_price_cents)), 0) as total
+    from asset_trades t
+    join assets a on a.id = t.asset_id
+    where t.kind = 'dividend' and (${proventoStatusExpr()}) = 'pago'
+      ${options.assetClass ? sql`and a.asset_class = ${options.assetClass}` : sql``}
+      ${options.assetId ? sql`and t.asset_id = ${options.assetId}` : sql``}
+    group by year, month
+  `)
+
+  const byYear = new Map<string, number[]>()
+  for (const r of rows) {
+    const monthsRow = byYear.get(r.year) ?? Array(12).fill(0)
+    monthsRow[Number(r.month) - 1] = r.total
+    byYear.set(r.year, monthsRow)
+  }
+
+  return [...byYear.entries()]
+    .sort((a, b) => Number(b[0]) - Number(a[0]))
+    .map(([year, monthsRow]) => {
+      const totalCents = monthsRow.reduce((sum, v) => sum + v, 0)
+      return { year, months: monthsRow, avgCents: Math.round(totalCents / 12), totalCents }
+    })
+}
+
+export type ProventoRow = {
+  id: number
+  assetId: number
+  ticker: string | null
+  assetName: string
+  assetClass: string
+  status: 'pago' | 'a_receber'
+  dividendType: string | null
+  exDate: string | null
+  tradedOn: string
+  quantity: number
+  unitPriceCents: number
+  grossCents: number
+  netCents: number
+}
+
+/** Linhas detalhadas de "Meus proventos" — um lançamento por linha, status e líquido sempre derivados, nunca guardados. */
+export async function listProventos(
+  options: { year?: string | null; assetClass?: string | null; assetId?: number | null } = {},
+): Promise<ProventoRow[]> {
+  return db.execute<ProventoRow>(sql`
+    select
+      t.id,
+      t.asset_id as "assetId",
+      a.ticker,
+      a.name as "assetName",
+      a.asset_class as "assetClass",
+      (${proventoStatusExpr()}) as status,
+      t.dividend_type as "dividendType",
+      t.ex_date as "exDate",
+      t.traded_on as "tradedOn",
+      t.quantity,
+      t.unit_price_cents as "unitPriceCents",
+      round(t.quantity * t.unit_price_cents) as "grossCents",
+      (${proventoNetExpr}) as "netCents"
+    from asset_trades t
+    join assets a on a.id = t.asset_id
+    where t.kind = 'dividend'
+      ${options.year ? sql`and substr(t.traded_on, 1, 4) = ${options.year}` : sql``}
+      ${options.assetClass ? sql`and a.asset_class = ${options.assetClass}` : sql``}
+      ${options.assetId ? sql`and t.asset_id = ${options.assetId}` : sql``}
+    order by t.traded_on desc
+  `)
 }
 
 export async function recordValuation(assetId: number, asOf: string, unitPriceCents: number) {

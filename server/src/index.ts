@@ -7,6 +7,7 @@ import { insightsRoutes } from './routes/insights'
 import { backupRoutes } from './routes/backups'
 import { pricingRoutes } from './routes/pricing'
 import { simulateRoutes } from './routes/simulate'
+import { friendlyErrorMessage } from './core/errors'
 
 // Secrets (e.g. BRAPI_TOKEN) live in .env, gitignored — never hardcoded in
 // source. Missing the file is fine (local dev without any external API
@@ -40,8 +41,7 @@ app.setErrorHandler((error: unknown, _req, reply) => {
     typeof error === 'object' && error !== null && 'statusCode' in error
       ? Number((error as { statusCode?: number }).statusCode) || 500
       : 500
-  const message = error instanceof Error ? error.message : 'erro interno'
-  return reply.code(status).send({ error: message })
+  return reply.code(status).send({ error: friendlyErrorMessage(error) })
 })
 
 await app.register(cors, { origin: true })

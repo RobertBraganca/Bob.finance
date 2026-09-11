@@ -1,16 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { currentPeriod } from '../lib/period'
 import { useMeta } from '../lib/store'
-import {
-  bpsToInput,
-  centsToInput,
-  money,
-  parseMoneyInput,
-  parsePercentInput,
-  periodLong,
-} from '../lib/format'
+import { bpsToInput, centsToInput, money, parseMoneyInput, parsePercentInput } from '../lib/format'
 import {
   Assumptions,
   Bento,
@@ -24,11 +16,9 @@ import {
   StatTile,
   useToast,
   type AssumptionBag,
-  PeriodNav,
 } from '../components/ui'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
-import { PageHeader } from '../components/shell/Shell'
 
 /**
  * Motor financeiro: alocação do disponível e ponto de equilíbrio.
@@ -52,12 +42,6 @@ type Destination = {
   realizedCents: number
   differenceCents: number | null
   assumptions: AssumptionBag
-}
-
-type FinancialEngineRecords = {
-  highestAvailable: { periodo: string; valorCents: number } | null
-  daysSinceNegativeBalance: number | null
-  lastNegativeOn: string | null
 }
 
 type Available = {
@@ -99,6 +83,7 @@ type EngineSettings = {
   taxRateBps: number
   reservePlannedCents: number
   marginCents: number
+  investmentPlannedCents: number | null
 }
 
 /**
@@ -113,12 +98,16 @@ function lineHint(line: BreakEvenLine): string | null {
   return null
 }
 
-export function FinancialEnginePage() {
+/**
+ * Vira aba dentro de Saúde financeira na fusão de sessão de 10/09/2026 (o
+ * usuário pediu as duas telas "na mesma sessão" — mesmo período, mesma
+ * navegação). Sem `PageHeader` próprio: quem hospeda o título e a `PeriodNav`
+ * compartilhada é `FinancialHealth.tsx`. `ParamsEditor` é exportado porque o
+ * botão "Parâmetros" que o abre agora mora no header do pai (visível só
+ * quando esta aba está ativa), não mais neste componente.
+ */
+export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string | null }) {
   const meta = useMeta()
-  const [period, setPeriod] = useState<string | null>(null)
-  const [tuning, setTuning] = useState(false)
-
-  const resolvedPeriod = period ?? meta.data?.ledger.max?.slice(0, 7) ?? meta.data?.today?.slice(0, 7) ?? null
 
   const available = useQuery({
     queryKey: ['engine-available', resolvedPeriod],
@@ -134,31 +123,11 @@ export function FinancialEnginePage() {
     placeholderData: (previous) => previous,
   })
 
-  const records = useQuery({
-    queryKey: ['engine-records'],
-    queryFn: () => api.get<FinancialEngineRecords>('/financial-engine/records', { months: 24 }),
-    enabled: meta.isSuccess,
-  })
-
   const hasLedger = (meta.data?.ledger.count ?? 0) > 0
 
   return (
     <>
-      <PageHeader
-        title="Motor financeiro"
-        subtitle={resolvedPeriod ? periodLong(resolvedPeriod) : undefined}
-        actions={
-          <div className="row">
-            <PeriodNav period={resolvedPeriod ?? currentPeriod()} onChange={setPeriod} />
-            <Button variant="primary" icon="settings" onClick={() => setTuning(true)}>
-              Parâmetros
-            </Button>
-          </div>
-        }
-      />
-
-      <div className="page">
-        {meta.isError ? (
+      {meta.isError ? (
           <Card>
             <EmptyState
               icon="alert"
@@ -190,7 +159,7 @@ export function FinancialEnginePage() {
           <Bento>
             <Slab span={6} accent>
               <HeroFigure
-                label="Disponível para alocação"
+                label="Quanto ainda não tem destino"
                 value={money(available.data.availableCents)}
               >
                 <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-xs)', marginTop: 'var(--sp-3)' }}>
@@ -227,28 +196,8 @@ export function FinancialEnginePage() {
               </div>
             </Card>
 
-            <Card span={6} title="Recordes" subtitle="Últimos 24 meses observados">
-              <div className="stack stack--loose">
-                <StatTile
-                  label="Maior disponível já registrado"
-                  value={records.data?.highestAvailable ? money(records.data.highestAvailable.valorCents) : '-'}
-                  foot={records.data?.highestAvailable ? periodLong(records.data.highestAvailable.periodo) : undefined}
-                />
-                <StatTile
-                  label="Dias desde o último saldo negativo"
-                  value={
-                    records.data?.daysSinceNegativeBalance !== null &&
-                    records.data?.daysSinceNegativeBalance !== undefined
-                      ? String(records.data.daysSinceNegativeBalance)
-                      : 'nunca ficou negativo'
-                  }
-                  foot={records.data?.lastNegativeOn ? `último em ${records.data.lastNegativeOn}` : undefined}
-                />
-              </div>
-            </Card>
-
             <Card
-              span={6}
+              span={12}
               title="Por destino"
               subtitle="Em ordem alfabética, deliberadamente neutra: a ordem não é calculada a partir dos valores"
             >
@@ -300,7 +249,7 @@ export function FinancialEnginePage() {
                 do outro lado (auditoria de layout de 01/09/2026). */}
             <Card
               span={12}
-              title="Ponto de equilíbrio de faturamento"
+              title="Quanto eu precisaria faturar este mês"
               assumptions={breakEven.data?.assumptions}
               subtitle="O faturamento que cobriria tudo que já está configurado neste mês"
             >
@@ -406,21 +355,12 @@ export function FinancialEnginePage() {
                     >
                       {money(breakEven.data.differenceCents ?? 0)}
                     </span>
-                    {/* O RBT12 não entra em conta nenhuma: é a base sobre a
-                        qual a alíquota efetiva do Simples é calculada, e
-                        aparece para que uma alíquota nominal digitada no
-                        lugar da efetiva, ou uma que envelheceu enquanto o
-                        faturamento mudava de faixa, fique visível. */}
-                    <span className="kv__k">RBT12 (12 meses anteriores)</span>
-                    <span className="kv__v">{money(breakEven.data.rbt12Cents)}</span>
                   </div>
-                  {breakEven.data.rbt12CoveredMonths < 12 && (
-                    <p className="chart__note">
-                      O ledger cobre {breakEven.data.rbt12CoveredMonths} dos 12 meses anteriores,
-                      então o RBT12 acima está incompleto e indica uma faixa do Simples menor que a
-                      real.
-                    </p>
-                  )}
+                  {/* RBT12 e a nota de cobertura saíram daqui — já vêm no
+                      ⓘ "como calculamos" deste card (assumptions.rbt12*,
+                      já emitidas pelo backend), então mostrá-los soltos no
+                      corpo duplicava exatamente o tipo de detalhe contábil
+                      que confundia mais do que ajudava (09/09/2026). */}
 
                   {/* The closing sentence stays conditional, per the
                       instrumental-language table in decisions/0010. */}
@@ -434,14 +374,11 @@ export function FinancialEnginePage() {
             </Card>
           </Bento>
         )}
-      </div>
-
-      {tuning && <ParamsEditor onClose={() => setTuning(false)} />}
     </>
   )
 }
 
-function ParamsEditor({ onClose }: { onClose: () => void }) {
+export function ParamsEditor({ onClose }: { onClose: () => void }) {
   const toast = useToast()
   const queryClient = useQueryClient()
   const meta = useMeta()
@@ -459,6 +396,7 @@ function ParamsEditor({ onClose }: { onClose: () => void }) {
   const [tax, setTax] = useState<string | undefined>(undefined)
   const [reserve, setReserve] = useState<string | undefined>(undefined)
   const [margin, setMargin] = useState<string | undefined>(undefined)
+  const [investmentPlanned, setInvestmentPlanned] = useState<string | undefined>(undefined)
 
   const save = useMutation({
     mutationFn: () =>
@@ -475,6 +413,12 @@ function ParamsEditor({ onClose }: { onClose: () => void }) {
         ...(margin === undefined || margin.trim() === ''
           ? {}
           : { marginCents: parseMoneyInput(margin) ?? 0 }),
+        ...(investmentPlanned === undefined
+          ? {}
+          : {
+              investmentPlannedCents:
+                investmentPlanned.trim() === '' ? null : parseMoneyInput(investmentPlanned),
+            }),
       }),
     onSuccess: () => {
       toast('Parâmetros salvos')
@@ -566,6 +510,22 @@ function ParamsEditor({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setMargin(e.target.value)}
                   className="text-right tabular-nums"
                 />
+              </div>
+              <div className="field" style={{ width: 190 }}>
+                <label className="field__label">Investimento planejado (R$)</label>
+                <Input
+                  value={
+                    investmentPlanned === undefined
+                      ? centsToInput(current.investmentPlannedCents)
+                      : investmentPlanned
+                  }
+                  onChange={(e) => setInvestmentPlanned(e.target.value)}
+                  placeholder="deixe vazio para derivar"
+                  className="text-right tabular-nums"
+                />
+                <span className="field__hint">
+                  Vazio significa continuar somando o aporte mensal das metas de investimento ativas
+                </span>
               </div>
             </div>
           </div>

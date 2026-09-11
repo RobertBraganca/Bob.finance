@@ -14,6 +14,7 @@ import {
   Icon,
   Meter,
   scoreIndicatorState,
+  Segmented,
   Slab,
   SkeletonLines,
   StatTile,
@@ -27,6 +28,7 @@ import { SimulatorModal } from '../components/ui/SimulatorModal'
 import { PageHeader } from '../components/shell/Shell'
 import { ScoreHistoryChart, type ScorePoint } from '../components/charts/ScoreHistoryChart'
 import { NetWorthHistoryChart, type NetWorthPoint } from '../components/charts/NetWorthHistoryChart'
+import { MotorFinanceiroTab, ParamsEditor } from './FinancialEngine'
 
 /**
  * Saúde financeira: Health Score, Runway, Radar de risco.
@@ -143,7 +145,17 @@ const monthsLabel = (months: number | null) =>
 export function FinancialHealthPage() {
   const meta = useMeta()
   const [period, setPeriod] = useState<string | null>(null)
-  const [tuning, setTuning] = useState(false)
+  /**
+   * Fusão de sessão de 10/09/2026: Motor financeiro virou a aba 'motor'
+   * desta mesma página (mesmo período, mesma `PeriodNav`), a pedido do
+   * usuário. Os dois modais de configuração continuam distintos — pesos e
+   * limites do Health Score não têm nada a ver com os parâmetros do motor —
+   * só o botão que abre cada um passou a viver no header do pai, visível
+   * conforme a aba ativa.
+   */
+  const [tab, setTab] = useState<'geral' | 'motor'>('geral')
+  const [tuningHealth, setTuningHealth] = useState(false)
+  const [tuningEngine, setTuningEngine] = useState(false)
   const [simulating, setSimulating] = useState(false)
 
   // The ledger's most recent month, same fallback the API uses, so the page
@@ -217,18 +229,38 @@ export function FinancialHealthPage() {
         actions={
           <div className="row">
             <PeriodNav period={resolvedPeriod ?? currentPeriod()} onChange={setPeriod} />
-            <Button size="sm" icon="sparkle" onClick={() => setSimulating(true)}>
-              Simular
-            </Button>
-            <Button variant="primary" icon="settings" onClick={() => setTuning(true)}>
-              Pesos e limites
-            </Button>
+            {tab === 'geral' ? (
+              <>
+                <Button size="sm" icon="sparkle" onClick={() => setSimulating(true)}>
+                  Simular
+                </Button>
+                <Button variant="primary" icon="settings" onClick={() => setTuningHealth(true)}>
+                  Pesos e limites
+                </Button>
+              </>
+            ) : (
+              <Button variant="primary" icon="settings" onClick={() => setTuningEngine(true)}>
+                Parâmetros
+              </Button>
+            )}
           </div>
         }
       />
 
       <div className="page">
-        {meta.isError ? (
+        <Segmented
+          ariaLabel="Seção"
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'geral', label: 'Visão geral' },
+            { value: 'motor', label: 'Motor financeiro' },
+          ]}
+        />
+
+        {tab === 'motor' ? (
+          <MotorFinanceiroTab period={resolvedPeriod} />
+        ) : meta.isError ? (
           <Card>
             <EmptyState
               icon="alert"
@@ -456,7 +488,8 @@ export function FinancialHealthPage() {
         )}
       </div>
 
-      {tuning && <SettingsEditor onClose={() => setTuning(false)} />}
+      {tuningHealth && <SettingsEditor onClose={() => setTuningHealth(false)} />}
+      {tuningEngine && <ParamsEditor onClose={() => setTuningEngine(false)} />}
       {simulating && <SimulatorModal onClose={() => setSimulating(false)} />}
     </>
   )
