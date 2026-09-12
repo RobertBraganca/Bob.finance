@@ -775,8 +775,20 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
   const toast = useToast()
   const queryClient = useQueryClient()
   const accounts = useAccounts()
+  /**
+   * "Recorrente" cria um `cash_flow_forecasts` em vez de transações
+   * avulsas (retainer mensal) — pedido do usuário a partir do estudo
+   * `docs/estudo-viabilidade-stacks-intuit-vs-uso-real.md`, 11/09/2026.
+   * `clientLabel` continua texto livre: nenhuma entidade de cliente/
+   * projeto nova, exatamente como `docs/specs/project-pricing/spec.md`
+   * já documenta como fora de escopo enquanto `specs/client-projects` não
+   * existir.
+   */
+  const [mode, setMode] = useState<'single' | 'recurring'>('single')
   const [accountId, setAccountId] = useState<number | null>(null)
   const [paidOn, setPaidOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const [dueDay, setDueDay] = useState('5')
+  const [startPeriod, setStartPeriod] = useState(() => new Date().toISOString().slice(0, 7))
   // Parte do recomendado — o usuário só digita algo diferente se o valor de
   // fato fechado com o cliente divergiu (negociação, desconto, ajuste).
   const [actualPrice, setActualPrice] = useState(() => centsToInput(quote.recommendedPriceCents))
@@ -784,7 +796,9 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
   const actualDiffersFromRecommended = actualPriceCents !== null && actualPriceCents !== quote.recommendedPriceCents
 
   const count = Math.max(1, quote.installments)
-  const isInstalment = count > 1
+  const isInstalment = mode === 'single' && count > 1
+  const dueDayNum = Number(dueDay)
+  const dueDayValid = Number.isInteger(dueDayNum) && dueDayNum >= 1 && dueDayNum <= 28
   /** Padrão: um mês depois do recebimento da primeira, editável. */
   const [secondInstallmentOn, setSecondInstallmentOn] = useState(() =>
     addMonthsToDateInput(new Date().toISOString().slice(0, 10), 1),
@@ -806,6 +820,13 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
     mutationFn: () => {
       if (accountId === null) throw new Error('escolha a conta')
       if (actualPriceCents === null || actualPriceCents <= 0) throw new Error('informe o valor fechado')
+      if (mode === 'recurring') {
+        if (!dueDayValid) throw new Error('dia de vencimento precisa ser entre 1 e 28')
+        return api.post(`/pricing/quotes/${quote.id}/approve`, {
+          actualPriceCents,
+          recurring: { accountId, dueDay: dueDayNum, startPeriod },
+        })
+      }
       return api.post(`/pricing/quotes/${quote.id}/approve`, {
         accountId,
         paidOn,
@@ -816,9 +837,11 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
     onSuccess: () => {
       telemetry.action('pricing', 'quote_approved')
       toast(
-        isInstalment
-          ? `Cotação aprovada: ${count} parcelas criadas, a primeira recebida e as demais como pendências`
-          : 'Cotação aprovada: lançamento de receita criado',
+        mode === 'recurring'
+          ? 'Cotação aprovada: fatura recorrente criada, a próxima ocorrência entra em Lançamentos como pendência ao vencer'
+          : isInstalment
+            ? `Cotação aprovada: ${count} parcelas criadas, a primeira recebida e as demais como pendências`
+            : 'Cotação aprovada: lançamento de receita criado',
       )
       queryClient.invalidateQueries()
       onClose()
@@ -838,7 +861,13 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
           <Button
             variant="primary"
             icon="check"
-            disabled={accountId === null || !actualPriceCents || actualPriceCents <= 0 || approve.isPending}
+            disabled={
+              accountId === null ||
+              !actualPriceCents ||
+              actualPriceCents <= 0 ||
+              approve.isPending ||
+              (mode === 'recurring' && !dueDayValid)
+            }
             onClick={() => approve.mutate()}
           >
             Aprovar
@@ -847,10 +876,22 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
       }
     >
       <div className="stack">
+        <Segmented
+          ariaLabel="Forma de recebimento"
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: 'single', label: 'Pagamento único ou parcelado' },
+            { value: 'recurring', label: 'Recorrente (retainer mensal)' },
+          ]}
+        />
+
         <p className="chart__note">
-          {isInstalment
-            ? `Esta cotação está parcelada em ${count}x: cria uma linha por parcela, a primeira já recebida e as seguintes como pendências em Lançamentos.`
-            : 'Cria um lançamento de receita com o valor fechado abaixo e move o status desta cotação para "Aprovada".'}{' '}
+          {mode === 'recurring'
+            ? 'Cria uma previsão recorrente: a partir do mês inicial, cada ocorrência entra em Lançamentos como pendência ao vencer, mesmo mecanismo de qualquer outro compromisso recorrente.'
+            : isInstalment
+              ? `Esta cotação está parcelada em ${count}x: cria uma linha por parcela, a primeira já recebida e as seguintes como pendências em Lançamentos.`
+              : 'Cria um lançamento de receita com o valor fechado abaixo e move o status desta cotação para "Aprovada".'}{' '}
           Recomendado: {money(quote.recommendedPriceCents)}.
         </p>
         <div className="field">
@@ -872,37 +913,54 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
             onChange={setAccountId}
           />
         </div>
-        <div className="field">
-          <label className="field__label">
-            {isInstalment ? 'Data da 1ª parcela (recebida)' : 'Data do recebimento'}
-          </label>
-          <TextInput value={paidOn} onChange={setPaidOn} type="date" />
-        </div>
 
-        {isInstalment && (
+        {mode === 'recurring' ? (
+          <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Dia de vencimento</label>
+              <TextInput value={dueDay} onChange={setDueDay} numeral />
+              {!dueDayValid && <span className="field__hint">Precisa ser entre 1 e 28.</span>}
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label">Primeiro mês de cobrança</label>
+              <TextInput value={startPeriod} onChange={setStartPeriod} type="month" />
+            </div>
+          </div>
+        ) : (
           <>
             <div className="field">
-              <label className="field__label">Data da 2ª parcela</label>
-              <TextInput value={secondInstallmentOn} onChange={setSecondInstallmentOn} type="date" />
-              {count > 2 && (
-                <span className="field__hint">
-                  Da 3ª em diante o vencimento anda de mês em mês a partir desta data. Cada parcela
-                  vira uma linha própria e pode ser ajustada depois em Lançamentos.
-                </span>
-              )}
+              <label className="field__label">
+                {isInstalment ? 'Data da 1ª parcela (recebida)' : 'Data do recebimento'}
+              </label>
+              <TextInput value={paidOn} onChange={setPaidOn} type="date" />
             </div>
 
-            <div className="kv">
-              {schedule.map((p) => (
-                <Fragment key={p.i}>
-                  <span className="kv__k">
-                    {p.i + 1}ª parcela · {fmtDate(p.on)}
-                    {p.i > 0 ? ' (pendente)' : ''}
-                  </span>
-                  <span className="kv__v">{money(p.amountCents)}</span>
-                </Fragment>
-              ))}
-            </div>
+            {isInstalment && (
+              <>
+                <div className="field">
+                  <label className="field__label">Data da 2ª parcela</label>
+                  <TextInput value={secondInstallmentOn} onChange={setSecondInstallmentOn} type="date" />
+                  {count > 2 && (
+                    <span className="field__hint">
+                      Da 3ª em diante o vencimento anda de mês em mês a partir desta data. Cada parcela
+                      vira uma linha própria e pode ser ajustada depois em Lançamentos.
+                    </span>
+                  )}
+                </div>
+
+                <div className="kv">
+                  {schedule.map((p) => (
+                    <Fragment key={p.i}>
+                      <span className="kv__k">
+                        {p.i + 1}ª parcela · {fmtDate(p.on)}
+                        {p.i > 0 ? ' (pendente)' : ''}
+                      </span>
+                      <span className="kv__v">{money(p.amountCents)}</span>
+                    </Fragment>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

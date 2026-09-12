@@ -669,9 +669,15 @@ export const cashFlowForecasts = pgTable(
     endPeriod: text('end_period'),
     notes: text('notes'),
     active: boolean('active').notNull().default(true),
+    /** the approved quote this recurring forecast was created from, if any — same shape/purpose as transactions.sourceQuoteId */
+    sourceQuoteId: int('source_quote_id').references(() => projectQuotes.id, { onDelete: 'set null' }),
     createdAt: text('created_at').notNull().default(now),
   },
-  (t) => [index('cash_flow_forecasts_account_idx').on(t.accountId), index('cash_flow_forecasts_category_idx').on(t.categoryId)],
+  (t) => [
+    index('cash_flow_forecasts_account_idx').on(t.accountId),
+    index('cash_flow_forecasts_category_idx').on(t.categoryId),
+    index('cash_flow_forecasts_source_quote_idx').on(t.sourceQuoteId),
+  ],
 )
 
 /** A suggested (pending, real) pair the user said is NOT a match. */

@@ -4,6 +4,7 @@ import { categories, categoryCaps, monthlyGoals } from '../db/schema.ts'
 import { addMonths, daysInMonth, periodBounds, periodRange, todayIso } from '../core/dates.ts'
 import { categoryBreakdown, totals, type Range } from './analytics.ts'
 import { averageRecentQuoteCents } from './pricing.ts'
+import type { Assumptions } from './financialHealth.ts'
 
 /**
  * Goals are stored per `YYYY-MM` period so that changing this month's budget
@@ -451,7 +452,7 @@ export async function goalHistory(months = 12, accountId?: number | null) {
  * ------------------------------------------------------------------ */
 export type BannerSeverity = 'good' | 'warning' | 'critical'
 
-export type HomeBanner = { id: string; severity: BannerSeverity } & (
+export type HomeBanner = { id: string; severity: BannerSeverity; assumptions: Assumptions } & (
   | { kind: 'spend_cap_exceeded'; spentCents: number; capCents: number }
   | { kind: 'spend_cap_at_risk'; projectedCents: number; capCents: number }
   | { kind: 'category_cap_exceeded'; categoryName: string; spentCents: number; capCents: number }
@@ -509,14 +510,28 @@ export async function homeBanners(accountId?: number | null): Promise<HomeBanner
         kind: 'spend_cap_exceeded',
         spentCents: spend.spentCents,
         capCents: spend.capCents,
+        assumptions: {
+          formula: 'gasto do mês (todas as categorias) ÷ teto de gasto configurado',
+          spentCents: spend.spentCents,
+          capCents: spend.capCents,
+          origem: 'specs/monthly-goals',
+        },
       })
     } else if (spend.state === 'at_risk') {
+      const projectedCents = projectMonthEnd(spend.spentCents, currentPeriod)
       banners.push({
         id: 'spend-cap',
         severity: 'warning',
         kind: 'spend_cap_at_risk',
-        projectedCents: projectMonthEnd(spend.spentCents, currentPeriod),
+        projectedCents,
         capCents: spend.capCents,
+        assumptions: {
+          formula: 'projeção de fechamento do mês (ritmo atual) ÷ teto de gasto configurado',
+          spentCents: spend.spentCents,
+          projectedCents,
+          capCents: spend.capCents,
+          origem: 'specs/monthly-goals',
+        },
       })
     }
   }
@@ -528,6 +543,13 @@ export async function homeBanners(accountId?: number | null): Promise<HomeBanner
     .sort((a, b) => b.usedBps - a.usedBps)[0]
   if (worstCap) {
     flaggedCategoryIds.add(worstCap.categoryId)
+    const capAssumptions: Assumptions = {
+      formula: 'gasto do mês na categoria ÷ teto configurado para a categoria',
+      categoria: worstCap.name,
+      spentCents: worstCap.spentCents,
+      capCents: worstCap.capCents,
+      origem: 'specs/monthly-goals',
+    }
     banners.push(
       worstCap.state === 'exceeded'
         ? {
@@ -537,6 +559,7 @@ export async function homeBanners(accountId?: number | null): Promise<HomeBanner
             categoryName: worstCap.name,
             spentCents: worstCap.spentCents,
             capCents: worstCap.capCents,
+            assumptions: capAssumptions,
           }
         : {
             id: `cap-${worstCap.categoryId}`,
@@ -545,6 +568,7 @@ export async function homeBanners(accountId?: number | null): Promise<HomeBanner
             categoryName: worstCap.name,
             spentCents: worstCap.spentCents,
             capCents: worstCap.capCents,
+            assumptions: capAssumptions,
           },
     )
   }
@@ -561,6 +585,13 @@ export async function homeBanners(accountId?: number | null): Promise<HomeBanner
       kind: 'category_concentration',
       categoryName: topCategory.name,
       shareBps: topCategory.shareBps,
+      assumptions: {
+        formula: 'gasto da categoria ÷ gasto total do mês (todas as categorias-mãe, saídas)',
+        categoria: topCategory.name,
+        shareBps: topCategory.shareBps,
+        limiarBps: CONCENTRATION_AT_BPS,
+        origem: 'specs/dashboard',
+      },
     })
   }
 
@@ -570,10 +601,16 @@ export async function homeBanners(accountId?: number | null): Promise<HomeBanner
   if (last.actual.expenseCents > 0) {
     const projectedCents = projectMonthEnd(current.actual.expenseCents, currentPeriod)
     const deltaBps = Math.round(((projectedCents - last.actual.expenseCents) / last.actual.expenseCents) * 10_000)
+    const trendAssumptions: Assumptions = {
+      formula: 'projeção de fechamento do mês (ritmo atual) vs. total já fechado do mês anterior',
+      projectedCents,
+      mesAnteriorCents: last.actual.expenseCents,
+      deltaBps,
+    }
     if (deltaBps >= TREND_UP_AT_BPS) {
-      banners.push({ id: 'trend', severity: 'warning', kind: 'trend_up', deltaBps })
+      banners.push({ id: 'trend', severity: 'warning', kind: 'trend_up', deltaBps, assumptions: trendAssumptions })
     } else if (deltaBps <= TREND_DOWN_AT_BPS) {
-      banners.push({ id: 'trend', severity: 'good', kind: 'trend_down', deltaBps })
+      banners.push({ id: 'trend', severity: 'good', kind: 'trend_down', deltaBps, assumptions: trendAssumptions })
     }
   }
 

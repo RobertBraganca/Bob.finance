@@ -238,7 +238,7 @@ export function QuoteFunnelChart({ stages, surface = 'paper' }: { stages: QuoteF
           { header: 'Queda desde a etapa anterior', value: (row) => String(row.dropFromPreviousCount), align: 'right' },
         ],
       }}
-      note="Etapas inferidas do status atual de cada cotação, não de um histórico de transições — uma cotação que já foi rejeitada e depois reaprovada conta como aprovada, não como reprovada no caminho."
+      note="Etapas inferidas do status atual de cada cotação, não de um histórico de transições. Uma cotação que já foi rejeitada e depois reaprovada conta como aprovada, não como reprovada no caminho."
     >
       <div className="stack stack--tight">
         {stages.map((stage, i) => (

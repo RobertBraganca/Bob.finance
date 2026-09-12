@@ -261,7 +261,7 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
         span={12}
         flush
         title="Histórico mensal"
-        subtitle="Só o que já foi pago — o que ainda está a receber não entra nesta soma"
+        subtitle="Só o que já foi pago: o que ainda está a receber não entra nesta soma"
         actions={
           <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
             <FilterSelect

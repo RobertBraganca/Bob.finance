@@ -287,6 +287,8 @@ export type ForecastInput = {
   installmentsRealized?: number
   endPeriod?: string | null
   notes?: string | null
+  /** the approved quote this forecast was created from, if any (Precificação -> fatura recorrente) */
+  sourceQuoteId?: number | null
 }
 
 export async function createForecast(input: ForecastInput) {
