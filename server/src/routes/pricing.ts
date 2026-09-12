@@ -188,10 +188,17 @@ export async function pricingRoutes(app: FastifyInstance) {
     const { id } = idParam.parse(req.params)
     const body = z
       .object({
-        accountId: z.number().int().positive(),
-        paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        accountId: z.number().int().positive().optional(),
+        paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         actualPriceCents: z.number().int().positive().optional(),
         secondInstallmentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        recurring: z
+          .object({
+            accountId: z.number().int().positive(),
+            dueDay: z.number().int().min(1).max(28),
+            startPeriod: z.string().regex(/^\d{4}-\d{2}$/),
+          })
+          .optional(),
       })
       .parse(req.body)
     try {

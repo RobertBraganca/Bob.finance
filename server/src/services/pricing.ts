@@ -4,6 +4,7 @@ import { pricingMultiplierOptions, pricingSettings, projectQuotes } from '../db/
 import { addMonths, addMonthsToDate, periodOf, periodRange, todayIso } from '../core/dates'
 import * as financialEngine from './financialEngine'
 import { createTransaction } from './transactions'
+import { createForecast } from './cashFlow'
 import type { Assumptions } from './financialHealth'
 
 /**
@@ -535,15 +536,25 @@ export function splitInstallments(totalCents: number, count: number): number[] {
 }
 
 export type ApproveInput = {
-  accountId: number
-  paidOn: string
   actualPriceCents?: number
+  /** Obrigatório quando `recurring` não é informado — a aprovação vira pagamento único/parcelado. */
+  accountId?: number
+  paidOn?: string
   /**
    * Data da SEGUNDA parcela. Da terceira em diante o vencimento anda de
    * mês em mês a partir dela — a convenção "1 + N mensais". Obrigatória
    * quando a cotação tem parcelamento; ignorada quando é à vista.
    */
   secondInstallmentOn?: string
+  /**
+   * Quando presente, a aprovação cria UM `cash_flow_forecasts` recorrente
+   * em vez de transações avulsas — `accountId`/`paidOn`/`secondInstallmentOn`
+   * acima são ignorados neste caso. Dali em diante o mecanismo de
+   * materialização já existente (`cashFlow.materialize`) gera as
+   * ocorrências futuras como `transactions` pendentes, mesmo padrão de
+   * `decisions/0003` que qualquer outra previsão de fluxo de caixa segue.
+   */
+  recurring?: { accountId: number; dueDay: number; startPeriod: string }
 }
 
 export async function approveQuote(id: number, input: ApproveInput): Promise<QuoteRow> {
@@ -554,38 +565,53 @@ export async function approveQuote(id: number, input: ApproveInput): Promise<Quo
   const actualPriceCents = input.actualPriceCents ?? quote.recommendedPriceCents
   if (actualPriceCents <= 0) throw new PricingError('valor fechado precisa ser maior que zero')
 
-  const count = Math.max(1, quote.installments)
-  if (count > 1 && !input.secondInstallmentOn) {
-    throw new PricingError(
-      `esta cotação está parcelada em ${count}x: informe a data da segunda parcela para as futuras entrarem em Lançamentos com o vencimento certo`,
-    )
-  }
-
-  /**
-   * Parcelado gera UMA linha por parcela, não uma linha com o valor cheio
-   * (pedido do usuário, 01/09/2026: "hoje a transação está entrando com
-   * valor cheio"). A primeira é real e já recebida (dia da aprovação); as
-   * seguintes são pendências — linhas reais com `pending = true`, o
-   * mecanismo do `decisions/0003` — então aparecem em "A receber" e no
-   * fluxo de caixa sem inflar nenhum mês já fechado, e cada uma pode ser
-   * conciliada ou editada individualmente depois.
-   */
-  const amounts = splitInstallments(Math.abs(actualPriceCents), count)
-  for (const [index, amountCents] of amounts.entries()) {
-    const postedOn =
-      index === 0 ? input.paidOn : addMonthsToDate(input.secondInstallmentOn!, index - 1)
-    await createTransaction({
-      accountId: input.accountId,
-      postedOn,
-      description:
-        count > 1
-          ? `Projeto: ${quote.clientLabel} (${index + 1}/${count})`
-          : `Projeto: ${quote.clientLabel}`,
-      amountCents,
-      source: 'manual',
+  if (input.recurring) {
+    await createForecast({
+      description: `Projeto: ${quote.clientLabel}`,
+      kind: 'recurring',
+      amountCents: Math.abs(actualPriceCents),
+      accountId: input.recurring.accountId,
+      startPeriod: input.recurring.startPeriod,
+      dueDay: input.recurring.dueDay,
       sourceQuoteId: id,
-      pending: index > 0,
     })
+  } else {
+    if (!input.accountId || !input.paidOn) {
+      throw new PricingError('informe a conta e a data de recebimento')
+    }
+    const count = Math.max(1, quote.installments)
+    if (count > 1 && !input.secondInstallmentOn) {
+      throw new PricingError(
+        `esta cotação está parcelada em ${count}x: informe a data da segunda parcela para as futuras entrarem em Lançamentos com o vencimento certo`,
+      )
+    }
+
+    /**
+     * Parcelado gera UMA linha por parcela, não uma linha com o valor cheio
+     * (pedido do usuário, 01/09/2026: "hoje a transação está entrando com
+     * valor cheio"). A primeira é real e já recebida (dia da aprovação); as
+     * seguintes são pendências — linhas reais com `pending = true`, o
+     * mecanismo do `decisions/0003` — então aparecem em "A receber" e no
+     * fluxo de caixa sem inflar nenhum mês já fechado, e cada uma pode ser
+     * conciliada ou editada individualmente depois.
+     */
+    const amounts = splitInstallments(Math.abs(actualPriceCents), count)
+    for (const [index, amountCents] of amounts.entries()) {
+      const postedOn =
+        index === 0 ? input.paidOn : addMonthsToDate(input.secondInstallmentOn!, index - 1)
+      await createTransaction({
+        accountId: input.accountId,
+        postedOn,
+        description:
+          count > 1
+            ? `Projeto: ${quote.clientLabel} (${index + 1}/${count})`
+            : `Projeto: ${quote.clientLabel}`,
+        amountCents,
+        source: 'manual',
+        sourceQuoteId: id,
+        pending: index > 0,
+      })
+    }
   }
 
   const row = (

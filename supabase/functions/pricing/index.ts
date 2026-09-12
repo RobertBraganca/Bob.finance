@@ -199,10 +199,17 @@ app.post('/quotes/:id/approve', async (c) => {
   const { id } = idParam.parse(c.req.param())
   const body = z
     .object({
-      accountId: z.number().int().positive(),
-      paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      accountId: z.number().int().positive().optional(),
+      paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       actualPriceCents: z.number().int().positive().optional(),
       secondInstallmentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      recurring: z
+        .object({
+          accountId: z.number().int().positive(),
+          dueDay: z.number().int().min(1).max(28),
+          startPeriod: z.string().regex(/^\d{4}-\d{2}$/),
+        })
+        .optional(),
     })
     .parse(await c.req.json())
   return c.json(await pricing.approveQuote(id, body))
