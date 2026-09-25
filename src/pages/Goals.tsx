@@ -162,7 +162,7 @@ export function GoalsPage() {
                 </h2>
                 <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-base)' }}>
                   Uma meta de receita, um teto de gastos e uma taxa de poupança-alvo já são
-                  suficientes para o mês virar um placar. Tetos por categoria podem ser sugeridos a
+                  suficientes para o mês virar um placar. Tetos por TAG podem ser sugeridos a
                   partir da sua média real dos últimos três meses.
                 </p>
                 <div className="row" style={{ marginTop: 'var(--sp-2)' }}>
@@ -170,7 +170,7 @@ export function GoalsPage() {
                     Definir metas do mês
                   </Button>
                   <Button variant="slab" icon="plus" onClick={() => setCapModal(true)}>
-                    Tetos por categoria
+                    Tetos por TAG
                   </Button>
                 </div>
               </div>
@@ -246,7 +246,7 @@ export function GoalsPage() {
 
             <Card
               span={6}
-              title="Tetos por categoria"
+              title="Tetos por TAG"
               subtitle="A marca escura em cada barra é o ritmo esperado para hoje"
               actions={
                 <Button size="sm" icon="plus" onClick={() => setCapModal(true)}>
@@ -258,13 +258,13 @@ export function GoalsPage() {
                 <EmptyState
                   icon="alert"
                   title="Falha ao carregar tetos"
-                  body="Não foi possível carregar os tetos por categoria agora. Tente novamente em instantes."
+                  body="Não foi possível carregar os tetos por TAG agora. Tente novamente em instantes."
                 />
               ) : data.caps.length === 0 ? (
                 <EmptyState
                   icon="target"
-                  title="Nenhum teto por categoria"
-                  body="Defina limites nas categorias que mais pesam para acompanhar cada uma."
+                  title="Nenhum teto por TAG"
+                  body="Defina limites nas TAGs que mais pesam para acompanhar cada uma."
                   action={
                     <Button variant="primary" size="sm" onClick={() => setCapModal(true)}>
                       Sugerir a partir do histórico
@@ -545,7 +545,7 @@ function CapEditor({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[880px]">
-        <DialogTitle>{`Tetos por categoria de ${periodLong(period)}`}</DialogTitle>
+        <DialogTitle>{`Tetos por TAG de ${periodLong(period)}`}</DialogTitle>
         <div className="stack stack--loose">
         {caps.length > 0 && (
           <div className="stack stack--tight">
@@ -575,7 +575,7 @@ function CapEditor({
           <span className="label">Adicionar teto</span>
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-end' }}>
             <div className="field" style={{ minWidth: 240, flex: 1 }}>
-              <label className="field__label">Categoria</label>
+              <label className="field__label">TAG</label>
               <Select
                 value={categoryId}
                 placeholder="Escolha"

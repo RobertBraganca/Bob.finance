@@ -56,12 +56,12 @@ export const BENTO_CARD_LABELS: Record<BentoCardId, string> = {
   'pending-income': 'Receitas pendentes',
   'pending-expense': 'Despesas pendentes',
   'income-expense-chart': 'Gráfico de entradas e saídas',
-  'income-by-category': 'Entradas por categoria',
-  'expense-by-category': 'Gastos por categoria',
+  'income-by-category': 'Entradas por TAG',
+  'expense-by-category': 'Gastos por TAG',
   'net-flow': 'Resultado acumulado',
   'top-merchants': 'Onde o dinheiro mais foi',
   'account-flow': 'Fluxo entre contas',
-  'uncategorized-banner': 'Aviso de sem categoria',
+  'uncategorized-banner': 'Aviso de sem TAG',
 }
 
 export type BentoCardConfig = { id: BentoCardId; span: BentoSpan; visible: boolean }

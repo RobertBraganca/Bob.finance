@@ -88,17 +88,17 @@ function bannerContent(b: HomeBanner): { title: string; description: string } {
       }
     case 'category_cap_exceeded':
       return {
-        title: `Categoria ${b.categoryName} passou do teto`,
+        title: `TAG ${b.categoryName} passou do teto`,
         description: `${money(b.spentCents)} de ${money(b.capCents)} usados este mês.`,
       }
     case 'category_cap_at_risk':
       return {
-        title: `Categoria ${b.categoryName} no ritmo de passar do teto`,
+        title: `TAG ${b.categoryName} no ritmo de passar do teto`,
         description: `${money(b.spentCents)} de ${money(b.capCents)} já usados este mês.`,
       }
     case 'category_concentration':
       return {
-        title: `Categoria ${b.categoryName} concentra o gasto do mês`,
+        title: `TAG ${b.categoryName} concentra o gasto do mês`,
         description: `Representa ${bps(b.shareBps, 0)} do total gasto este mês.`,
       }
     case 'trend_up':

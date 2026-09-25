@@ -88,7 +88,7 @@ export function TransactionForm({
           <TextInput value={value.amount} onChange={(amount) => onChange({ amount })} placeholder="0,00" numeral />
         </div>
         <div className="field" style={{ flex: 1, minWidth: 150 }}>
-          <label className="field__label">Categoria</label>
+          <label className="field__label">TAG</label>
           <CategorySelect
             value={value.categoryId}
             direction={value.direction}

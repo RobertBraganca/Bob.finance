@@ -342,7 +342,7 @@ export function ImportPage() {
                 ['Detecção', 'O cabeçalho do arquivo é comparado com a assinatura de cada perfil de banco cadastrado.'],
                 ['Normalização', 'Datas viram ISO, valores viram centavos inteiros e o sinal segue a convenção do banco (valor assinado, débito/crédito ou coluna D/C).'],
                 ['Deduplicação', 'Cada linha ganha uma impressão digital de conta + data + valor + descrição. Repetições no arquivo e no que já existe são marcadas.'],
-                ['Revisão', 'Você vê tudo, ajusta categorias na tabela e decide o que entra. Só então grava.'],
+                ['Revisão', 'Você vê tudo, ajusta TAGs na tabela e decide o que entra. Só então grava.'],
               ].map(([title, body], index) => (
                 <li key={title} className="row" style={{ alignItems: 'flex-start', gap: 'var(--sp-3)' }}>
                   <span
@@ -533,7 +533,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
               <StatTile label="Duplicatas" value={summary!.duplicates} />
             </Card>
             <Card span={3} muted>
-              <StatTile label="Sem categoria" value={summary!.uncategorized} />
+              <StatTile label="Sem TAG" value={summary!.uncategorized} />
             </Card>
           </div>
 
@@ -542,7 +542,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
               <TabsList aria-label="Filtrar linhas">
                 <TabsTrigger value="all">{`Todas (${rows.length})`}</TabsTrigger>
                 <TabsTrigger value="problems">{`Atenção (${summary!.duplicates + summary!.errors})`}</TabsTrigger>
-                <TabsTrigger value="uncategorized">{`Sem categoria (${summary!.uncategorized})`}</TabsTrigger>
+                <TabsTrigger value="uncategorized">{`Sem TAG (${summary!.uncategorized})`}</TabsTrigger>
               </TabsList>
             </Tabs>
             <div className="row">
@@ -584,7 +584,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
                   <th style={{ width: 96 }}>Data</th>
                   <th>Descrição</th>
                   <th className="table__num" style={{ width: 116 }}>Valor</th>
-                  <th style={{ width: 210 }}>Categoria</th>
+                  <th style={{ width: 210 }}>TAG</th>
                 </tr>
               </thead>
               <tbody>

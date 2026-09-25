@@ -115,7 +115,7 @@ function csvField(value: string): string {
 }
 
 function transactionsToCsv(rows: Row[]): string {
-  const header = ['Data', 'Descrição', 'Categoria', 'Conta', 'Direção', 'Valor', 'Origem', 'Pendente']
+  const header = ['Data', 'Descrição', 'TAG', 'Conta', 'Direção', 'Valor', 'Origem', 'Pendente']
   const lines = rows.map((row) =>
     [
       fmtDate(row.postedOn),
@@ -483,7 +483,7 @@ export function TransactionsPage() {
                       setSearch(value)
                       setPage(0)
                     }}
-                    placeholder="Buscar por descrição, categoria ou data…"
+                    placeholder="Buscar por descrição, TAG ou data…"
                   />
                 </div>
                 <FilterSelect
@@ -507,7 +507,7 @@ export function TransactionsPage() {
                       setCategoryId(value)
                       setPage(0)
                     }}
-                    placeholder="Todas categorias"
+                    placeholder="Todas TAGs"
                   />
                 </div>
                 <div style={{ minWidth: 170 }}>
@@ -535,7 +535,7 @@ export function TransactionsPage() {
                       setPage(0)
                     }}
                   />
-                  Só sem categoria
+                  Só sem TAG
                 </label>
                 <label className="row" style={{ gap: 'var(--sp-2)', fontSize: 'var(--text-sm)' }}>
                   <input
@@ -556,11 +556,11 @@ export function TransactionsPage() {
                 )}
                 {parentCategoryId !== null && (
                   <span className="badge badge--info row" style={{ gap: 'var(--sp-2)' }}>
-                    {parentCategoryName ?? `categoria #${parentCategoryId}`}
+                    {parentCategoryName ?? `TAG #${parentCategoryId}`}
                     <button
                       type="button"
                       onClick={() => setParentCategoryId(null)}
-                      aria-label="Remover filtro de categoria"
+                      aria-label="Remover filtro de TAG"
                       style={{ background: 'none', border: 0, cursor: 'pointer', padding: 0, display: 'flex' }}
                     >
                       <Icon name="x" size={12} />
@@ -583,7 +583,7 @@ export function TransactionsPage() {
                   title={
                     selectionAllHidden
                       ? 'Reexibir na lista'
-                      : 'Ocultar da lista, sem apagar nem mudar categoria'
+                      : 'Ocultar da lista, sem apagar nem mudar TAG'
                   }
                 >
                   {selectionAllHidden ? 'Reexibir' : 'Ocultar'}
@@ -630,7 +630,7 @@ export function TransactionsPage() {
                         </th>
                         <th style={{ width: 100 }}>Data</th>
                         <th>Descrição</th>
-                        <th style={{ width: 190 }}>Categoria</th>
+                        <th style={{ width: 190 }}>TAG</th>
                         <th style={{ width: 130 }}>Conta</th>
                         <th className="table__num" style={{ width: 128 }}>Valor</th>
                         <th style={{ width: 40 }} />
@@ -1082,7 +1082,7 @@ function InstallmentModal({ installment, onClose }: { installment: InstallmentRo
             />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">Categoria (opcional)</label>
+            <label className="field__label">TAG (opcional)</label>
             <CategorySelect value={categoryId} direction={direction === 'in' ? 'in' : 'out'} onChange={setCategoryId} />
           </div>
         </div>
@@ -1410,10 +1410,10 @@ function BulkCategorizeModal({
       }
     >
       <div className="stack">
-        <label className="field__label">Categoria</label>
+        <label className="field__label">TAG</label>
         <CategorySelect
           value={categoryId}
-          placeholder="Remover categoria"
+          placeholder="Remover TAG"
           direction={uniformDirection}
           onChange={setCategoryId}
         />

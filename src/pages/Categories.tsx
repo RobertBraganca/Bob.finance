@@ -118,12 +118,12 @@ export function CategoriesPage() {
   return (
     <>
       <PageHeader
-        title="Categorias e regras"
+        title="TAGs e regras"
         subtitle="A árvore, as regras que categorizam sozinhas e o que o app aprendeu com você"
         actions={
           <div className="row">
             <Button icon="refresh" onClick={() => recategorize.mutate(true)} disabled={recategorize.isPending}>
-              Aplicar às sem categoria
+              Aplicar às sem TAG
             </Button>
             <Button
               variant="ghost"
@@ -175,11 +175,11 @@ function CategoryTree() {
     <>
       <div className="row row--between">
         <p className="muted" style={{ fontSize: 'var(--text-sm)', maxWidth: '70ch' }}>
-          Uma subcategoria herda a cor e o tipo da categoria-mãe: o gráfico de rosca agrupa por
+          Uma subTAG herda a cor e o tipo da TAG-mãe: o gráfico de rosca agrupa por
           mãe, então uma filha com cor própria reportaria o grupo errado.
         </p>
         <Button variant="primary" icon="plus" onClick={() => setAddingUnder('root')}>
-          Nova categoria-mãe
+          Nova TAG-mãe
         </Button>
       </div>
 
@@ -200,7 +200,7 @@ function CategoryTree() {
                       </span>
                       <span className="row" style={{ gap: 2 }}>
                         <Button variant="quiet" size="sm" icon="pencil" onClick={() => setEditing(node)} title="Editar" />
-                        <Button variant="quiet" size="sm" icon="plus" onClick={() => setAddingUnder(node)} title="Adicionar subcategoria" />
+                        <Button variant="quiet" size="sm" icon="plus" onClick={() => setAddingUnder(node)} title="Adicionar subTAG" />
                       </span>
                     </div>
                     <div style={{ paddingLeft: 24 }}>
@@ -275,13 +275,13 @@ function CategorySpendingView() {
     <>
       <div className="row row--between" style={{ marginBottom: 'var(--sp-3)' }}>
         <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
-          Quanto entrou e saiu por categoria-mãe, um mês por vez.
+          Quanto entrou e saiu por TAG-mãe, um mês por vez.
         </p>
         <PeriodNav period={period} onChange={setPeriod} max={meta.data?.today.slice(0, 7)} />
       </div>
 
       <Bento>
-        <Card span={6} title="Entradas por categoria" subtitle="Agrupado por categoria-mãe">
+        <Card span={6} title="Entradas por TAG" subtitle="Agrupado por TAG-mãe">
           <CategoryRing
             slices={spending.data?.incomeByCategory ?? []}
             childSlices={spending.data?.incomeByCategoryLeaf}
@@ -292,7 +292,7 @@ function CategorySpendingView() {
             onSliceClick={goToCategory}
           />
         </Card>
-        <Card span={6} title="Gastos por categoria" subtitle="Agrupado por categoria-mãe">
+        <Card span={6} title="Gastos por TAG" subtitle="Agrupado por TAG-mãe">
           <CategoryRing
             slices={spending.data?.byCategory ?? []}
             childSlices={spending.data?.byCategoryLeaf}
@@ -333,7 +333,7 @@ function CategoryModal({
         ? api.patch(`/categories/${node!.id}`, { name, color, kind, dreGroup: dreGroup || null })
         : api.post('/categories', { name, color, kind, dreGroup: dreGroup || null, parentId: parent?.id ?? null }),
     onSuccess: () => {
-      toast(isEdit ? 'Categoria atualizada' : 'Categoria criada')
+      toast(isEdit ? 'TAG atualizada' : 'TAG criada')
       queryClient.invalidateQueries()
       onClose()
     },
@@ -345,8 +345,8 @@ function CategoryModal({
     onSuccess: (result) => {
       toast(
         result.deleted
-          ? 'Categoria excluída'
-          : `Categoria arquivada, ${result.affected} lançamentos mantêm a classificação`,
+          ? 'TAG excluída'
+          : `TAG arquivada, ${result.affected} lançamentos mantêm a classificação`,
       )
       queryClient.invalidateQueries()
       onClose()
@@ -358,7 +358,7 @@ function CategoryModal({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[560px]">
         <DialogTitle>
-          {isEdit ? `Editar ${node!.name}` : parent ? `Nova subcategoria de ${parent.name}` : 'Nova categoria-mãe'}
+          {isEdit ? `Editar ${node!.name}` : parent ? `Nova subTAG de ${parent.name}` : 'Nova TAG-mãe'}
         </DialogTitle>
       <div className="stack">
         <div className="field">
@@ -429,7 +429,7 @@ function CategoryModal({
                 <span className="field__hint">
                   Só usado no DRE formal da conta PJ (specs/dre): define em que linha (Receita
                   Bruta, Dedução, Custo do serviço, Resultado financeiro, Imposto sobre o lucro)
-                  esta categoria entra. Sem escolher, cai no balde padrão.
+                  esta TAG entra. Sem escolher, cai no balde padrão.
                 </span>
               </div>
             )}
@@ -438,7 +438,7 @@ function CategoryModal({
 
         {isChild && (
           <p className="field__hint">
-            Subcategorias herdam cor, tipo e classificação de DRE da mãe automaticamente.
+            SubTAGs herdam cor, tipo e classificação de DRE da mãe automaticamente.
           </p>
         )}
       </div>
@@ -542,7 +542,7 @@ function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
                     <th style={{ width: 70, textAlign: 'right' }}>Prior.</th>
                     <th style={{ width: 110 }}>Condição</th>
                     <th>Padrão</th>
-                    <th>Categoria</th>
+                    <th>TAG</th>
                     <th style={{ width: 110 }}>Origem</th>
                     <th style={{ width: 70, textAlign: 'right' }}>Usos</th>
                     <th style={{ width: 44 }} />
@@ -609,7 +609,7 @@ function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
                 </span>
               </div>
               <div className="field">
-                <label className="field__label">Categoria</label>
+                <label className="field__label">TAG</label>
                 <CategorySelect value={categoryId} placeholder="Escolha" onChange={setCategoryId} />
               </div>
             </div>
@@ -665,7 +665,7 @@ function MemoryTable({ memory, isError }: { memory: Memory[]; isError?: boolean 
         <EmptyState
           icon="sparkle"
           title="Nada aprendido ainda"
-          body="Corrija a categoria de um lançamento e o padrão aparece aqui."
+          body="Corrija a TAG de um lançamento e o padrão aparece aqui."
         />
       ) : (
         <div className="table-wrap">
@@ -673,7 +673,7 @@ function MemoryTable({ memory, isError }: { memory: Memory[]; isError?: boolean 
             <thead>
               <tr>
                 <th>Assinatura do comerciante</th>
-                <th>Categoria</th>
+                <th>TAG</th>
                 <th style={{ width: 130, textAlign: 'right' }}>Confirmações</th>
                 <th style={{ width: 120 }}>Status</th>
                 <th style={{ width: 44 }} />

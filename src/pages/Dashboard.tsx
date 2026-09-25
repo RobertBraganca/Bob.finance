@@ -401,7 +401,7 @@ export function Dashboard() {
       </Card>
     ),
     'income-by-category': (
-      <Card span={spanOf('income-by-category')} title="Entradas por categoria" subtitle="Agrupado por categoria-mãe">
+      <Card span={spanOf('income-by-category')} title="Entradas por TAG" subtitle="Agrupado por TAG-mãe">
         <CategoryRing
           slices={incomeByCategory}
           childSlices={incomeByCategoryLeaf}
@@ -415,7 +415,7 @@ export function Dashboard() {
       </Card>
     ),
     'expense-by-category': (
-      <Card span={spanOf('expense-by-category')} title="Gastos por categoria" subtitle="Agrupado por categoria-mãe">
+      <Card span={spanOf('expense-by-category')} title="Gastos por TAG" subtitle="Agrupado por TAG-mãe">
         <CategoryRing
           slices={byCategory}
           childSlices={byCategoryLeaf}
@@ -483,8 +483,8 @@ export function Dashboard() {
             <Icon name="alert" size={16} />
             <span>
               <strong className="tabular">{totals.uncategorizedCount}</strong> lançamentos sem
-              categoria no período, e os gráficos os contam pelo sinal, o que pode distorcer a
-              quebra por categoria.
+              TAG no período, e os gráficos os contam pelo sinal, o que pode distorcer a
+              quebra por TAG.
             </span>
           </span>
           <Link to="/lancamentos?uncategorized=1">
@@ -1965,7 +1965,7 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
             <span className="field__hint">Usada para sugerir a conciliação quando o extrato real chegar.</span>
           </div>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">Categoria (opcional)</label>
+            <label className="field__label">TAG (opcional)</label>
             <CategorySelect
               value={categoryId}
               direction={flow === 'income' ? 'in' : 'out'}
@@ -2191,7 +2191,7 @@ function FirstRun() {
               <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-base)' }}>
                 O app já conhece o formato de CSV do Itaú, Nubank (conta e cartão), Bradesco,
                 Santander e Inter: detecta o banco pelo cabeçalho, normaliza datas e valores,
-                marca duplicatas e sugere categorias antes de gravar qualquer coisa.
+                marca duplicatas e sugere TAGs antes de gravar qualquer coisa.
               </p>
               <div className="row" style={{ marginTop: 'var(--sp-2)' }}>
                 <Link to="/importar">

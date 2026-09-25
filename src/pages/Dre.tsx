@@ -135,7 +135,7 @@ export function DrePage() {
     <>
       <PageHeader
         title="DRE PJ x PF"
-        subtitle="Receita e despesa por categoria, separadas por conta"
+        subtitle="Receita e despesa por TAG, separadas por conta"
         actions={<RangeFilter hideAccountFilter />}
       />
 
@@ -559,7 +559,7 @@ function DreColumn({
         <table className="table">
           <thead>
             <tr>
-              <th>Categoria</th>
+              <th>TAG</th>
               <th className="table__num" style={{ width: 64 }}>Qtde</th>
               <th className="table__num" style={{ width: 64 }}>%</th>
               <th className="table__num" style={{ width: 120 }}>Valor</th>
@@ -678,7 +678,7 @@ function UncategorizedPanel({
         <span className="row" style={{ gap: 'var(--sp-2)' }}>
           <Icon name="alert" size={14} />
           <strong style={{ fontSize: 'var(--text-sm)' }}>
-            {data.totalCount.toLocaleString('pt-BR')} lançamentos sem categoria
+            {data.totalCount.toLocaleString('pt-BR')} lançamentos sem TAG
           </strong>
         </span>
         <Link to="/lancamentos?uncategorized=1" className="btn btn--ghost btn--sm">
@@ -687,7 +687,7 @@ function UncategorizedPanel({
       </div>
 
       <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-        Agrupado por quem enviou ou recebeu: escolha uma categoria para classificar todos os
+        Agrupado por quem enviou ou recebeu: escolha uma TAG para classificar todos os
         lançamentos do grupo de uma vez.
         {data.hasMore &&
           ` Mostrando os ${data.groups.length} maiores grupos de ${data.groupCount}; o resto está em Lançamentos.`}

@@ -141,12 +141,12 @@ export function CategoryRing({
     <ChartFrame
       isEmpty={!hasData}
       emptyTitle="Nada categorizado ainda"
-      emptyBody="Depois da primeira importação, os gastos aparecem agrupados por categoria aqui."
+      emptyBody="Depois da primeira importação, os gastos aparecem agrupados por TAG aqui."
       table={{
-        caption: 'Gastos por categoria',
+        caption: 'Gastos por TAG',
         rows: segments,
         columns: [
-          { header: 'Categoria', value: (row) => row.name },
+          { header: 'TAG', value: (row) => row.name },
           { header: countLabel, value: (row) => row.transactionCount, align: 'right' },
           { header: 'Participação', value: (row) => `${(row.shareBps / 100).toFixed(1)}%`, align: 'right' },
           { header: 'Valor', value: (row) => money(row.amountCents), align: 'right' },
@@ -276,7 +276,7 @@ export function CategoryRing({
                       <li key={child.categoryId ?? child.name} className="ranked__item--child">
                         <span className="swatch swatch--sm" style={{ background: child.color }} />
                         <span className="truncate">
-                          {child.categoryId === segment.categoryId ? `${child.name} (sem subcategoria)` : child.name}
+                          {child.categoryId === segment.categoryId ? `${child.name} (sem subTAG)` : child.name}
                         </span>
                         <span className="ranked__share">{(child.shareBps / 100).toFixed(1)}%</span>
                         <span className="ranked__value">{money(child.amountCents)}</span>

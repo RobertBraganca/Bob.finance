@@ -31,7 +31,7 @@ const LABELS: Record<string, string> = {
   atualBps: 'Percentual atual',
   capCents: 'Teto configurado',
   cartoesConsiderados: 'Cartões considerados',
-  categoria: 'Categoria',
+  categoria: 'TAG',
   // Both travel in the same bag: the code for machines, the label for people.
   // Giving them the same caption would print "Classe" twice, in a row.
   classe: 'Código da classe',
