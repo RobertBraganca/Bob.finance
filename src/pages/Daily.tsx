@@ -278,7 +278,7 @@ function QuickAdd({ today }: { today: string }) {
           />
         </div>
         <div className="field" style={{ minWidth: 200, flex: 1 }}>
-          <label className="field__label">Categoria</label>
+          <label className="field__label">TAG</label>
           <CategorySelect value={categoryId} direction="out" onChange={setCategoryId} />
         </div>
         <div className="field" style={{ minWidth: 180, flex: 1 }}>
@@ -351,7 +351,7 @@ function RecentDaily({ period }: { period: string }) {
               <tr>
                 <th style={{ width: 110 }}>Data</th>
                 <th>Nota</th>
-                <th style={{ width: 200 }}>Categoria</th>
+                <th style={{ width: 200 }}>TAG</th>
                 <th className="table__num" style={{ width: 130 }}>Valor</th>
               </tr>
             </thead>
@@ -363,7 +363,7 @@ function RecentDaily({ period }: { period: string }) {
                   <td>
                     <span className="row" style={{ gap: 'var(--sp-2)' }}>
                       {row.categoryColor && <span className="swatch" style={{ background: row.categoryColor }} />}
-                      <span className="truncate">{row.categoryName ?? 'Sem categoria'}</span>
+                      <span className="truncate">{row.categoryName ?? 'Sem TAG'}</span>
                     </span>
                   </td>
                   <td className="table__num neg">{money(row.amountCents)}</td>

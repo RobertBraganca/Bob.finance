@@ -113,6 +113,28 @@ function hash(value: string): number {
   return h
 }
 
+/**
+ * Same relative-luminance formula as `scripts/check-contrast.mjs`, applied
+ * at runtime: a heatmap cell's fill is DATA-DRIVEN (one of 8 sequential
+ * steps, either ramp), so no fixed foreground/background pair can be
+ * hardcoded there the way the rest of the design system does it.
+ *
+ * Provably safe rather than tuned by eye: picking whichever of pure black
+ * or pure white has the higher contrast ratio against a background of
+ * luminance L guarantees at least 4.583:1 for EVERY possible L (the ratios
+ * cross at L=0.179, both sides equal to that value there) -- comfortably
+ * above the 4.5:1 this codebase requires of small text elsewhere.
+ */
+export function textOnFill(hex: string): string {
+  const c = hex.replace('#', '')
+  const lin = (v: number) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+  const [r, g, b] = [0, 2, 4].map((i) => lin(parseInt(c.slice(i, i + 2), 16) / 255))
+  const luminance = 0.2126 * r! + 0.7152 * g! + 0.0722 * b!
+  const contrastWithBlack = (luminance + 0.05) / 0.05
+  const contrastWithWhite = 1.05 / (luminance + 0.05)
+  return contrastWithBlack >= contrastWithWhite ? '#09090b' : '#ffffff'
+}
+
 /* ---- Fixed mark specs, applied to every chart -------------------- */
 export const MARK = {
   /** bars never fill their band — the leftover is deliberate air */

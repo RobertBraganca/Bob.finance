@@ -1,12 +1,15 @@
 import { useState } from 'react'
-import { money } from '../../lib/format'
-import { themeFor, type Surface } from '../../lib/chartTheme'
+import { money, moneyCompactPlain } from '../../lib/format'
+import { textOnFill, themeFor, type Surface } from '../../lib/chartTheme'
 import { useEffectiveSurface } from '../../lib/theme'
 import { EmptyState } from '../ui'
 
 export type HeatmapDay = { day: string; expenseCents: number; transactionCount: number }
 
-const WEEKDAY_LETTERS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
+// Abreviação de 3 letras em vez de uma só (ajuste de 25/09/2026, a pedido do
+// usuário) — mais legível que "D S T Q Q S S", que exige já saber a ordem
+// dos dias da semana de cor pra decifrar.
+const WEEKDAY_LABELS = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB']
 
 /**
  * Item 8 do backlog de 07/09/2026: mapa de calor por dia do mês, gasto
@@ -29,6 +32,10 @@ const WEEKDAY_LETTERS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
 export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[]; surface?: Surface }) {
   const theme = themeFor(useEffectiveSurface(surface))
   const [hovered, setHovered] = useState<HeatmapDay | null>(null)
+  // Toque fixa o detalhe (mouse não existe em touch, então só `hovered`
+  // nunca mostrava nada no celular) — clicar de novo no mesmo dia desmarca.
+  const [selected, setSelected] = useState<HeatmapDay | null>(null)
+  const shown = hovered ?? selected
 
   const confirmedDays = days.filter((d) => d.transactionCount > 0)
   if (confirmedDays.length === 0) {
@@ -44,6 +51,8 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
   const totalCents = confirmedDays.reduce((sum, d) => sum + d.expenseCents, 0)
   const maxCents = Math.max(...days.map((d) => d.expenseCents))
   const busiestDay = days.reduce((max, d) => (d.expenseCents > max.expenseCents ? d : max), days[0]!)
+  const noSpendDays = days.length - confirmedDays.length
+  const avgPerActiveDayCents = Math.round(totalCents / confirmedDays.length)
 
   // Índice 0-7 na escala sequencial, proporcional ao maior gasto do mês --
   // nunca ao maior gasto HISTÓRICO, porque um mês de referência diferente
@@ -64,9 +73,6 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
         <div>
           <span className="stat__label">Mapa de calor</span>
           <div className="stat__value">{money(totalCents)}</div>
-          <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-            Média diária: {money(Math.round(totalCents / confirmedDays.length))}
-          </span>
         </div>
       </div>
 
@@ -76,34 +82,71 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
           uma tentativa anterior travou largura E altura, deixando um bloco
           pequeno colado à esquerda em vez de ocupar a linha inteira). */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 }}>
-        {WEEKDAY_LETTERS.map((letter, i) => (
+        {WEEKDAY_LABELS.map((label, i) => (
           <div
             key={i}
             className="muted"
             style={{ textAlign: 'center', fontSize: 'var(--text-2xs)', fontWeight: 600 }}
           >
-            {letter}
+            {label}
           </div>
         ))}
-        {cells.map((cell, i) =>
-          cell === null ? (
-            <div key={`blank-${i}`} />
-          ) : (
+        {cells.map((cell, i) => {
+          if (cell === null) return <div key={`blank-${i}`} />
+
+          const hasSpend = cell.transactionCount > 0
+          const fill = hasSpend ? colorFor(cell.expenseCents) : 'var(--surface-muted)'
+          // A cor do texto segue a cor de FUNDO real da célula, nunca um
+          // token fixo do tema: só a célula com gasto tem um fundo
+          // arbitrário vindo de dado (`textOnFill`); a célula sem gasto
+          // fica na leitura padrão do app (`--ink-3`, discreta de propósito).
+          const textColor = hasSpend ? textOnFill(fill) : 'var(--ink-3)'
+          const dayNumber = Number(cell.day.slice(-2))
+
+          return (
             <div
               key={cell.day}
+              role={hasSpend ? 'button' : undefined}
+              tabIndex={hasSpend ? 0 : undefined}
               onMouseEnter={() => setHovered(cell)}
               onMouseLeave={() => setHovered((current) => (current?.day === cell.day ? null : current))}
+              onClick={() => {
+                if (!hasSpend) return
+                setSelected((current) => (current?.day === cell.day ? null : cell))
+              }}
+              onKeyDown={(e) => {
+                if (!hasSpend) return
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setSelected((current) => (current?.day === cell.day ? null : cell))
+                }
+              }}
               title={`${cell.day}: ${money(cell.expenseCents)}`}
               style={{
-                height: 28,
+                height: 44,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 1,
                 borderRadius: 'var(--r-sm)',
-                background: cell.transactionCount > 0 ? colorFor(cell.expenseCents) : 'var(--surface-muted)',
-                cursor: cell.transactionCount > 0 ? 'pointer' : 'default',
-                border: hovered?.day === cell.day ? `2px solid ${theme.axisText}` : '2px solid transparent',
+                background: fill,
+                color: textColor,
+                cursor: hasSpend ? 'pointer' : 'default',
+                border: shown?.day === cell.day ? `2px solid ${theme.axisText}` : '2px solid transparent',
               }}
-            />
-          ),
-        )}
+            >
+              <span style={{ fontSize: 'var(--text-2xs)', lineHeight: 1, opacity: hasSpend ? 0.85 : 1 }}>
+                {dayNumber}
+              </span>
+              {hasSpend && (
+                <span className="tabular" style={{ fontSize: 'var(--text-2xs)', lineHeight: 1, fontWeight: 700 }}>
+                  {moneyCompactPlain(cell.expenseCents)}
+                </span>
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {/*
@@ -116,10 +159,10 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
         só trocando o CONTEÚDO de dentro, a altura nunca muda.
       */}
       <div style={{ padding: 'var(--sp-2) var(--sp-3)', borderRadius: 'var(--r-card)', background: 'var(--surface-muted)', minHeight: 44 }}>
-        {hovered ? (
+        {shown ? (
           <span className="row row--wrap" style={{ gap: 'var(--sp-2)', alignItems: 'baseline' }}>
             <strong style={{ fontSize: 'var(--text-sm)' }}>
-              {new Date(`${hovered.day}T00:00:00Z`).toLocaleDateString('pt-BR', {
+              {new Date(`${shown.day}T00:00:00Z`).toLocaleDateString('pt-BR', {
                 weekday: 'long',
                 day: 'numeric',
                 month: 'long',
@@ -133,30 +176,60 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
                 timeZone: 'UTC',
               })}
             </strong>
-            <span className="tabular">{money(hovered.expenseCents)}</span>
+            <span className="tabular">{money(shown.expenseCents)}</span>
             <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-              {hovered.transactionCount} transação(ões)
+              {shown.transactionCount} transação(ões)
             </span>
           </span>
         ) : (
           <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-            Passe o mouse sobre um dia para ver o detalhe
+            Toque ou passe o mouse sobre um dia para ver o detalhe
           </span>
         )}
       </div>
 
-      <div className="row row--between" style={{ fontSize: 'var(--text-2xs)' }}>
-        <span className="row" style={{ gap: 4 }}>
-          <span className="muted">Menos</span>
-          {theme.sequential.map((color, i) => (
-            <span key={i} style={{ width: 12, height: 12, borderRadius: 3, background: color, display: 'inline-block' }} />
-          ))}
-          <span className="muted">Mais</span>
-        </span>
-        <span className="muted">
-          Maior gasto: <strong className="tabular">{money(busiestDay.expenseCents)}</strong> dia{' '}
-          {Number(busiestDay.day.slice(-2))}
-        </span>
+      {/* 3 estatísticas fixas (ajuste de 25/09/2026, a pedido do usuário) —
+          antes só "maior gasto" aparecia, e enfiado dentro da legenda de
+          cores. Mesmo grid de 3 colunas usado em outros cards de resumo do
+          projeto. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sp-3)' }}>
+        <div className="stack" style={{ gap: 2 }}>
+          <span className="muted" style={{ fontSize: 'var(--text-2xs)', fontWeight: 600 }}>
+            Média por dia
+          </span>
+          <span className="tabular" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+            {money(avgPerActiveDayCents)}
+          </span>
+        </div>
+        <div className="stack" style={{ gap: 2 }}>
+          <span className="muted" style={{ fontSize: 'var(--text-2xs)', fontWeight: 600 }}>
+            Maior dia
+          </span>
+          <span className="tabular" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+            {new Date(`${busiestDay.day}T00:00:00Z`).toLocaleDateString('pt-BR', {
+              day: '2-digit',
+              month: '2-digit',
+              timeZone: 'UTC',
+            })}{' '}
+            · {money(busiestDay.expenseCents)}
+          </span>
+        </div>
+        <div className="stack" style={{ gap: 2 }}>
+          <span className="muted" style={{ fontSize: 'var(--text-2xs)', fontWeight: 600 }}>
+            Dias sem saída
+          </span>
+          <span className="tabular" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+            {noSpendDays}
+          </span>
+        </div>
+      </div>
+
+      <div className="row" style={{ fontSize: 'var(--text-2xs)', gap: 4 }}>
+        <span className="muted">Menos</span>
+        {theme.sequential.map((color, i) => (
+          <span key={i} style={{ width: 12, height: 12, borderRadius: 3, background: color, display: 'inline-block' }} />
+        ))}
+        <span className="muted">Mais</span>
       </div>
     </div>
   )

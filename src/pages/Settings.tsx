@@ -395,7 +395,7 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
   const launch = useMutation({
     mutationFn: () => {
       if (diffCents === 0) throw new Error('não há diferença para lançar')
-      if (mode === 'manual' && categoryId === null) throw new Error('escolha uma categoria')
+      if (mode === 'manual' && categoryId === null) throw new Error('escolha uma TAG')
       return api.post('/transactions', {
         accountId: account.id,
         postedOn,
@@ -475,7 +475,7 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
               <TextInput value={postedOn} onChange={setPostedOn} type="date" />
             </div>
             <p className="chart__note">
-              Categoria "Financeiro/Reajuste de saldo": não conta como receita nem despesa, é uma
+              TAG "Financeiro/Reajuste de saldo": não conta como receita nem despesa, é uma
               correção de registro.
             </p>
           </>
@@ -492,7 +492,7 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
               <TextInput value={description} onChange={setDescription} placeholder="ex. saque em espécie" />
             </div>
             <div className="field">
-              <label className="field__label">Categoria</label>
+              <label className="field__label">TAG</label>
               <CategorySelect value={categoryId} onChange={setCategoryId} direction={direction} />
             </div>
             <p className="chart__note">
@@ -754,7 +754,7 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
               ['debit', 'Débito', needs('debit')],
               ['credit', 'Crédito', needs('credit')],
               ['typeFlag', 'Tipo (D/C)', needs('typeFlag')],
-              ['rawCategory', 'Categoria do banco', false],
+              ['rawCategory', 'TAG do banco', false],
             ]
               .filter(([, , show]) => show !== false || ['rawCategory'].includes(String(0)))
               .map(([key, label, required]) => (
@@ -773,7 +773,7 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
                 </div>
               ))}
             <div className="field" style={{ minWidth: 170, flex: 1 }}>
-              <label className="field__label">Categoria do banco</label>
+              <label className="field__label">TAG do banco</label>
               <TextInput
                 value={columnMap.rawCategory ?? ''}
                 onChange={(value) => setColumnMap((current) => ({ ...current, rawCategory: value }))}

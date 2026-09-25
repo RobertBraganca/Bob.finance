@@ -21,7 +21,7 @@ export function CategorySelect({
   value,
   onChange,
   direction,
-  placeholder = 'Sem categoria',
+  placeholder = 'Sem TAG',
   bare,
 }: {
   id?: string
@@ -39,7 +39,7 @@ export function CategorySelect({
       value={value}
       onChange={onChange}
       placeholder={placeholder}
-      ariaLabel="Categoria"
+      ariaLabel="TAG"
       renderTrigger={({ label, triggerProps }) => (
         <button id={id} {...triggerProps} className={bare ? 'select select--bare' : 'select'}>
           <span className="select__value truncate">{label}</span>

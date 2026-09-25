@@ -65,7 +65,7 @@ const NAV_SECTIONS: NavSection[] = [
 const SETTINGS_NAV: NavItem[] = [
   { to: '/ajustes', label: 'Contas e bancos', icon: 'bank' },
   { to: '/cartoes', label: 'Cartões', icon: 'wallet' },
-  { to: '/categorias', label: 'Categorias e regras', icon: 'tags' },
+  { to: '/categorias', label: 'TAGs e regras', icon: 'tags' },
   { to: '/importar', label: 'Importar', icon: 'upload' },
 ]
 

@@ -44,6 +44,7 @@ import {
   IconGripVertical,
   IconLogout,
   IconEyeOff,
+  IconBellFilled,
   type Icon as TablerIcon,
 } from '@tabler/icons-react'
 
@@ -134,6 +135,7 @@ const ICONS: Record<string, TablerIcon> = {
   logout: IconLogout,
   // Sem "eye-off" filled na Tabler — outline mantido (ocultar lançamento).
   eyeOff: IconEyeOff,
+  bell: IconBellFilled,
 }
 
 export type IconName = keyof typeof ICONS

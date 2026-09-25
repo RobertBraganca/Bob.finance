@@ -30,6 +30,20 @@ export function axisMoney(cents: number): string {
   return `${sign}${Math.round(value)}`
 }
 
+/**
+ * Compact like `moneyCompact`, minus the "R$" (too tight a space for it,
+ * e.g. a heatmap day cell) -- but unlike `axisMoney`, never rounds off the
+ * "mil"/"mi" tier's own precision, and a value below R$ 1.000 prints its
+ * exact cents instead of a rounded integer: "2 mil" / "350,00" / "250,5 mil".
+ */
+export function moneyCompactPlain(cents: number): string {
+  const value = Math.abs(cents) / 100
+  const sign = cents < 0 ? '-' : ''
+  if (value >= 1_000_000) return `${sign}${decimal.format(value / 1_000_000)} mi`
+  if (value >= 1_000) return `${sign}${decimal.format(Math.round(value / 100) / 10)} mil`
+  return `${sign}${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 export const bps = (value: number, digits = 1) =>
   `${(value / 100).toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`
 

@@ -68,6 +68,15 @@ const pairs = [
   ['series pink (slab)',    '#ff2ea6', '#080808', 3.0],
   ['series green (slab)',   '#32d74b', '#080808', 3.0],
   ['series purple (slab)',  '#ba2be2', '#080808', 3.0],
+  // Mapa de calor (SpendingHeatmap, 25/09/2026): texto (dia + valor) pintado
+  // DIRETO sobre a célula colorida, cuja cor é um dos 8 degraus da rampa
+  // sequencial -- `textOnFill()` em chartTheme.ts escolhe preto ou branco
+  // por luminância, e estes dois pares são os dois graus mais PRÓXIMOS do
+  // cruzamento (0007bff escolhe escuro, 0063cc escolhe claro; o mesmo par de
+  // hex aparece nas duas rampas, só em ordem invertida, então cobre os dois
+  // temas). Ficam aqui para que o algoritmo nunca escolha errado calado.
+  ['heatmap celula #007bff (texto escuro)', '#09090b', '#007bff', 4.5],
+  ['heatmap celula #0063cc (texto claro)', '#ffffff', '#0063cc', 4.5],
 ]
 let bad = 0
 for (const [name, fg, bg, min] of pairs) {

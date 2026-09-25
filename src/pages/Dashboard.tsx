@@ -26,7 +26,6 @@ import {
   type BentoSpan,
 } from '../lib/bentoLayout'
 import {
-  Assumptions,
   Bento,
   Button,
   Card,
@@ -47,12 +46,9 @@ import {
   StatTile,
   TextInput,
   useToast,
-  type AssumptionBag,
-  type IconName,
   type MeterState,
   type PendingDeleteScope,
 } from '../components/ui'
-import { Alert, AlertAction, AlertDescription, AlertTitle } from '../components/ui/alert'
 import { PageHeader, RangeFilter } from '../components/shell/Shell'
 import { IncomeExpenseChart } from '../components/charts/IncomeExpenseChart'
 import { TransactionForm, type TransactionFormValue } from '../components/forms/TransactionForm'
@@ -405,7 +401,7 @@ export function Dashboard() {
       </Card>
     ),
     'income-by-category': (
-      <Card span={spanOf('income-by-category')} title="Entradas por categoria" subtitle="Agrupado por categoria-mãe">
+      <Card span={spanOf('income-by-category')} title="Entradas por TAG" subtitle="Agrupado por TAG-mãe">
         <CategoryRing
           slices={incomeByCategory}
           childSlices={incomeByCategoryLeaf}
@@ -419,7 +415,7 @@ export function Dashboard() {
       </Card>
     ),
     'expense-by-category': (
-      <Card span={spanOf('expense-by-category')} title="Gastos por categoria" subtitle="Agrupado por categoria-mãe">
+      <Card span={spanOf('expense-by-category')} title="Gastos por TAG" subtitle="Agrupado por TAG-mãe">
         <CategoryRing
           slices={byCategory}
           childSlices={byCategoryLeaf}
@@ -487,8 +483,8 @@ export function Dashboard() {
             <Icon name="alert" size={16} />
             <span>
               <strong className="tabular">{totals.uncategorizedCount}</strong> lançamentos sem
-              categoria no período, e os gráficos os contam pelo sinal, o que pode distorcer a
-              quebra por categoria.
+              TAG no período, e os gráficos os contam pelo sinal, o que pode distorcer a
+              quebra por TAG.
             </span>
           </span>
           <Link to="/lancamentos?uncategorized=1">
@@ -520,7 +516,6 @@ export function Dashboard() {
       />
 
       <div className="page" style={{ opacity: dashboard.isFetching ? 0.72 : 1, transition: 'opacity 120ms' }}>
-        <Insights />
         <Bento>
           {bento.layout
             .filter((c) => isVisible(c.id))
@@ -688,258 +683,6 @@ function BentoSettingsModal({
  * then one page per card — because "limite total" and "limite disponível"
  * don't mean anything summed across cards with different due dates.
  */
-/* ================================================================== *
- * Termômetro mensal — avisos temporários e dispensáveis
- *
- * Diferente de "Modo mês" logo abaixo (card fixo, sempre visível): estes
- * só aparecem quando o servidor (`homeBanners()`, goals.ts) tem algo
- * ESPECÍFICO a dizer sobre o mês corrente — estourou/está no ritmo de
- * estourar um teto, uma categoria concentra boa parte do gasto, ou a
- * projeção do mês foge do mês passado. Sempre um dado ("no ritmo
- * atual..."), nunca um veredito ("você falhou"). Dispensar é só de HOJE
- * (localStorage por data) — se o motivo continuar amanhã, o aviso volta;
- * não é "nunca mais mostrar isso".
- * ================================================================== */
-type HomeBannerSeverity = 'good' | 'warning' | 'critical'
-
-type HomeBanner = { id: string; severity: HomeBannerSeverity; assumptions: AssumptionBag } & (
-  | { kind: 'spend_cap_exceeded'; spentCents: number; capCents: number }
-  | { kind: 'spend_cap_at_risk'; projectedCents: number; capCents: number }
-  | { kind: 'category_cap_exceeded'; categoryName: string; spentCents: number; capCents: number }
-  | { kind: 'category_cap_at_risk'; categoryName: string; spentCents: number; capCents: number }
-  | { kind: 'category_concentration'; categoryName: string; shareBps: number }
-  | { kind: 'trend_up'; deltaBps: number }
-  | { kind: 'trend_down'; deltaBps: number }
-)
-
-/**
- * Duas fontes a mais, unidas na mesma seção "Insights": o Radar de risco
- * (specs/financial-health) já roda com limite configurável e `assumptions`
- * — só nunca tinha aparecido fora da própria tela de Saúde financeira, que
- * recebe 1/5 das visitas do Painel (achado do estudo `docs/estudo-
- * viabilidade-stacks-intuit-vs-uso-real.md`, 10/09/2026). Tipos mínimos,
- * só os campos que este card lê — mesmo padrão de todo outro local type
- * deste arquivo.
- */
-type RiskRule = {
-  key: string
-  label: string
-  valueBps: number
-  thresholdBps: number
-  unit: 'share' | 'points'
-  direction: 'above' | 'below'
-  outsideRange: boolean
-  exceedsPositively: boolean
-  assumptions: AssumptionBag
-}
-
-type ClosingChecklistItem = { key: string; label: string; kind: 'auto' | 'manual'; done: boolean; detail: string }
-type ClosingChecklist = { period: string; items: ClosingChecklistItem[]; reviewedAt: string | null }
-
-/** Uma forma comum pras três fontes renderizarem no mesmo `Alert`, sem un-cast em cada uso. */
-type InsightItem = {
-  id: string
-  severity: HomeBannerSeverity | 'neutral'
-  title: string
-  description: string
-  assumptions: AssumptionBag
-  /** só o Radar de risco e o lembrete de fechamento apontam pra fora do Painel — os banners de gasto já estão na própria tela. */
-  linkTo?: string
-}
-
-/**
- * Título curto (escaneável) + descrição com o detalhe/números — mesma
- * composição que a própria doc do shadcn usa em todo exemplo (nunca só
- * AlertDescription sozinha: o CSS do componente assume um grid de 2
- * linhas, ícone ocupando as duas via row-span — sem AlertTitle a grade
- * não fecha e o layout sai torto). Moeda/percentual sempre formatados
- * aqui, nunca no backend.
- */
-function bannerContent(b: HomeBanner): { title: string; description: string } {
-  switch (b.kind) {
-    case 'spend_cap_exceeded':
-      return {
-        title: 'Teto de gasto do mês estourado',
-        description: `${money(b.spentCents)} de um teto de ${money(b.capCents)}.`,
-      }
-    case 'spend_cap_at_risk':
-      return {
-        title: 'No ritmo de estourar o teto do mês',
-        description: `Projeção de fechamento: ${money(b.projectedCents)}, acima do teto de ${money(b.capCents)}.`,
-      }
-    case 'category_cap_exceeded':
-      return {
-        title: `Categoria ${b.categoryName} passou do teto`,
-        description: `${money(b.spentCents)} de ${money(b.capCents)} usados este mês.`,
-      }
-    case 'category_cap_at_risk':
-      return {
-        title: `Categoria ${b.categoryName} no ritmo de passar do teto`,
-        description: `${money(b.spentCents)} de ${money(b.capCents)} já usados este mês.`,
-      }
-    case 'category_concentration':
-      return {
-        title: `Categoria ${b.categoryName} concentra o gasto do mês`,
-        description: `Representa ${bps(b.shareBps, 0)} do total gasto este mês.`,
-      }
-    case 'trend_up':
-      return {
-        title: 'Seus gastos estão subindo',
-        description: `No ritmo atual, a projeção deste mês é ${bps(b.deltaBps, 0)} maior que o mês passado.`,
-      }
-    case 'trend_down':
-      return {
-        title: 'Seus gastos estão em queda',
-        description: `No ritmo atual, ${bps(Math.abs(b.deltaBps), 0)} menores que no mês passado.`,
-      }
-  }
-}
-
-type InsightSeverity = HomeBannerSeverity | 'neutral'
-const BANNER_ICON: Record<InsightSeverity, IconName> = {
-  good: 'check',
-  warning: 'alert',
-  critical: 'alert',
-  neutral: 'clock',
-}
-
-function dismissedBannersKey() {
-  // Por data (não um "nunca mais") — mesmo padrão de chave usada em
-  // outros lugares deste arquivo para "hoje" (new Date().toISOString()).
-  return `bob-finance:dismissed-banners:${new Date().toISOString().slice(0, 10)}`
-}
-
-/**
- * "Fora da faixa" e "acima da folga" viram Observação aqui do mesmo jeito
- * que já são na própria tela de Saúde financeira (`RiskRow`) — mesma
- * frase, sem duplicar a régua de bom/ruim em dois lugares.
- */
-function riskRuleContent(r: RiskRule): { title: string; description: string } {
-  const format = r.unit === 'points' ? points : bps
-  const comparison = r.direction === 'above' ? 'acima de' : 'abaixo de'
-  return {
-    title: r.label,
-    description: `${format(r.valueBps)}, seu limite: ${comparison} ${format(r.thresholdBps)}.`,
-  }
-}
-
-/**
- * Insights: une três fontes que já existiam separadas — banners de gasto
- * (`/home/banners`), Radar de risco (`/financial-health/risk-radar`,
- * antes só na tela de Saúde financeira) e o lembrete do checklist de
- * fechamento mensal (`/financial-health/closing-checklist`) — na tela
- * mais visitada do produto (achado de `docs/estudo-viabilidade-stacks-
- * intuit-vs-uso-real.md`, 10/09/2026: Painel tem 5x as visitas de Saúde
- * financeira). Nenhuma fórmula nova: as três rotas já existiam, cada
- * regra já carrega `assumptions`, e nada aqui vira recomendação — Radar
- * de risco e checklist continuam Observação, exatamente como já são nas
- * próprias telas (decisions/0010).
- */
-function Insights() {
-  const currentPeriod = new Date().toISOString().slice(0, 7)
-
-  const bannersQuery = useQuery({
-    queryKey: ['home-banners'],
-    queryFn: () => api.get<{ banners: HomeBanner[] }>('/home/banners'),
-  })
-  const riskQuery = useQuery({
-    queryKey: ['dashboard-risk-radar', currentPeriod],
-    queryFn: () => api.get<{ rules: RiskRule[] }>('/financial-health/risk-radar', { period: currentPeriod }),
-  })
-  const checklistQuery = useQuery({
-    queryKey: ['dashboard-closing-checklist', currentPeriod],
-    queryFn: () => api.get<ClosingChecklist>('/financial-health/closing-checklist', { period: currentPeriod }),
-  })
-
-  const [dismissed, setDismissed] = useState<Set<string>>(() => {
-    try {
-      const raw = localStorage.getItem(dismissedBannersKey())
-      return raw ? new Set(JSON.parse(raw)) : new Set()
-    } catch {
-      return new Set()
-    }
-  })
-
-  const dismiss = (id: string) => {
-    setDismissed((prev) => {
-      const next = new Set(prev).add(id)
-      try {
-        localStorage.setItem(dismissedBannersKey(), JSON.stringify([...next]))
-      } catch {
-        // localStorage indisponível (modo privado, etc.) — a dispensa só dura a sessão.
-      }
-      return next
-    })
-  }
-
-  const items: InsightItem[] = []
-
-  for (const b of bannersQuery.data?.banners ?? []) {
-    const { title, description } = bannerContent(b)
-    items.push({ id: b.id, severity: b.severity, title, description, assumptions: b.assumptions })
-  }
-
-  for (const r of riskQuery.data?.rules ?? []) {
-    if (!r.outsideRange && !r.exceedsPositively) continue
-    const { title, description } = riskRuleContent(r)
-    items.push({
-      id: `risk-${r.key}`,
-      severity: r.exceedsPositively ? 'good' : 'warning',
-      title,
-      description,
-      assumptions: r.assumptions,
-      linkTo: '/saude',
-    })
-  }
-
-  const closingItem = checklistQuery.data?.items.find((i) => i.kind === 'manual')
-  if (closingItem && !closingItem.done) {
-    items.push({
-      id: 'closing-checklist',
-      severity: 'neutral',
-      title: 'Fechamento do mês ainda não revisado',
-      description: closingItem.detail,
-      assumptions: { formula: 'item manual do checklist de fechamento mensal', origem: 'specs/financial-health' },
-      linkTo: '/saude',
-    })
-  }
-
-  const rank: Record<InsightSeverity, number> = { critical: 0, warning: 1, neutral: 2, good: 3 }
-  const visible = items
-    .filter((i) => !dismissed.has(i.id))
-    .sort((a, b) => rank[a.severity] - rank[b.severity])
-    .slice(0, 5)
-
-  if (visible.length === 0) return null
-
-  return (
-    <div className="stack stack--tight" style={{ marginBottom: 'var(--sp-4)' }}>
-      {visible.map((item) => (
-        <Alert key={item.id} variant={item.severity === 'neutral' ? 'default' : item.severity}>
-          <Icon name={BANNER_ICON[item.severity]} size={16} />
-          <AlertTitle>{item.title}</AlertTitle>
-          <AlertDescription>
-            {item.description}
-            <Assumptions data={item.assumptions} compact />
-          </AlertDescription>
-          <AlertAction>
-            <div className="row" style={{ gap: 2 }}>
-              {item.linkTo && (
-                <Link to={item.linkTo}>
-                  <Button variant="ghost" size="sm">
-                    Ver
-                  </Button>
-                </Link>
-              )}
-              <Button variant="ghost" size="sm" icon="x" title="Dispensar por hoje" onClick={() => dismiss(item.id)} />
-            </div>
-          </AlertAction>
-        </Alert>
-      ))}
-    </div>
-  )
-}
-
 /* ================================================================== *
  * "Modo mês"
  *
@@ -2222,7 +1965,7 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
             <span className="field__hint">Usada para sugerir a conciliação quando o extrato real chegar.</span>
           </div>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">Categoria (opcional)</label>
+            <label className="field__label">TAG (opcional)</label>
             <CategorySelect
               value={categoryId}
               direction={flow === 'income' ? 'in' : 'out'}
@@ -2448,7 +2191,7 @@ function FirstRun() {
               <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-base)' }}>
                 O app já conhece o formato de CSV do Itaú, Nubank (conta e cartão), Bradesco,
                 Santander e Inter: detecta o banco pelo cabeçalho, normaliza datas e valores,
-                marca duplicatas e sugere categorias antes de gravar qualquer coisa.
+                marca duplicatas e sugere TAGs antes de gravar qualquer coisa.
               </p>
               <div className="row" style={{ marginTop: 'var(--sp-2)' }}>
                 <Link to="/importar">

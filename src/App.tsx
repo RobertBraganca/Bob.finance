@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/shell/Shell'
+import { NotificationsBell } from './components/shell/NotificationsBell'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from './components/ui/sidebar'
 import { Card, Icon, PageSkeleton } from './components/ui'
 import { telemetry } from './lib/telemetry'
@@ -115,9 +116,18 @@ export function App() {
     <SidebarProvider>
       <Sidebar />
       <SidebarInset>
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
-          <SidebarTrigger />
-          <span className="text-sm font-semibold">Finanças</span>
+        {/* Barra persistente em TODA tela e largura (deixou de ser md:hidden
+            em 25/09/2026): o sino de notificações precisa de um lugar
+            sempre visível, e nenhuma outra chrome do app cobre esse papel
+            no desktop (cada página desenha o próprio `PageHeader`). Trigger
+            + título continuam só no mobile, papel que já cumpriam. */}
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <div className="flex items-center gap-2 md:hidden">
+            <SidebarTrigger />
+            <span className="text-sm font-semibold">Finanças</span>
+          </div>
+          <div className="flex-1" />
+          <NotificationsBell />
         </div>
         <div className="main">
           <PortWarning />
