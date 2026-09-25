@@ -671,6 +671,41 @@
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
 }
+/* Ancorado pela direita: para um gatilho perto da borda direita da tela
+   (sino de notificações na barra superior), abrir pela esquerda (padrão
+   acima) empurraria o painel para fora da viewport. */
+.popover-panel--right {
+  left: auto;
+  right: 0;
+}
+
+/* ---- Sino de notificações ---------------------------------------------
+   Badge numérico no canto do gatilho + painel mais largo que um popover
+   comum, porque o conteúdo é uma lista de `Alert`s (25/09/2026). */
+.notifications-bell__trigger {
+  position: relative;
+}
+.notifications-bell__badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: var(--r-pill);
+  background: var(--brand);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+.notifications-bell__panel {
+  width: 360px;
+  max-width: min(360px, calc(100vw - var(--sp-4) * 2));
+  max-height: min(480px, 70vh);
+  overflow-y: auto;
+}
 
 /* ---- Dropdown listbox ------------------------------------------------
    The panel behind Select/FilterSelect/CategorySelect (`Dropdown.tsx`),
