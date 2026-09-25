@@ -21,6 +21,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from '../ui/sidebar'
+import { NotificationsBell } from './NotificationsBell'
 import { useMeta, useRange } from '../../lib/store'
 import { useTheme } from '../../lib/theme'
 import { useAuth } from '../../lib/auth'
@@ -251,7 +252,10 @@ export function PageHeader({
           </p>
         )}
       </div>
-      {actions && <div className="topbar__actions">{actions}</div>}
+      <div className="topbar__actions">
+        {actions}
+        <NotificationsBell />
+      </div>
     </header>
   )
 }
