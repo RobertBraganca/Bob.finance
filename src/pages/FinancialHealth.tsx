@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { currentPeriod } from '../lib/period'
@@ -795,10 +795,11 @@ function NumberField({
   value: string
   onChange: (value: string) => void
 }) {
+  const fieldId = useId()
   return (
     <div className="field" style={{ width: 168 }}>
-      <label className="field__label">{label}</label>
-      <Input value={value} onChange={(e) => onChange(e.target.value)} className="text-right tabular-nums" />
+      <label className="field__label" htmlFor={fieldId}>{label}</label>
+      <Input id={fieldId} value={value} onChange={(e) => onChange(e.target.value)} className="text-right tabular-nums" />
       {hint && <span className="field__hint">{hint}</span>}
     </div>
   )

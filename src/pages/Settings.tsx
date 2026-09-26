@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useAccounts, useCategoryIndex, useMeta, type Account } from '../lib/store'
@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   CategorySelect,
+  ConfirmDeleteModal,
   EmptyState,
   Icon,
   Modal,
@@ -117,11 +118,11 @@ export function SettingsPage() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Conta</th>
-                    <th>Instituição</th>
-                    <th>Tipo</th>
-                    <th className="table__num">Saldo atual</th>
-                    <th style={{ width: 76 }} />
+                    <th scope="col">Conta</th>
+                    <th scope="col">Instituição</th>
+                    <th scope="col">Tipo</th>
+                    <th scope="col" className="table__num">Saldo atual</th>
+                    <th scope="col" style={{ width: 76 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -182,13 +183,13 @@ export function SettingsPage() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Perfil</th>
-                      <th>Delimitador</th>
-                      <th>Data</th>
-                      <th>Decimal</th>
-                      <th>Convenção de sinal</th>
-                      <th>Codificação</th>
-                      <th style={{ width: 44 }} />
+                      <th scope="col">Perfil</th>
+                      <th scope="col">Delimitador</th>
+                      <th scope="col">Data</th>
+                      <th scope="col">Decimal</th>
+                      <th scope="col">Convenção de sinal</th>
+                      <th scope="col">Codificação</th>
+                      <th scope="col" style={{ width: 44 }} />
                     </tr>
                   </thead>
                   <tbody>
@@ -266,6 +267,11 @@ export function AccountModal({ account, onClose }: { account: Account | null; on
   // before any lançamento exists). An existing account's balance is never
   // edited directly anymore — see "Conferência de saldo" (decisions/0018).
   const [balance, setBalance] = useState(centsToInput(0))
+  const nameFieldId = useId()
+  const institutionFieldId = useId()
+  const kindFieldId = useId()
+  const balanceFieldId = useId()
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const save = useMutation({
     mutationFn: () => {
@@ -298,6 +304,19 @@ export function AccountModal({ account, onClose }: { account: Account | null; on
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
+  if (confirmingDelete) {
+    return (
+      <ConfirmDeleteModal
+        title={`Excluir ${account!.name}?`}
+        body="Lançamentos que já usam esta conta não são apagados nem perdem o histórico. Isso não pode ser desfeito."
+        confirmLabel="Excluir conta"
+        pending={remove.isPending}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => remove.mutate()}
+      />
+    )
+  }
+
   return (
     <Modal
       title={isEdit ? `Editar ${account.name}` : 'Nova conta'}
@@ -305,7 +324,7 @@ export function AccountModal({ account, onClose }: { account: Account | null; on
       footer={
         <>
           {isEdit ? (
-            <Button variant="danger" icon="trash" onClick={() => remove.mutate()} disabled={remove.isPending}>
+            <Button variant="danger" icon="trash" onClick={() => setConfirmingDelete(true)} disabled={remove.isPending}>
               Excluir
             </Button>
           ) : (
@@ -329,16 +348,17 @@ export function AccountModal({ account, onClose }: { account: Account | null; on
     >
       <div className="stack">
         <div className="field">
-          <label className="field__label">Nome</label>
-          <TextInput value={name} onChange={setName} placeholder="ex. Conta PJ" />
+          <label className="field__label" htmlFor={nameFieldId}>Nome</label>
+          <TextInput id={nameFieldId} value={name} onChange={setName} placeholder="ex. Conta PJ" />
         </div>
         <div className="field">
-          <label className="field__label">Instituição</label>
-          <TextInput value={institution} onChange={setInstitution} placeholder="ex. Inter" />
+          <label className="field__label" htmlFor={institutionFieldId}>Instituição</label>
+          <TextInput id={institutionFieldId} value={institution} onChange={setInstitution} placeholder="ex. Inter" />
         </div>
         <div className="field">
-          <label className="field__label">Tipo</label>
+          <label className="field__label" htmlFor={kindFieldId}>Tipo</label>
           <Select
+            id={kindFieldId}
             value={kind}
             options={Object.entries(ACCOUNT_KIND).map(([value, label]) => ({ value, label }))}
             onChange={(value) => setKind(value ?? 'checking')}
@@ -351,8 +371,8 @@ export function AccountModal({ account, onClose }: { account: Account | null; on
           </p>
         ) : (
           <div className="field">
-            <label className="field__label">Saldo inicial (R$)</label>
-            <TextInput value={balance} onChange={setBalance} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={balanceFieldId}>Saldo inicial (R$)</label>
+            <TextInput id={balanceFieldId} value={balance} onChange={setBalance} placeholder="0,00" numeral />
             <span className="field__hint">Ponto de partida antes do primeiro extrato importado.</span>
           </div>
         )}
@@ -386,6 +406,10 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
   const [description, setDescription] = useState('')
   const [categoryId, setCategoryId] = useState<number | null>(null)
   const [mode, setMode] = useState<'adjustment' | 'manual' | null>(null)
+  const reportedFieldId = useId()
+  const dateFieldId = useId()
+  const descriptionFieldId = useId()
+  const categoryFieldId = useId()
 
   const reportedCents = parseMoneyInput(reported)
   const diffCents = reportedCents === null ? 0 : reportedCents - derivedCents
@@ -444,8 +468,8 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
           <div className="table__num" style={{ textAlign: 'left' }}>{money(derivedCents)}</div>
         </div>
         <div className="field">
-          <label className="field__label">Saldo real (do extrato)</label>
-          <TextInput value={reported} onChange={setReported} placeholder="0,00" numeral />
+          <label className="field__label" htmlFor={reportedFieldId}>Saldo real (do extrato)</label>
+          <TextInput id={reportedFieldId} value={reported} onChange={setReported} placeholder="0,00" numeral />
         </div>
 
         {reportedCents !== null && diffCents === 0 && (
@@ -471,8 +495,8 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
         {mode === 'adjustment' && (
           <>
             <div className="field">
-              <label className="field__label">Data</label>
-              <TextInput value={postedOn} onChange={setPostedOn} type="date" />
+              <label className="field__label" htmlFor={dateFieldId}>Data</label>
+              <TextInput id={dateFieldId} value={postedOn} onChange={setPostedOn} type="date" />
             </div>
             <p className="chart__note">
               TAG "Financeiro/Reajuste de saldo": não conta como receita nem despesa, é uma
@@ -484,16 +508,16 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
         {mode === 'manual' && (
           <>
             <div className="field">
-              <label className="field__label">Data</label>
-              <TextInput value={postedOn} onChange={setPostedOn} type="date" />
+              <label className="field__label" htmlFor={dateFieldId}>Data</label>
+              <TextInput id={dateFieldId} value={postedOn} onChange={setPostedOn} type="date" />
             </div>
             <div className="field">
-              <label className="field__label">Descrição</label>
-              <TextInput value={description} onChange={setDescription} placeholder="ex. saque em espécie" />
+              <label className="field__label" htmlFor={descriptionFieldId}>Descrição</label>
+              <TextInput id={descriptionFieldId} value={description} onChange={setDescription} placeholder="ex. saque em espécie" />
             </div>
             <div className="field">
-              <label className="field__label">TAG</label>
-              <CategorySelect value={categoryId} onChange={setCategoryId} direction={direction} />
+              <label className="field__label" htmlFor={categoryFieldId}>TAG</label>
+              <CategorySelect id={categoryFieldId} value={categoryId} onChange={setCategoryId} direction={direction} />
             </div>
             <p className="chart__note">
               Para dinheiro que realmente entrou ou saiu e nunca foi lançado, não um erro de registro.
@@ -513,6 +537,7 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
 function DeleteAccountButton({ account }: { account: Account }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
 
   const remove = useMutation({
     mutationFn: () => api.del<{ archived: boolean; deleted: boolean; affected: number }>(`/accounts/${account.id}`),
@@ -523,19 +548,32 @@ function DeleteAccountButton({ account }: { account: Account }) {
           : `Conta arquivada, ${result.affected} lançamento(s) preservados`,
       )
       queryClient.invalidateQueries()
+      setConfirming(false)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
   return (
-    <Button
-      variant="quiet"
-      size="sm"
-      icon="trash"
-      onClick={() => remove.mutate()}
-      disabled={remove.isPending}
-      title="Excluir conta"
-    />
+    <>
+      <Button
+        variant="quiet"
+        size="sm"
+        icon="trash"
+        onClick={() => setConfirming(true)}
+        disabled={remove.isPending}
+        title="Excluir conta"
+      />
+      {confirming && (
+        <ConfirmDeleteModal
+          title={`Excluir ${account.name}?`}
+          body="Lançamentos que já usam esta conta não são apagados nem perdem o histórico. Isso não pode ser desfeito."
+          confirmLabel="Excluir conta"
+          pending={remove.isPending}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => remove.mutate()}
+        />
+      )}
+    </>
   )
 }
 
@@ -570,6 +608,21 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
   })
   const [signature, setSignature] = useState((profile?.headerSignature ?? []).join(', '))
   const [ignore, setIgnore] = useState((profile?.ignorePatterns ?? []).join(', '))
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const profileNameFieldId = useId()
+  const profileInstitutionFieldId = useId()
+  const delimiterFieldId = useId()
+  const dateFormatFieldId = useId()
+  const decimalFieldId = useId()
+  const thousandsFieldId = useId()
+  const encodingFieldId = useId()
+  const skipRowsFieldId = useId()
+  const signConventionFieldId = useId()
+  const columnMapFieldId = useId()
+  const rawCategoryFieldId = useId()
+  const signatureFieldId = useId()
+  const ignoreFieldId = useId()
+  const defaultAccountFieldId = useId()
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
@@ -616,6 +669,19 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
   })
 
+  if (confirmingDelete) {
+    return (
+      <ConfirmDeleteModal
+        title={`Excluir ${profile!.name}?`}
+        body="Lançamentos já importados com este perfil não são afetados. Isso não pode ser desfeito."
+        confirmLabel="Excluir perfil"
+        pending={remove.isPending}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => remove.mutate()}
+      />
+    )
+  }
+
   return (
     <Modal
       wide
@@ -624,7 +690,7 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
       footer={
         <>
           {profile ? (
-            <Button variant="danger" icon="trash" onClick={() => remove.mutate()}>
+            <Button variant="danger" icon="trash" onClick={() => setConfirmingDelete(true)}>
               Remover
             </Button>
           ) : (
@@ -644,12 +710,13 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
       <div className="stack stack--loose">
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 200 }}>
-            <label className="field__label">Nome do perfil</label>
-            <TextInput value={form.name} onChange={(v) => set('name', v)} placeholder="ex. Sicoob Extrato" />
+            <label className="field__label" htmlFor={profileNameFieldId}>Nome do perfil</label>
+            <TextInput id={profileNameFieldId} value={form.name} onChange={(v) => set('name', v)} placeholder="ex. Sicoob Extrato" />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 160 }}>
-            <label className="field__label">Instituição</label>
+            <label className="field__label" htmlFor={profileInstitutionFieldId}>Instituição</label>
             <TextInput
+              id={profileInstitutionFieldId}
               value={form.institution}
               onChange={(v) => set('institution', v)}
               placeholder="ex. Sicoob"
@@ -659,8 +726,9 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ minWidth: 130 }}>
-            <label className="field__label">Delimitador</label>
+            <label className="field__label" htmlFor={delimiterFieldId}>Delimitador</label>
             <Select
+              id={delimiterFieldId}
               value={form.delimiter}
               options={[
                 { value: ';', label: 'ponto e vírgula' },
@@ -673,8 +741,9 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
             />
           </div>
           <div className="field" style={{ minWidth: 150 }}>
-            <label className="field__label">Formato de data</label>
+            <label className="field__label" htmlFor={dateFormatFieldId}>Formato de data</label>
             <Select
+              id={dateFormatFieldId}
               value={form.dateFormat}
               options={[
                 'dd/MM/yyyy',
@@ -689,8 +758,9 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
             />
           </div>
           <div className="field" style={{ minWidth: 110 }}>
-            <label className="field__label">Decimal</label>
+            <label className="field__label" htmlFor={decimalFieldId}>Decimal</label>
             <Select
+              id={decimalFieldId}
               value={form.decimalSeparator}
               options={[
                 { value: ',', label: 'vírgula' },
@@ -700,8 +770,9 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
             />
           </div>
           <div className="field" style={{ minWidth: 110 }}>
-            <label className="field__label">Milhar</label>
+            <label className="field__label" htmlFor={thousandsFieldId}>Milhar</label>
             <Select
+              id={thousandsFieldId}
               value={form.thousandsSeparator}
               options={[
                 { value: '.', label: 'ponto' },
@@ -712,8 +783,9 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
             />
           </div>
           <div className="field" style={{ minWidth: 130 }}>
-            <label className="field__label">Codificação</label>
+            <label className="field__label" htmlFor={encodingFieldId}>Codificação</label>
             <Select
+              id={encodingFieldId}
               value={form.encoding}
               options={[
                 { value: 'utf-8', label: 'UTF-8' },
@@ -723,14 +795,15 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
             />
           </div>
           <div className="field" style={{ minWidth: 110 }}>
-            <label className="field__label">Linhas a pular</label>
-            <TextInput value={form.skipRows} onChange={(v) => set('skipRows', v)} numeral />
+            <label className="field__label" htmlFor={skipRowsFieldId}>Linhas a pular</label>
+            <TextInput id={skipRowsFieldId} value={form.skipRows} onChange={(v) => set('skipRows', v)} numeral />
           </div>
         </div>
 
         <div className="field">
-          <label className="field__label">Convenção de sinal</label>
+          <label className="field__label" htmlFor={signConventionFieldId}>Convenção de sinal</label>
           <Select
+            id={signConventionFieldId}
             value={form.signConvention}
             options={Object.entries(SIGN_LABEL).map(([value, label]) => ({ value, label }))}
             onChange={(v) => set('signConvention', v ?? 'signed')}
@@ -759,11 +832,12 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
               .filter(([, , show]) => show !== false || ['rawCategory'].includes(String(0)))
               .map(([key, label, required]) => (
                 <div className="field" key={String(key)} style={{ minWidth: 170, flex: 1 }}>
-                  <label className="field__label">
+                  <label className="field__label" htmlFor={`${columnMapFieldId}-${String(key)}`}>
                     {String(label)}
                     {required ? ' *' : ''}
                   </label>
                   <TextInput
+                    id={`${columnMapFieldId}-${String(key)}`}
                     value={columnMap[String(key)] ?? ''}
                     onChange={(value) =>
                       setColumnMap((current) => ({ ...current, [String(key)]: value }))
@@ -773,8 +847,9 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
                 </div>
               ))}
             <div className="field" style={{ minWidth: 170, flex: 1 }}>
-              <label className="field__label">TAG do banco</label>
+              <label className="field__label" htmlFor={rawCategoryFieldId}>TAG do banco</label>
               <TextInput
+                id={rawCategoryFieldId}
                 value={columnMap.rawCategory ?? ''}
                 onChange={(value) => setColumnMap((current) => ({ ...current, rawCategory: value }))}
                 placeholder="opcional"
@@ -784,8 +859,9 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
         </div>
 
         <div className="field">
-          <label className="field__label">Assinatura do cabeçalho</label>
+          <label className="field__label" htmlFor={signatureFieldId}>Assinatura do cabeçalho</label>
           <TextInput
+            id={signatureFieldId}
             value={signature}
             onChange={setSignature}
             placeholder="Data, Histórico, Valor, Saldo"
@@ -796,16 +872,17 @@ function ProfileModal({ profile, onClose }: { profile: Profile | null; onClose: 
         </div>
 
         <div className="field">
-          <label className="field__label">Linhas a ignorar</label>
-          <TextInput value={ignore} onChange={setIgnore} placeholder="saldo anterior, saldo do dia, total" />
+          <label className="field__label" htmlFor={ignoreFieldId}>Linhas a ignorar</label>
+          <TextInput id={ignoreFieldId} value={ignore} onChange={setIgnore} placeholder="saldo anterior, saldo do dia, total" />
           <span className="field__hint">
             Descrições de linhas de resumo que o banco anexa e que não são lançamentos.
           </span>
         </div>
 
         <div className="field">
-          <label className="field__label">Conta padrão</label>
+          <label className="field__label" htmlFor={defaultAccountFieldId}>Conta padrão</label>
           <Select
+            id={defaultAccountFieldId}
             value={form.defaultAccountId}
             placeholder="Perguntar sempre"
             options={(accounts.data?.accounts ?? []).map((account) => ({

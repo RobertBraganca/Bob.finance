@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import {
@@ -25,6 +25,7 @@ import {
   Bento,
   Button,
   Card,
+  ConfirmDeleteModal,
   EmptyState,
   Modal,
   Segmented,
@@ -209,17 +210,20 @@ function QuoteFormFields({
   })
   const dimensions = multipliers.data?.dimensions ?? []
   const byDimension = multipliers.data?.byDimension ?? {}
+  const hoursFieldId = useId()
+  const marginFieldId = useId()
+  const dimensionFieldIdBase = useId()
 
   return (
     <>
       <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
         <div className="field" style={{ width: 150 }}>
-          <label className="field__label">Horas estimadas</label>
-          <TextInput value={hours} onChange={setHours} numeral />
+          <label className="field__label" htmlFor={hoursFieldId}>Horas estimadas</label>
+          <TextInput id={hoursFieldId} value={hours} onChange={setHours} numeral />
         </div>
         <div className="field" style={{ width: 150 }}>
-          <label className="field__label">Margem extra (%)</label>
-          <TextInput value={margin} onChange={setMargin} numeral placeholder="0" />
+          <label className="field__label" htmlFor={marginFieldId}>Margem extra (%)</label>
+          <TextInput id={marginFieldId} value={margin} onChange={setMargin} numeral placeholder="0" />
           <span className="field__hint">Deste projeto, além da margem mensal</span>
         </div>
       </div>
@@ -227,10 +231,13 @@ function QuoteFormFields({
       <div className="stack stack--tight">
         <span className="label">Multiplicadores</span>
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
-          {dimensions.map((dim) => (
+          {dimensions.map((dim) => {
+            const dimensionFieldId = `${dimensionFieldIdBase}-${dim.value}`
+            return (
             <div className="field" key={dim.value} style={{ minWidth: 190, flex: 1 }}>
-              <label className="field__label">{dim.label}</label>
+              <label className="field__label" htmlFor={dimensionFieldId}>{dim.label}</label>
               <Select
+                id={dimensionFieldId}
                 value={selected[dim.value] ?? null}
                 placeholder="Não informado (1,0x)"
                 options={(byDimension[dim.value] ?? []).map((o) => ({
@@ -240,7 +247,8 @@ function QuoteFormFields({
                 onChange={(value) => setSelected((prev) => ({ ...prev, [dim.value]: value }))}
               />
             </div>
-          ))}
+            )
+          })}
         </div>
         <p className="chart__note">
           Uma dimensão sem opção escolhida vale 1,0x e não altera o resultado.
@@ -465,6 +473,7 @@ function SaveQuoteModal({
 }) {
   const toast = useToast()
   const [label, setLabel] = useState('')
+  const clientLabelFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => api.post('/pricing/quotes', { ...payload, clientLabel: label.trim() }),
@@ -495,8 +504,8 @@ function SaveQuoteModal({
     >
       <div className="stack">
         <div className="field">
-          <label className="field__label">Cliente ou projeto</label>
-          <TextInput value={label} onChange={setLabel} placeholder="ex. Identidade visual, cliente X" />
+          <label className="field__label" htmlFor={clientLabelFieldId}>Cliente ou projeto</label>
+          <TextInput id={clientLabelFieldId} value={label} onChange={setLabel} placeholder="ex. Identidade visual, cliente X" />
         </div>
         <div className="kv">
           <span className="kv__k">Preço mínimo</span>
@@ -538,12 +547,14 @@ function QuotesTab() {
   })
   const [approving, setApproving] = useState<Quote | null>(null)
   const [editing, setEditing] = useState<Quote | null>(null)
+  const [confirmingQuote, setConfirmingQuote] = useState<Quote | null>(null)
 
   const remove = useMutation({
     mutationFn: (id: number) => api.del(`/pricing/quotes/${id}`),
     onSuccess: () => {
       toast('Cotação removida')
       queryClient.invalidateQueries({ queryKey: ['pricing-quotes'] })
+      setConfirmingQuote(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
   })
@@ -651,16 +662,16 @@ function QuotesTab() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Cliente ou projeto</th>
-                  <th>Quando</th>
-                  <th className="table__num">Horas</th>
-                  <th className="table__num">Hora base</th>
-                  <th className="table__num">Mínimo</th>
-                  <th className="table__num">Recomendado</th>
-                  <th className="table__num">Fechado por</th>
-                  <th className="table__num">Premium</th>
-                  <th>Status</th>
-                  <th style={{ width: 96 }} />
+                  <th scope="col">Cliente ou projeto</th>
+                  <th scope="col">Quando</th>
+                  <th scope="col" className="table__num">Horas</th>
+                  <th scope="col" className="table__num">Hora base</th>
+                  <th scope="col" className="table__num">Mínimo</th>
+                  <th scope="col" className="table__num">Recomendado</th>
+                  <th scope="col" className="table__num">Fechado por</th>
+                  <th scope="col" className="table__num">Premium</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" style={{ width: 96 }} />
                 </tr>
               </thead>
               <tbody>
@@ -733,7 +744,7 @@ function QuotesTab() {
                           size="sm"
                           icon="trash"
                           title="Remover cotação"
-                          onClick={() => remove.mutate(quote.id)}
+                          onClick={() => setConfirmingQuote(quote)}
                         />
                       </div>
                     </td>
@@ -747,6 +758,16 @@ function QuotesTab() {
 
       {approving && <ApproveQuoteModal quote={approving} onClose={() => setApproving(null)} />}
       {editing && <EditQuoteModal quote={editing} onClose={() => setEditing(null)} />}
+      {confirmingQuote && (
+        <ConfirmDeleteModal
+          title={`Excluir a cotação de ${confirmingQuote.clientLabel}?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel="Excluir cotação"
+          pending={remove.isPending}
+          onCancel={() => setConfirmingQuote(null)}
+          onConfirm={() => remove.mutate(confirmingQuote.id)}
+        />
+      )}
     </Bento>
   )
 }
@@ -789,6 +810,12 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
   const [paidOn, setPaidOn] = useState(() => new Date().toISOString().slice(0, 10))
   const [dueDay, setDueDay] = useState('5')
   const [startPeriod, setStartPeriod] = useState(() => new Date().toISOString().slice(0, 7))
+  const actualPriceFieldId = useId()
+  const accountFieldId = useId()
+  const dueDayFieldId = useId()
+  const startPeriodFieldId = useId()
+  const paidOnFieldId = useId()
+  const secondInstallmentFieldId = useId()
   // Parte do recomendado — o usuário só digita algo diferente se o valor de
   // fato fechado com o cliente divergiu (negociação, desconto, ajuste).
   const [actualPrice, setActualPrice] = useState(() => centsToInput(quote.recommendedPriceCents))
@@ -895,8 +922,8 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
           Recomendado: {money(quote.recommendedPriceCents)}.
         </p>
         <div className="field">
-          <label className="field__label">Valor fechado (R$)</label>
-          <TextInput value={actualPrice} onChange={setActualPrice} numeral />
+          <label className="field__label" htmlFor={actualPriceFieldId}>Valor fechado (R$)</label>
+          <TextInput id={actualPriceFieldId} value={actualPrice} onChange={setActualPrice} numeral />
           {actualDiffersFromRecommended && (
             <span className="field__hint">
               Diferente do recomendado ({money(quote.recommendedPriceCents)}): o recomendado continua
@@ -905,8 +932,9 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
           )}
         </div>
         <div className="field">
-          <label className="field__label">Conta</label>
+          <label className="field__label" htmlFor={accountFieldId}>Conta</label>
           <Select
+            id={accountFieldId}
             value={accountId}
             placeholder="Escolha a conta"
             options={(accounts.data?.accounts ?? []).map((a) => ({ value: a.id, label: a.name }))}
@@ -917,29 +945,29 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
         {mode === 'recurring' ? (
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Dia de vencimento</label>
-              <TextInput value={dueDay} onChange={setDueDay} numeral />
+              <label className="field__label" htmlFor={dueDayFieldId}>Dia de vencimento</label>
+              <TextInput id={dueDayFieldId} value={dueDay} onChange={setDueDay} numeral />
               {!dueDayValid && <span className="field__hint">Precisa ser entre 1 e 28.</span>}
             </div>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Primeiro mês de cobrança</label>
-              <TextInput value={startPeriod} onChange={setStartPeriod} type="month" />
+              <label className="field__label" htmlFor={startPeriodFieldId}>Primeiro mês de cobrança</label>
+              <TextInput id={startPeriodFieldId} value={startPeriod} onChange={setStartPeriod} type="month" />
             </div>
           </div>
         ) : (
           <>
             <div className="field">
-              <label className="field__label">
+              <label className="field__label" htmlFor={paidOnFieldId}>
                 {isInstalment ? 'Data da 1ª parcela (recebida)' : 'Data do recebimento'}
               </label>
-              <TextInput value={paidOn} onChange={setPaidOn} type="date" />
+              <TextInput id={paidOnFieldId} value={paidOn} onChange={setPaidOn} type="date" />
             </div>
 
             {isInstalment && (
               <>
                 <div className="field">
-                  <label className="field__label">Data da 2ª parcela</label>
-                  <TextInput value={secondInstallmentOn} onChange={setSecondInstallmentOn} type="date" />
+                  <label className="field__label" htmlFor={secondInstallmentFieldId}>Data da 2ª parcela</label>
+                  <TextInput id={secondInstallmentFieldId} value={secondInstallmentOn} onChange={setSecondInstallmentOn} type="date" />
                   {count > 2 && (
                     <span className="field__hint">
                       Da 3ª em diante o vencimento anda de mês em mês a partir desta data. Cada parcela
@@ -994,6 +1022,9 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
     quote.directCosts.map((c) => ({ label: c.label, value: centsToInput(c.amountCents) })),
   )
   const [preview, setPreview] = useState<Simulation | null>(null)
+  const clientLabelFieldId = useId()
+  const installmentsFieldId = useId()
+  const paymentTermsFieldId = useId()
 
   const isApproved = quote.status === 'approved'
 
@@ -1098,14 +1129,14 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
         <hr className="divider" />
 
         <div className="field">
-          <label className="field__label">Cliente ou projeto</label>
-          <TextInput value={clientLabel} onChange={setClientLabel} />
+          <label className="field__label" htmlFor={clientLabelFieldId}>Cliente ou projeto</label>
+          <TextInput id={clientLabelFieldId} value={clientLabel} onChange={setClientLabel} />
         </div>
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
           <div className="field" style={{ width: 140 }}>
-            <label className="field__label">Parcelas</label>
-            <TextInput value={installments} onChange={setInstallments} numeral />
+            <label className="field__label" htmlFor={installmentsFieldId}>Parcelas</label>
+            <TextInput id={installmentsFieldId} value={installments} onChange={setInstallments} numeral />
             <span className="field__hint">
               {parcels > 1
                 ? `${parcels}x de ${money(Math.round(referencePriceCents / parcels))}`
@@ -1115,8 +1146,9 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
             </span>
           </div>
           <div className="field" style={{ minWidth: 260, flex: 1 }}>
-            <label className="field__label">Condição de pagamento</label>
+            <label className="field__label" htmlFor={paymentTermsFieldId}>Condição de pagamento</label>
             <TextInput
+              id={paymentTermsFieldId}
               value={paymentTerms}
               onChange={setPaymentTerms}
               placeholder="50% na aprovação, 50% na entrega"
@@ -1199,6 +1231,8 @@ function ParamsTab() {
   const [hours, setHours] = useState<string | null>(null)
   const [billable, setBillable] = useState<string | null>(null)
   const current = settings.data?.settings
+  const hoursFieldId = useId()
+  const billableFieldId = useId()
 
   const saveSettings = useMutation({
     mutationFn: () =>
@@ -1233,8 +1267,9 @@ function ParamsTab() {
         ) : (
           <div className="stack">
             <div className="field">
-              <label className="field__label">Horas disponíveis por mês</label>
+              <label className="field__label" htmlFor={hoursFieldId}>Horas disponíveis por mês</label>
               <TextInput
+                id={hoursFieldId}
                 value={hours ?? String(current.availableHoursPerMonth)}
                 onChange={setHours}
                 numeral
@@ -1242,8 +1277,9 @@ function ParamsTab() {
               <span className="field__hint">176 = 22 dias úteis de 8 horas</span>
             </div>
             <div className="field">
-              <label className="field__label">Percentual faturável (%)</label>
+              <label className="field__label" htmlFor={billableFieldId}>Percentual faturável (%)</label>
               <TextInput
+                id={billableFieldId}
                 value={billable ?? bpsToInput(current.billablePercentageBps)}
                 onChange={setBillable}
                 numeral
@@ -1278,10 +1314,10 @@ function ParamsTab() {
           <table className="table">
             <thead>
               <tr>
-                <th>Dimensão</th>
-                <th>Opção</th>
-                <th className="table__num">Multiplicador</th>
-                <th style={{ width: 96 }} />
+                <th scope="col">Dimensão</th>
+                <th scope="col">Opção</th>
+                <th scope="col" className="table__num">Multiplicador</th>
+                <th scope="col" style={{ width: 96 }} />
               </tr>
             </thead>
             <tbody>
@@ -1357,6 +1393,11 @@ function MultiplierModal({
   const [multiplier, setMultiplier] = useState(
     option ? (option.multiplierBps / 10_000).toFixed(2).replace('.', ',') : '1,00',
   )
+  const dimensionFieldId = useId()
+  const labelFieldId = useId()
+  const descriptionFieldId = useId()
+  const multiplierFieldId = useId()
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const parsedMultiplier = () => {
     const value = Number(multiplier.replace(',', '.'))
@@ -1393,6 +1434,19 @@ function MultiplierModal({
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
   })
 
+  if (confirmingDelete && option) {
+    return (
+      <ConfirmDeleteModal
+        title={`Excluir ${option.label}?`}
+        body="Isso não pode ser desfeito."
+        confirmLabel="Excluir opção"
+        pending={remove.isPending}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => remove.mutate()}
+      />
+    )
+  }
+
   return (
     <Modal
       title={option ? `Editar "${option.label}"` : 'Nova opção de multiplicador'}
@@ -1400,7 +1454,7 @@ function MultiplierModal({
       footer={
         <>
           {option ? (
-            <Button variant="danger" icon="trash" onClick={() => remove.mutate()} disabled={remove.isPending}>
+            <Button variant="danger" icon="trash" onClick={() => setConfirmingDelete(true)} disabled={remove.isPending}>
               Remover
             </Button>
           ) : (
@@ -1420,8 +1474,9 @@ function MultiplierModal({
       <div className="stack">
         {!option && (
           <div className="field">
-            <label className="field__label">Dimensão</label>
+            <label className="field__label" htmlFor={dimensionFieldId}>Dimensão</label>
             <Select
+              id={dimensionFieldId}
               value={dimension}
               options={dimensions.map((d) => ({ value: d.value, label: d.label }))}
               onChange={setDimension}
@@ -1429,16 +1484,16 @@ function MultiplierModal({
           </div>
         )}
         <div className="field">
-          <label className="field__label">Rótulo</label>
-          <TextInput value={label} onChange={setLabel} placeholder="ex. Muito complexo" />
+          <label className="field__label" htmlFor={labelFieldId}>Rótulo</label>
+          <TextInput id={labelFieldId} value={label} onChange={setLabel} placeholder="ex. Muito complexo" />
         </div>
         <div className="field">
-          <label className="field__label">Descrição (opcional)</label>
-          <TextInput value={description} onChange={setDescription} placeholder="Quando usar esta opção" />
+          <label className="field__label" htmlFor={descriptionFieldId}>Descrição (opcional)</label>
+          <TextInput id={descriptionFieldId} value={description} onChange={setDescription} placeholder="Quando usar esta opção" />
         </div>
         <div className="field" style={{ width: 160 }}>
-          <label className="field__label">Multiplicador</label>
-          <TextInput value={multiplier} onChange={setMultiplier} numeral />
+          <label className="field__label" htmlFor={multiplierFieldId}>Multiplicador</label>
+          <TextInput id={multiplierFieldId} value={multiplier} onChange={setMultiplier} numeral />
           <span className="field__hint">1,00 é neutro. 1,30 acrescenta 30%</span>
         </div>
       </div>

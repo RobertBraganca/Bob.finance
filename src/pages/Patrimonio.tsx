@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useMeta } from '../lib/store'
@@ -282,6 +282,8 @@ function AddAssetModal({ onClose }: { onClose: () => void }) {
   const meta = useMeta()
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
+  const nameFieldId = useId()
+  const valueFieldId = useId()
 
   const create = useMutation({
     mutationFn: async () => {
@@ -314,16 +316,18 @@ function AddAssetModal({ onClose }: { onClose: () => void }) {
         <DialogTitle>Adicionar bem ao patrimônio</DialogTitle>
         <div className="stack stack--loose">
           <div className="field">
-            <label className="field__label">Nome do bem</label>
+            <label className="field__label" htmlFor={nameFieldId}>Nome do bem</label>
             <Input
+              id={nameFieldId}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Apartamento, carro, aliança..."
             />
           </div>
           <div className="field">
-            <label className="field__label">Valor estimado</label>
+            <label className="field__label" htmlFor={valueFieldId}>Valor estimado</label>
             <Input
+              id={valueFieldId}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder="0,00"
@@ -352,6 +356,7 @@ function RevalueModal({ item, onClose }: { item: IlliquidItem; onClose: () => vo
   const queryClient = useQueryClient()
   const meta = useMeta()
   const [value, setValue] = useState(() => centsToInput(item.valueCents))
+  const valueFieldId = useId()
 
   const save = useMutation({
     mutationFn: () =>
@@ -373,8 +378,9 @@ function RevalueModal({ item, onClose }: { item: IlliquidItem; onClose: () => vo
         <DialogTitle>Atualizar valor de {item.name}</DialogTitle>
         <div className="stack stack--loose">
           <div className="field">
-            <label className="field__label">Valor atual</label>
+            <label className="field__label" htmlFor={valueFieldId}>Valor atual</label>
             <Input
+              id={valueFieldId}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder="0,00"

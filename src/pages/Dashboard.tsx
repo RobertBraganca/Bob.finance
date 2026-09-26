@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, useId, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -30,6 +30,7 @@ import {
   Button,
   Card,
   CategorySelect,
+  ConfirmDeleteModal,
   Delta,
   EmptyState,
   HeroFigure,
@@ -550,6 +551,10 @@ function BentoSettingsModal({
 }) {
   const [draggedId, setDraggedId] = useState<BentoCardId | null>(null)
   const [dragOverId, setDragOverId] = useState<BentoCardId | null>(null)
+  // Um único useId() por componente (não por item da lista, o que violaria
+  // regras de hooks) combinado com o card.id, já estável e único, para dar
+  // um id por linha.
+  const widthFieldIdBase = useId()
 
   const dropOn = (targetId: BentoCardId) => {
     if (draggedId && draggedId !== targetId) {
@@ -659,8 +664,9 @@ function BentoSettingsModal({
             </div>
 
             <div className="field" style={{ minWidth: 110 }}>
-              <label className="field__label">Largura</label>
+              <label className="field__label" htmlFor={`${widthFieldIdBase}-${card.id}`}>Largura</label>
               <Select
+                id={`${widthFieldIdBase}-${card.id}`}
                 value={card.span}
                 options={BENTO_SPAN_OPTIONS.map((span) => ({
                   value: span,
@@ -1558,6 +1564,9 @@ function PendingListModal({
   // Só pergunta escopo quando a linha vem de um template (forecastId) —
   // uma pendência avulsa exclui direto, sem modal extra (decisions/0020).
   const [scopeTarget, setScopeTarget] = useState<PendingRow | null>(null)
+  // Mas "direto" não é mais "sem perguntar nada" (revisão de UX copy de
+  // 26/09/2026): só não pergunta o ESCOPO, ainda confirma a exclusão.
+  const [confirmingPending, setConfirmingPending] = useState<PendingRow | null>(null)
 
   const remove = useMutation({
     mutationFn: ({ id, scope }: { id: number; scope?: PendingDeleteScope }) =>
@@ -1566,17 +1575,20 @@ function PendingListModal({
       toast('Pendência removida')
       queryClient.invalidateQueries()
       setScopeTarget(null)
+      setConfirmingPending(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
   // decisions/0024: essas linhas não têm transação real ainda — o "remover"
   // aqui apaga a PREVISÃO inteira (endpoint de forecast, não de pendência).
+  const [confirmingForecast, setConfirmingForecast] = useState<ForecastEntry | null>(null)
   const removeForecast = useMutation({
     mutationFn: (id: number) => api.del(`/cash-flow/forecasts/${id}`),
     onSuccess: () => {
       toast('Previsão removida')
       queryClient.invalidateQueries()
+      setConfirmingForecast(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
@@ -1596,10 +1608,10 @@ function PendingListModal({
         <table className="table">
           <thead>
             <tr>
-              <th>Descrição</th>
-              <th>Data</th>
-              <th className="table__num">Valor</th>
-              <th style={{ width: 104 }} />
+              <th scope="col">Descrição</th>
+              <th scope="col">Data</th>
+              <th scope="col" className="table__num">Valor</th>
+              <th scope="col" style={{ width: 104 }} />
             </tr>
           </thead>
           <tbody>
@@ -1654,7 +1666,7 @@ function PendingListModal({
                       size="sm"
                       icon="trash"
                       onClick={() =>
-                        r.forecastId !== null || r.debtId !== null ? setScopeTarget(r) : remove.mutate({ id: r.id })
+                        r.forecastId !== null || r.debtId !== null ? setScopeTarget(r) : setConfirmingPending(r)
                       }
                       disabled={remove.isPending}
                       title="Remover pendência"
@@ -1691,7 +1703,7 @@ function PendingListModal({
                         variant="quiet"
                         size="sm"
                         icon="trash"
-                        onClick={() => removeForecast.mutate(f.id)}
+                        onClick={() => setConfirmingForecast(f)}
                         disabled={removeForecast.isPending}
                         title="Remover previsão"
                       />
@@ -1710,6 +1722,26 @@ function PendingListModal({
           pending={remove.isPending}
           onCancel={() => setScopeTarget(null)}
           onConfirm={(scope) => remove.mutate({ id: scopeTarget.id, scope })}
+        />
+      )}
+      {confirmingPending && (
+        <ConfirmDeleteModal
+          title={`Excluir ${confirmingPending.description}?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel="Excluir pendência"
+          pending={remove.isPending}
+          onCancel={() => setConfirmingPending(null)}
+          onConfirm={() => remove.mutate({ id: confirmingPending.id })}
+        />
+      )}
+      {confirmingForecast && (
+        <ConfirmDeleteModal
+          title={`Excluir a previsão de ${confirmingForecast.description}?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel="Excluir previsão"
+          pending={removeForecast.isPending}
+          onCancel={() => setConfirmingForecast(null)}
+          onConfirm={() => removeForecast.mutate(confirmingForecast.id)}
         />
       )}
     </Modal>
@@ -1851,6 +1883,13 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
    * (02/09/2026). Vazio = sem fim previsto, que segue sendo o padrão.
    */
   const [endMonth, setEndMonth] = useState('')
+  const descriptionFieldId = useId()
+  const amountFieldId = useId()
+  const paymentDateFieldId = useId()
+  const accountFieldId = useId()
+  const categoryFieldId = useId()
+  const installmentCountFieldId = useId()
+  const installmentsRealizedFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -1912,8 +1951,13 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
     >
       <div className="stack">
         <div className="field">
-          <label className="field__label">Descrição</label>
-          <TextInput value={description} onChange={setDescription} placeholder="ex. BERA, Design UI/UX E-commerce DME" />
+          <label className="field__label" htmlFor={descriptionFieldId}>Descrição</label>
+          <TextInput
+            id={descriptionFieldId}
+            value={description}
+            onChange={setDescription}
+            placeholder="ex. BERA, Design UI/UX E-commerce DME"
+          />
         </div>
 
         <div className="field">
@@ -1939,14 +1983,14 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">
+            <label className="field__label" htmlFor={amountFieldId}>
               Valor {kind === 'recurring' ? 'por mês' : kind === 'installment' ? 'por parcela' : ''} (R$)
             </label>
-            <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+            <TextInput id={amountFieldId} value={amount} onChange={setAmount} placeholder="0,00" numeral />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Data de pagamento</label>
-            <TextInput value={paymentDate} onChange={setPaymentDate} type="date" />
+            <label className="field__label" htmlFor={paymentDateFieldId}>Data de pagamento</label>
+            <TextInput id={paymentDateFieldId} value={paymentDate} onChange={setPaymentDate} type="date" />
             {kind !== 'single' && (
               <span className="field__hint">O dia (não o mês) se repete nas próximas ocorrências.</span>
             )}
@@ -1955,8 +1999,9 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">Conta esperada</label>
+            <label className="field__label" htmlFor={accountFieldId}>Conta esperada</label>
             <Select
+              id={accountFieldId}
               value={accountId}
               placeholder="Selecione"
               options={(meta.data?.accounts ?? []).map((a) => ({ value: a.id, label: a.name }))}
@@ -1965,8 +2010,9 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
             <span className="field__hint">Usada para sugerir a conciliação quando o extrato real chegar.</span>
           </div>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">TAG (opcional)</label>
+            <label className="field__label" htmlFor={categoryFieldId}>TAG (opcional)</label>
             <CategorySelect
+              id={categoryFieldId}
               value={categoryId}
               direction={flow === 'income' ? 'in' : 'out'}
               onChange={setCategoryId}
@@ -1997,12 +2043,26 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
         {kind === 'installment' && (
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Total de parcelas</label>
-              <TextInput value={installmentCount} onChange={setInstallmentCount} placeholder="ex. 3" numeral />
+              <label className="field__label" htmlFor={installmentCountFieldId}>Total de parcelas</label>
+              <TextInput
+                id={installmentCountFieldId}
+                value={installmentCount}
+                onChange={setInstallmentCount}
+                placeholder="ex. 3"
+                numeral
+              />
             </div>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Parcelas já confirmadas/recebidas</label>
-              <TextInput value={installmentsRealized} onChange={setInstallmentsRealized} placeholder="ex. 1" numeral />
+              <label className="field__label" htmlFor={installmentsRealizedFieldId}>
+                Parcelas já confirmadas/recebidas
+              </label>
+              <TextInput
+                id={installmentsRealizedFieldId}
+                value={installmentsRealized}
+                onChange={setInstallmentsRealized}
+                placeholder="ex. 1"
+                numeral
+              />
               <span className="field__hint">A pendência só materializa as parcelas futuras, a partir da próxima.</span>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, fileToBase64 } from '../lib/api'
 import { telemetry } from '../lib/telemetry'
@@ -9,6 +9,7 @@ import {
   Button,
   Card,
   CategorySelect,
+  ConfirmDeleteModal,
   EmptyState,
   Icon,
   Select,
@@ -83,6 +84,7 @@ export function ImportPage() {
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [dragging, setDragging] = useState(false)
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null)
+  const queueFieldIdBase = useId()
 
   const profiles = useQuery({
     queryKey: ['profiles'],
@@ -238,7 +240,10 @@ export function ImportPage() {
 
             {queue.length > 0 && (
               <div className="stack">
-                {queue.map((item) => (
+                {queue.map((item) => {
+                  const profileFieldId = `${queueFieldIdBase}-${item.key}-profile`
+                  const accountFieldId = `${queueFieldIdBase}-${item.key}-account`
+                  return (
                   <div key={item.key} className="card card--muted" style={{ padding: 'var(--sp-4)', gap: 'var(--sp-3)' }}>
                     <div className="row row--between row--wrap">
                       <span className="row">
@@ -261,8 +266,9 @@ export function ImportPage() {
                       <>
                         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
                           <div style={{ minWidth: 220, flex: 1 }}>
-                            <label className="field__label">Perfil do banco</label>
+                            <label className="field__label" htmlFor={profileFieldId}>Perfil do banco</label>
                             <Select
+                              id={profileFieldId}
                               value={item.profileId}
                               placeholder="Escolha o banco"
                               options={profileOptions}
@@ -274,8 +280,9 @@ export function ImportPage() {
                             />
                           </div>
                           <div style={{ minWidth: 220, flex: 1 }}>
-                            <label className="field__label">Conta de destino</label>
+                            <label className="field__label" htmlFor={accountFieldId}>Conta de destino</label>
                             <Select
+                              id={accountFieldId}
                               value={item.accountId}
                               placeholder="Escolha a conta"
                               options={accountOptions}
@@ -331,7 +338,8 @@ export function ImportPage() {
                       </>
                     )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </Card>
@@ -383,14 +391,14 @@ export function ImportPage() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Arquivo</th>
-                      <th>Banco</th>
-                      <th>Status</th>
-                      <th className="table__num">Linhas</th>
-                      <th className="table__num">Duplicatas</th>
-                      <th className="table__num">Erros</th>
-                      <th className="table__num">Gravadas</th>
-                      <th />
+                      <th scope="col">Arquivo</th>
+                      <th scope="col">Banco</th>
+                      <th scope="col">Status</th>
+                      <th scope="col" className="table__num">Linhas</th>
+                      <th scope="col" className="table__num">Duplicatas</th>
+                      <th scope="col" className="table__num">Erros</th>
+                      <th scope="col" className="table__num">Gravadas</th>
+                      <th scope="col" />
                     </tr>
                   </thead>
                   <tbody>
@@ -448,18 +456,32 @@ export function ImportPage() {
 function RevertButton({ batchId }: { batchId: number }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
   const revert = useMutation({
     mutationFn: () => api.post<{ removed: number }>(`/imports/${batchId}/revert`),
     onSuccess: (result) => {
       toast(`${result.removed} lançamentos removidos do ledger`)
       queryClient.invalidateQueries()
+      setConfirming(false)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao desfazer', 'error'),
   })
   return (
-    <Button variant="danger" size="sm" icon="trash" disabled={revert.isPending} onClick={() => revert.mutate()}>
-      Desfazer
-    </Button>
+    <>
+      <Button variant="danger" size="sm" icon="trash" disabled={revert.isPending} onClick={() => setConfirming(true)}>
+        Desfazer
+      </Button>
+      {confirming && (
+        <ConfirmDeleteModal
+          title="Desfazer esta importação?"
+          body="Os lançamentos que este lote gravou no ledger serão removidos. Isso não pode ser desfeito."
+          confirmLabel="Desfazer importação"
+          pending={revert.isPending}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => revert.mutate()}
+        />
+      )}
+    </>
   )
 }
 
@@ -470,6 +492,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
   const toast = useToast()
   const queryClient = useQueryClient()
   const [filter, setFilter] = useState<'all' | 'problems' | 'uncategorized'>('all')
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
 
   const batch = useQuery({
     queryKey: ['imports', batchId],
@@ -504,6 +527,19 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao descartar', 'error'),
   })
+
+  if (confirmingDiscard) {
+    return (
+      <ConfirmDeleteModal
+        title="Descartar este lote de importação?"
+        body="As linhas revisadas nesta tela são perdidas. Nada foi gravado no ledger ainda."
+        confirmLabel="Descartar lote"
+        pending={discard.isPending}
+        onCancel={() => setConfirmingDiscard(false)}
+        onConfirm={() => discard.mutate()}
+      />
+    )
+  }
 
   const rows = batch.data?.rows ?? []
   const visible = useMemo(() => {
@@ -578,13 +614,13 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: 40 }}>
+                  <th scope="col" style={{ width: 40 }}>
                     <span className="sr-only">Incluir</span>
                   </th>
-                  <th style={{ width: 96 }}>Data</th>
-                  <th>Descrição</th>
-                  <th className="table__num" style={{ width: 116 }}>Valor</th>
-                  <th style={{ width: 210 }}>TAG</th>
+                  <th scope="col" style={{ width: 96 }}>Data</th>
+                  <th scope="col">Descrição</th>
+                  <th scope="col" className="table__num" style={{ width: 116 }}>Valor</th>
+                  <th scope="col" style={{ width: 210 }}>TAG</th>
                 </tr>
               </thead>
               <tbody>
@@ -675,7 +711,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
         </>
       )}
         <DialogFooter>
-          <Button variant="danger" icon="trash" onClick={() => discard.mutate()} disabled={discard.isPending}>
+          <Button variant="danger" icon="trash" onClick={() => setConfirmingDiscard(true)} disabled={discard.isPending}>
             Descartar lote
           </Button>
           <Button
