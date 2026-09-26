@@ -559,10 +559,10 @@ function DreColumn({
         <table className="table">
           <thead>
             <tr>
-              <th>TAG</th>
-              <th className="table__num" style={{ width: 64 }}>Qtde</th>
-              <th className="table__num" style={{ width: 64 }}>%</th>
-              <th className="table__num" style={{ width: 120 }}>Valor</th>
+              <th scope="col">TAG</th>
+              <th scope="col" className="table__num" style={{ width: 64 }}>Qtde</th>
+              <th scope="col" className="table__num" style={{ width: 64 }}>%</th>
+              <th scope="col" className="table__num" style={{ width: 120 }}>Valor</th>
             </tr>
           </thead>
           <tbody>

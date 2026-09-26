@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { bpsToInput, centsToInput, parseMoneyInput, parsePercentInput } from '../../lib/format'
 // Importa do barrel uma vez só. NÃO é reexportado por ele: o barrel
 // importando este arquivo, que importa o barrel de volta, fecharia um ciclo
 // (mesmo motivo do comentário em SimulatorModal.tsx).
-import { Button, Modal, TextInput, useToast, type MeterState } from './index'
+import { Button, ConfirmDeleteModal, Modal, TextInput, useToast, type MeterState } from './index'
 
 /**
  * Uma meta de investimento (`investmentGoals`, `purpose` opcional —
@@ -67,6 +67,13 @@ export function GoalModal({
   const [monthly, setMonthly] = useState(centsToInput(goal?.monthlyContributionCents ?? null))
   const [expected, setExpected] = useState(bpsToInput(goal?.expectedReturnBps ?? 800))
   const [purpose, setPurpose] = useState<string | null>(goal?.purpose ?? defaultPurpose ?? null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+
+  const nameFieldId = useId()
+  const targetFieldId = useId()
+  const targetDateFieldId = useId()
+  const monthlyFieldId = useId()
+  const expectedFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -98,6 +105,19 @@ export function GoalModal({
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
   })
 
+  if (confirmingDelete && goal) {
+    return (
+      <ConfirmDeleteModal
+        title={`Excluir ${goal.name}?`}
+        body="Isso não pode ser desfeito."
+        confirmLabel="Excluir meta"
+        pending={remove.isPending}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => remove.mutate()}
+      />
+    )
+  }
+
   return (
     <Modal
       title={goal ? `Editar ${goal.name}` : 'Nova meta de investimento'}
@@ -105,7 +125,7 @@ export function GoalModal({
       footer={
         <>
           {goal ? (
-            <Button variant="danger" icon="trash" onClick={() => remove.mutate()}>
+            <Button variant="danger" icon="trash" onClick={() => setConfirmingDelete(true)}>
               Remover
             </Button>
           ) : (
@@ -119,8 +139,8 @@ export function GoalModal({
     >
       <div className="stack">
         <div className="field">
-          <label className="field__label">Nome da meta</label>
-          <TextInput value={name} onChange={setName} placeholder="ex. Reserva de oportunidade" />
+          <label className="field__label" htmlFor={nameFieldId}>Nome da meta</label>
+          <TextInput id={nameFieldId} value={name} onChange={setName} placeholder="ex. Reserva de oportunidade" />
         </div>
         <div className="field">
           <label className="field__label">Propósito (opcional)</label>
@@ -142,22 +162,22 @@ export function GoalModal({
         </div>
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Valor-alvo (R$)</label>
-            <TextInput value={target} onChange={setTarget} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={targetFieldId}>Valor-alvo (R$)</label>
+            <TextInput id={targetFieldId} value={target} onChange={setTarget} placeholder="0,00" numeral />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Data-alvo</label>
-            <TextInput value={targetDate} onChange={setTargetDate} type="date" />
+            <label className="field__label" htmlFor={targetDateFieldId}>Data-alvo</label>
+            <TextInput id={targetDateFieldId} value={targetDate} onChange={setTargetDate} type="date" />
           </div>
         </div>
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Aporte mensal (R$)</label>
-            <TextInput value={monthly} onChange={setMonthly} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={monthlyFieldId}>Aporte mensal (R$)</label>
+            <TextInput id={monthlyFieldId} value={monthly} onChange={setMonthly} placeholder="0,00" numeral />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Retorno esperado a.a. (%)</label>
-            <TextInput value={expected} onChange={setExpected} placeholder="8" numeral />
+            <label className="field__label" htmlFor={expectedFieldId}>Retorno esperado a.a. (%)</label>
+            <TextInput id={expectedFieldId} value={expected} onChange={setExpected} placeholder="8" numeral />
           </div>
         </div>
         <p className="chart__note">

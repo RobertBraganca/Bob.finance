@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -10,6 +10,7 @@ import {
   Button,
   Card,
   CategorySelect,
+  ConfirmDeleteModal,
   EmptyState,
   FilterSelect,
   Icon,
@@ -358,6 +359,7 @@ export function TransactionsPage() {
       setSelected(new Set())
       queryClient.invalidateQueries()
       setScopePrompt(null)
+      setConfirmingIds(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
@@ -365,10 +367,16 @@ export function TransactionsPage() {
   // vinculada a um template (forecast/dívida) — uma seleção comum exclui
   // direto, sem modal extra (decisions/0020).
   const [scopePrompt, setScopePrompt] = useState<number[] | null>(null)
+  // Uma seleção comum (sem vínculo de template) ainda passa por uma
+  // confirmação — só não pergunta o ESCOPO (revisão de UX copy de
+  // 26/09/2026: excluir sem perguntar nada era a única ação destrutiva do
+  // app sem esse passo; decisions/0020 nunca pediu para pular isso, só
+  // para não perguntar "esta/futuras/todas" quando não há template).
+  const [confirmingIds, setConfirmingIds] = useState<number[] | null>(null)
   const requestDelete = (ids: number[]) => {
     const hasTemplateLink = rows.some((r) => ids.includes(r.id) && r.pending && (r.forecastId || r.debtId))
     if (hasTemplateLink) setScopePrompt(ids)
-    else remove.mutate({ ids })
+    else setConfirmingIds(ids)
   }
 
 
@@ -617,7 +625,7 @@ export function TransactionsPage() {
                   <table className="table">
                     <thead>
                       <tr>
-                        <th style={{ width: 40 }}>
+                        <th scope="col" style={{ width: 40 }}>
                           <input
                             type="checkbox"
                             className="checkbox"
@@ -628,12 +636,12 @@ export function TransactionsPage() {
                             aria-label="Selecionar todos"
                           />
                         </th>
-                        <th style={{ width: 100 }}>Data</th>
-                        <th>Descrição</th>
-                        <th style={{ width: 190 }}>TAG</th>
-                        <th style={{ width: 130 }}>Conta</th>
-                        <th className="table__num" style={{ width: 128 }}>Valor</th>
-                        <th style={{ width: 40 }} />
+                        <th scope="col" style={{ width: 100 }}>Data</th>
+                        <th scope="col">Descrição</th>
+                        <th scope="col" style={{ width: 190 }}>TAG</th>
+                        <th scope="col" style={{ width: 130 }}>Conta</th>
+                        <th scope="col" className="table__num" style={{ width: 128 }}>Valor</th>
+                        <th scope="col" style={{ width: 40 }} />
                       </tr>
                     </thead>
                     <tbody>
@@ -787,6 +795,16 @@ export function TransactionsPage() {
           onConfirm={(scope: PendingDeleteScope) => remove.mutate({ ids: scopePrompt, scope })}
         />
       )}
+      {confirmingIds && (
+        <ConfirmDeleteModal
+          title={confirmingIds.length === 1 ? 'Excluir este lançamento?' : `Excluir ${confirmingIds.length} lançamentos?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel={confirmingIds.length === 1 ? 'Excluir lançamento' : 'Excluir lançamentos'}
+          pending={remove.isPending}
+          onCancel={() => setConfirmingIds(null)}
+          onConfirm={() => remove.mutate({ ids: confirmingIds })}
+        />
+      )}
     </>
   )
 }
@@ -918,25 +936,39 @@ function InstallmentsPanel({
 function DeleteInstallmentButton({ installmentId, description }: { installmentId: number; description: string }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
 
   const remove = useMutation({
     mutationFn: () => api.del(`/cash-flow/forecasts/${installmentId}`),
     onSuccess: () => {
       toast(`${description} removido`)
       queryClient.invalidateQueries()
+      setConfirming(false)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
   return (
-    <Button
-      variant="quiet"
-      size="sm"
-      icon="trash"
-      onClick={() => remove.mutate()}
-      disabled={remove.isPending}
-      title="Excluir parcelamento"
-    />
+    <>
+      <Button
+        variant="quiet"
+        size="sm"
+        icon="trash"
+        onClick={() => setConfirming(true)}
+        disabled={remove.isPending}
+        title="Excluir parcelamento"
+      />
+      {confirming && (
+        <ConfirmDeleteModal
+          title={`Excluir ${description}?`}
+          body="Parcelas já pagas continuam no histórico. Isso não pode ser desfeito."
+          confirmLabel="Excluir parcelamento"
+          pending={remove.isPending}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => remove.mutate()}
+        />
+      )}
+    </>
   )
 }
 
@@ -974,6 +1006,15 @@ function InstallmentModal({ installment, onClose }: { installment: InstallmentRo
     return `${installment.startPeriod}-${String(installment.dueDay).padStart(2, '0')}`
   })
   const [dueDay, setDueDay] = useState(String(installment?.dueDay ?? 10))
+
+  const descriptionFieldId = useId()
+  const amountFieldId = useId()
+  const dueDayFieldId = useId()
+  const paymentDateFieldId = useId()
+  const accountFieldId = useId()
+  const categoryFieldId = useId()
+  const installmentCountFieldId = useId()
+  const installmentsRealizedFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -1035,8 +1076,8 @@ function InstallmentModal({ installment, onClose }: { installment: InstallmentRo
       <div className="stack">
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 200 }}>
-            <label className="field__label">Descrição</label>
-            <TextInput value={description} onChange={setDescription} placeholder="ex. Notebook em 12x" />
+            <label className="field__label" htmlFor={descriptionFieldId}>Descrição</label>
+            <TextInput id={descriptionFieldId} value={description} onChange={setDescription} placeholder="ex. Notebook em 12x" />
           </div>
           <div className="field" style={{ minWidth: 170 }}>
             <label className="field__label">Direção</label>
@@ -1054,18 +1095,18 @@ function InstallmentModal({ installment, onClose }: { installment: InstallmentRo
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Valor por parcela (R$)</label>
-            <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={amountFieldId}>Valor por parcela (R$)</label>
+            <TextInput id={amountFieldId} value={amount} onChange={setAmount} placeholder="0,00" numeral />
           </div>
           {installment ? (
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Dia de vencimento</label>
-              <TextInput value={dueDay} onChange={setDueDay} placeholder="ex. 10" numeral />
+              <label className="field__label" htmlFor={dueDayFieldId}>Dia de vencimento</label>
+              <TextInput id={dueDayFieldId} value={dueDay} onChange={setDueDay} placeholder="ex. 10" numeral />
             </div>
           ) : (
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Data de pagamento</label>
-              <TextInput value={paymentDate} onChange={setPaymentDate} type="date" />
+              <label className="field__label" htmlFor={paymentDateFieldId}>Data de pagamento</label>
+              <TextInput id={paymentDateFieldId} value={paymentDate} onChange={setPaymentDate} type="date" />
               <span className="field__hint">O dia (não o mês) se repete nas próximas parcelas.</span>
             </div>
           )}
@@ -1073,8 +1114,9 @@ function InstallmentModal({ installment, onClose }: { installment: InstallmentRo
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">Conta</label>
+            <label className="field__label" htmlFor={accountFieldId}>Conta</label>
             <Select
+              id={accountFieldId}
               value={accountId}
               placeholder="Selecione"
               options={(accounts.data?.accounts ?? []).map((a) => ({ value: a.id, label: a.name }))}
@@ -1082,20 +1124,31 @@ function InstallmentModal({ installment, onClose }: { installment: InstallmentRo
             />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">TAG (opcional)</label>
-            <CategorySelect value={categoryId} direction={direction === 'in' ? 'in' : 'out'} onChange={setCategoryId} />
+            <label className="field__label" htmlFor={categoryFieldId}>TAG (opcional)</label>
+            <CategorySelect
+              id={categoryFieldId}
+              value={categoryId}
+              direction={direction === 'in' ? 'in' : 'out'}
+              onChange={setCategoryId}
+            />
           </div>
         </div>
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Total de parcelas</label>
-            <TextInput value={installmentCount} onChange={setInstallmentCount} placeholder="ex. 12" numeral />
+            <label className="field__label" htmlFor={installmentCountFieldId}>Total de parcelas</label>
+            <TextInput id={installmentCountFieldId} value={installmentCount} onChange={setInstallmentCount} placeholder="ex. 12" numeral />
           </div>
           {!installment && (
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Parcelas já confirmadas/recebidas</label>
-              <TextInput value={installmentsRealized} onChange={setInstallmentsRealized} placeholder="ex. 1" numeral />
+              <label className="field__label" htmlFor={installmentsRealizedFieldId}>Parcelas já confirmadas/recebidas</label>
+              <TextInput
+                id={installmentsRealizedFieldId}
+                value={installmentsRealized}
+                onChange={setInstallmentsRealized}
+                placeholder="ex. 1"
+                numeral
+              />
               <span className="field__hint">A pendência só materializa as parcelas futuras, a partir da próxima.</span>
             </div>
           )}
@@ -1169,6 +1222,7 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
   // data ou a categoria não tem o que propagar, segue direto.
   const [scopePrompt, setScopePrompt] = useState(false)
   const [creditCardId, setCreditCardId] = useState<number | null>(row.creditCardId)
+  const creditCardFieldId = useId()
 
   const cards = useQuery({
     queryKey: ['credit-cards'],
@@ -1248,8 +1302,9 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
       >
         <TransactionForm value={value} onChange={(patch) => setValue((current) => ({ ...current, ...patch }))} />
         <div className="field" style={{ marginTop: 'var(--sp-3)' }}>
-          <label className="field__label">Cartão de crédito</label>
+          <label className="field__label" htmlFor={creditCardFieldId}>Cartão de crédito</label>
           <Select
+            id={creditCardFieldId}
             value={creditCardId}
             placeholder="Nenhum"
             options={(cards.data?.cards ?? []).map((c) => ({ value: c.id, label: c.name }))}
@@ -1375,6 +1430,7 @@ function BulkCategorizeModal({
 }) {
   const [categoryId, setCategoryId] = useState<number | null>(null)
   const [saveAsRule, setSaveAsRule] = useState(false)
+  const categoryFieldId = useId()
 
   const distinct = useMemo(() => {
     const set = new Set(rows.map((row) => row.description.toLowerCase()))
@@ -1410,8 +1466,9 @@ function BulkCategorizeModal({
       }
     >
       <div className="stack">
-        <label className="field__label">TAG</label>
+        <label className="field__label" htmlFor={categoryFieldId}>TAG</label>
         <CategorySelect
+          id={categoryFieldId}
           value={categoryId}
           placeholder="Remover TAG"
           direction={uniformDirection}

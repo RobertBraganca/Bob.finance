@@ -101,8 +101,42 @@ function usePageViewTelemetry() {
   }, [location.pathname])
 }
 
+/** Mesmo rótulo do item de navegação lateral (Shell.tsx) para cada rota. */
+const PAGE_TITLE_BY_PATH: Record<string, string> = {
+  '/': 'Visão geral',
+  '/patrimonio': 'Patrimônio',
+  '/diario': 'Diário',
+  '/lancamentos': 'Lançamentos',
+  '/dre': 'DRE',
+  '/saude': 'Saúde financeira',
+  '/precificacao': 'Precificação',
+  '/parceiros': 'Receita de parceiros',
+  '/metas': 'Metas do mês',
+  '/dividas': 'Endividamento',
+  '/investimentos': 'Investimentos',
+  '/ajustes': 'Contas e bancos',
+  '/cartoes': 'Cartões',
+  '/categorias': 'TAGs e regras',
+  '/importar': 'Importar',
+}
+
+/**
+ * Auditoria de acessibilidade de 26/09/2026: numa SPA, trocar de rota não
+ * recarrega a página, então o título da aba (e o que um leitor de tela
+ * anuncia ao navegar) ficava travado em "Finanças" pras 15 rotas do app.
+ * Mesmo mapa de rótulos da navegação lateral, pra nunca discordar dela.
+ */
+function usePageTitle() {
+  const location = useLocation()
+  useEffect(() => {
+    const label = PAGE_TITLE_BY_PATH[location.pathname]
+    document.title = label ? `${label} · Finanças` : 'Finanças'
+  }, [location.pathname])
+}
+
 export function App() {
   usePageViewTelemetry()
+  usePageTitle()
   const { session, loading } = useAuth()
 
   // Nada renderiza (nem a tela de login) até saber se já existe uma sessão

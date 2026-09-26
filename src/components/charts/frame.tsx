@@ -97,7 +97,11 @@ export function ChartFrame<T>({
               <thead>
                 <tr>
                   {table.columns.map((column) => (
-                    <th key={column.header} style={column.align === 'right' ? { textAlign: 'right' } : undefined}>
+                    <th
+                      key={column.header}
+                      scope="col"
+                      style={column.align === 'right' ? { textAlign: 'right' } : undefined}
+                    >
                       {column.header}
                     </th>
                   ))}

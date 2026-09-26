@@ -5,6 +5,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -601,7 +602,16 @@ export function EmptyState({
 
 /* ------------------------------------------------------------------ *
  * Modal
+ *
+ * Auditoria de acessibilidade de 26/09/2026: sem retenção de foco, Tab
+ * escapava do diálogo pro resto da página (confirmado ao vivo, uma tecla
+ * Tab levava do modal "Personalizar" pro sino de notificações no
+ * cabeçalho, com o modal ainda coberto a tela). Este componente é usado
+ * em 9 arquivos -- a correção mora aqui, uma vez só.
  * ------------------------------------------------------------------ */
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 export function Modal({
   title,
   onClose,
@@ -615,9 +625,44 @@ export function Modal({
   footer?: ReactNode
   wide?: boolean
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  // Foco entra no diálogo ao abrir (primeiro controle focável, ou o
+  // próprio diálogo se não houver nenhum) e volta pra quem o abriu ao
+  // fechar -- sem isto, um usuário de teclado/leitor de tela perde a
+  // posição na página toda vez que fecha um modal.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    const first = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
+    ;(first ?? dialogRef.current)?.focus()
+    return () => previouslyFocused?.focus()
+  }, [])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? [],
+      ).filter((el) => el.offsetParent !== null)
+      if (focusable.length === 0) {
+        event.preventDefault()
+        return
+      }
+      const first = focusable[0]!
+      const last = focusable[focusable.length - 1]!
+      // Cicla dentro do diálogo em vez de deixar o Tab escapar pro resto
+      // da página, que continua no DOM (e visível) atrás do overlay.
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -625,7 +670,14 @@ export function Modal({
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={cx('modal', wide && 'modal--wide')} role="dialog" aria-modal="true" aria-label={title}>
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className={cx('modal', wide && 'modal--wide')}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
         <header className="row row--between">
           <h2 className="h2">{title}</h2>
           <Button variant="quiet" icon="x" onClick={onClose} title="Fechar" />
@@ -663,9 +715,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="toasts" role="status" aria-live="polite">
+      {/* Duas regiões vivas, não uma (auditoria de acessibilidade de
+          26/09/2026): um erro que some em 5,2s merece "alert"/assertive,
+          não o mesmo "status"/polite de um toast de sucesso, que pode ser
+          adiado ou perdido se o leitor de tela estiver no meio de outra
+          fala. Cada `<div>` fica sempre montado (mesmo vazio) -- é isso
+          que garante que o AT já conhece a região antes do conteúdo
+          aparecer nela. */}
+      <div className="toasts">
         {toasts.map((toast) => (
-          <div key={toast.id} className={cx('toast', toast.tone === 'error' && 'toast--error')}>
+          <div
+            key={toast.id}
+            role={toast.tone === 'error' ? 'alert' : 'status'}
+            aria-live={toast.tone === 'error' ? 'assertive' : 'polite'}
+            className={cx('toast', toast.tone === 'error' && 'toast--error')}
+          >
             <Icon name={toast.tone === 'error' ? 'alert' : 'check'} size={14} strokeWidth={2.2} />
             <span>{toast.message}</span>
           </div>
@@ -806,6 +870,60 @@ export function PendingScopeModal({
           </Button>
         </div>
       </div>
+    </Modal>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ * ConfirmDeleteModal
+ *
+ * Revisão de UX copy de 26/09/2026: todo botão de excluir do app (conta,
+ * cartão, dívida, TAG, meta, cotação, parceiro, perfil de importação...)
+ * chamava a mutação de exclusão direto no clique, sem nenhuma pergunta no
+ * meio -- o único ponto do produto onde uma ação destrutiva não pede
+ * confirmação, o oposto do princípio "sugestão nunca é aplicação
+ * automática" que já rege importação e conciliação. Um componente só,
+ * reaproveitado em cada um desses botões, no mesmo espírito do
+ * `PendingScopeModal` acima: título nomeia a ação e a entidade, corpo
+ * descreve a consequência real, botão primário repete o rótulo da ação
+ * (nunca "OK").
+ * ------------------------------------------------------------------ */
+export function ConfirmDeleteModal({
+  title,
+  body,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+  pending,
+}: {
+  /** "Excluir {nome}?" -- sempre com o nome real da entidade, nunca só o tipo genérico. */
+  title: string
+  /** A consequência real: o que acontece com lançamentos/histórico vinculados, e se é reversível. */
+  body: string
+  /** Repete a ação, nunca "OK"/"Confirmar" (ex. "Excluir conta", "Excluir TAG"). */
+  confirmLabel: string
+  onCancel: () => void
+  onConfirm: () => void
+  pending?: boolean
+}) {
+  return (
+    <Modal
+      title={title}
+      onClose={onCancel}
+      footer={
+        <>
+          <Button variant="quiet" onClick={onCancel} disabled={pending}>
+            Cancelar
+          </Button>
+          <Button variant="danger" onClick={onConfirm} disabled={pending}>
+            {confirmLabel}
+          </Button>
+        </>
+      }
+    >
+      <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
+        {body}
+      </p>
     </Modal>
   )
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { telemetry } from '../lib/telemetry'
@@ -9,6 +9,7 @@ import {
   Button,
   Card,
   capUsageState,
+  ConfirmDeleteModal,
   EmptyState,
   HeroFigure,
   Meter,
@@ -116,12 +117,12 @@ export function CreditCardsPage() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Cartão</th>
-                      <th>Conta</th>
-                      <th className="table__center">Fechamento</th>
-                      <th className="table__center">Vencimento</th>
-                      <th className="table__num">Limite disponível</th>
-                      <th style={{ width: 108 }} />
+                      <th scope="col">Cartão</th>
+                      <th scope="col">Conta</th>
+                      <th scope="col" className="table__center">Fechamento</th>
+                      <th scope="col" className="table__center">Vencimento</th>
+                      <th scope="col" className="table__num">Limite disponível</th>
+                      <th scope="col" style={{ width: 108 }} />
                     </tr>
                   </thead>
                   <tbody>
@@ -188,25 +189,39 @@ export function CreditCardsPage() {
 function DeleteCardButton({ cardId, name }: { cardId: number; name: string }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
 
   const remove = useMutation({
     mutationFn: () => api.del(`/credit-cards/${cardId}`),
     onSuccess: () => {
       toast(`${name} removido`)
       queryClient.invalidateQueries()
+      setConfirming(false)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
   return (
-    <Button
-      variant="quiet"
-      size="sm"
-      icon="trash"
-      onClick={() => remove.mutate()}
-      disabled={remove.isPending}
-      title="Excluir cartão"
-    />
+    <>
+      <Button
+        variant="quiet"
+        size="sm"
+        icon="trash"
+        onClick={() => setConfirming(true)}
+        disabled={remove.isPending}
+        title="Excluir cartão"
+      />
+      {confirming && (
+        <ConfirmDeleteModal
+          title={`Excluir ${name}?`}
+          body="Lançamentos que já usam este cartão não são apagados nem perdem o histórico. Isso não pode ser desfeito."
+          confirmLabel="Excluir cartão"
+          pending={remove.isPending}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => remove.mutate()}
+        />
+      )}
+    </>
   )
 }
 
@@ -278,6 +293,14 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
   const [creditLimit, setCreditLimit] = useState(centsToInput(card?.creditLimitCents ?? null))
   const [closingDay, setClosingDay] = useState(card ? String(card.closingDay) : '1')
   const [dueDay, setDueDay] = useState(card ? String(card.dueDay) : '10')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+
+  const nameFieldId = useId()
+  const linkedAccountFieldId = useId()
+  const institutionFieldId = useId()
+  const creditLimitFieldId = useId()
+  const closingDayFieldId = useId()
+  const dueDayFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -312,6 +335,19 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
   })
 
+  if (confirmingDelete && card) {
+    return (
+      <ConfirmDeleteModal
+        title={`Excluir ${card.name}?`}
+        body="Lançamentos que já usam este cartão não são apagados nem perdem o histórico. Isso não pode ser desfeito."
+        confirmLabel="Excluir cartão"
+        pending={remove.isPending}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => remove.mutate()}
+      />
+    )
+  }
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[560px]">
@@ -319,12 +355,13 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
         <div className="stack">
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
             <div className="field" style={{ flex: 1, minWidth: 200 }}>
-              <label className="field__label">Nome do cartão</label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Nubank Ultravioleta" />
+              <label className="field__label" htmlFor={nameFieldId}>Nome do cartão</label>
+              <Input id={nameFieldId} value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Nubank Ultravioleta" />
             </div>
             <div className="field" style={{ minWidth: 190 }}>
-              <label className="field__label">Conta vinculada</label>
+              <label className="field__label" htmlFor={linkedAccountFieldId}>Conta vinculada</label>
               <Select
+                id={linkedAccountFieldId}
                 value={accountId}
                 placeholder="Nenhuma"
                 options={(accounts.data?.accounts ?? []).map((a) => ({ value: a.id, label: a.name }))}
@@ -334,14 +371,15 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
           </div>
 
           <div className="field">
-            <label className="field__label">Instituição</label>
-            <Input value={institution} onChange={(e) => setInstitution(e.target.value)} placeholder="opcional" />
+            <label className="field__label" htmlFor={institutionFieldId}>Instituição</label>
+            <Input id={institutionFieldId} value={institution} onChange={(e) => setInstitution(e.target.value)} placeholder="opcional" />
           </div>
 
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Limite total (R$)</label>
+              <label className="field__label" htmlFor={creditLimitFieldId}>Limite total (R$)</label>
               <Input
+                id={creditLimitFieldId}
                 value={creditLimit}
                 onChange={(e) => setCreditLimit(e.target.value)}
                 placeholder="0,00"
@@ -349,8 +387,9 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
               />
             </div>
             <div className="field" style={{ flex: 1, minWidth: 120 }}>
-              <label className="field__label">Dia de fechamento</label>
+              <label className="field__label" htmlFor={closingDayFieldId}>Dia de fechamento</label>
               <Input
+                id={closingDayFieldId}
                 value={closingDay}
                 onChange={(e) => setClosingDay(e.target.value)}
                 placeholder="ex. 25"
@@ -358,8 +397,9 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
               />
             </div>
             <div className="field" style={{ flex: 1, minWidth: 120 }}>
-              <label className="field__label">Dia de vencimento</label>
+              <label className="field__label" htmlFor={dueDayFieldId}>Dia de vencimento</label>
               <Input
+                id={dueDayFieldId}
                 value={dueDay}
                 onChange={(e) => setDueDay(e.target.value)}
                 placeholder="ex. 5"
@@ -370,7 +410,7 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
         </div>
         <DialogFooter>
           {card ? (
-            <Button variant="danger" icon="trash" onClick={() => remove.mutate()}>
+            <Button variant="danger" icon="trash" onClick={() => setConfirmingDelete(true)}>
               Remover
             </Button>
           ) : (
@@ -395,6 +435,9 @@ function SnapshotModal({ card, onClose }: { card: CardRow; onClose: () => void }
   const queryClient = useQueryClient()
   const [asOf, setAsOf] = useState(() => new Date().toISOString().slice(0, 10))
   const [available, setAvailable] = useState(centsToInput(card.availableLimitCents))
+
+  const asOfFieldId = useId()
+  const availableFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -424,12 +467,13 @@ function SnapshotModal({ card, onClose }: { card: CardRow; onClose: () => void }
         <div className="stack">
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Data</label>
-              <Input value={asOf} onChange={(e) => setAsOf(e.target.value)} type="date" />
+              <label className="field__label" htmlFor={asOfFieldId}>Data</label>
+              <Input id={asOfFieldId} value={asOf} onChange={(e) => setAsOf(e.target.value)} type="date" />
             </div>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Limite disponível (R$)</label>
+              <label className="field__label" htmlFor={availableFieldId}>Limite disponível (R$)</label>
               <Input
+                id={availableFieldId}
                 value={available}
                 onChange={(e) => setAvailable(e.target.value)}
                 placeholder="0,00"

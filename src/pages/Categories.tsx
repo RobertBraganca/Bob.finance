@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -9,6 +9,7 @@ import {
   Button,
   Card,
   CategorySelect,
+  ConfirmDeleteModal,
   EmptyState,
   Icon,
   PeriodNav,
@@ -324,6 +325,10 @@ function CategoryModal({
   const [color, setColor] = useState(node?.color ?? parent?.color ?? PALETTE[0]!.hex)
   const [kind, setKind] = useState(node?.kind ?? parent?.kind ?? 'expense')
   const [dreGroup, setDreGroup] = useState(node?.dreGroup ?? parent?.dreGroup ?? '')
+  const nameFieldId = useId()
+  const kindFieldId = useId()
+  const dreGroupFieldId = useId()
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const isChild = isEdit ? node!.parentId !== null : parent !== null
 
@@ -354,6 +359,19 @@ function CategoryModal({
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
+  if (confirmingDelete) {
+    return (
+      <ConfirmDeleteModal
+        title={`Excluir ${node!.name}?`}
+        body="Lançamentos que já usam esta TAG não são apagados nem perdem a classificação. Isso não pode ser desfeito."
+        confirmLabel="Excluir TAG"
+        pending={remove.isPending}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => remove.mutate()}
+      />
+    )
+  }
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[560px]">
@@ -362,15 +380,16 @@ function CategoryModal({
         </DialogTitle>
       <div className="stack">
         <div className="field">
-          <label className="field__label">Nome</label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Assinaturas" />
+          <label className="field__label" htmlFor={nameFieldId}>Nome</label>
+          <Input id={nameFieldId} value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Assinaturas" />
         </div>
 
         {!isChild && (
           <>
             <div className="field">
-              <label className="field__label">Tipo de fluxo</label>
+              <label className="field__label" htmlFor={kindFieldId}>Tipo de fluxo</label>
               <Select
+                id={kindFieldId}
                 value={kind}
                 options={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))}
                 onChange={(value) => {
@@ -417,8 +436,9 @@ function CategoryModal({
 
             {(kind === 'income' || kind === 'expense') && (
               <div className="field">
-                <label className="field__label">Classificação no DRE (PJ)</label>
+                <label className="field__label" htmlFor={dreGroupFieldId}>Classificação no DRE (PJ)</label>
                 <Select
+                  id={dreGroupFieldId}
                   value={dreGroup}
                   options={[
                     { value: '', label: DRE_DEFAULT_LABEL[kind]! },
@@ -444,7 +464,7 @@ function CategoryModal({
       </div>
         <DialogFooter>
           {isEdit ? (
-            <Button variant="danger" icon="trash" onClick={() => remove.mutate()} disabled={remove.isPending}>
+            <Button variant="danger" icon="trash" onClick={() => setConfirmingDelete(true)} disabled={remove.isPending}>
               Excluir
             </Button>
           ) : (
@@ -476,6 +496,10 @@ function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
   const [pattern, setPattern] = useState('')
   const [categoryId, setCategoryId] = useState<number | null>(null)
   const [matchType, setMatchType] = useState('contains')
+  const [confirmingRuleId, setConfirmingRuleId] = useState<number | null>(null)
+  const matchTypeFieldId = useId()
+  const patternFieldId = useId()
+  const categoryFieldId = useId()
 
   const create = useMutation({
     mutationFn: () => api.post('/rules', { pattern: pattern.trim(), categoryId, matchType }),
@@ -494,9 +518,12 @@ function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
     onSuccess: () => {
       toast('Regra removida')
       queryClient.invalidateQueries()
+      setConfirmingRuleId(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
   })
+
+  const confirmingRule = rules.find((rule) => rule.id === confirmingRuleId) ?? null
 
   return (
     <>
@@ -539,13 +566,13 @@ function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
               <table className="table">
                 <thead>
                   <tr>
-                    <th style={{ width: 70, textAlign: 'right' }}>Prior.</th>
-                    <th style={{ width: 110 }}>Condição</th>
-                    <th>Padrão</th>
-                    <th>TAG</th>
-                    <th style={{ width: 110 }}>Origem</th>
-                    <th style={{ width: 70, textAlign: 'right' }}>Usos</th>
-                    <th style={{ width: 44 }} />
+                    <th scope="col" style={{ width: 70, textAlign: 'right' }}>Prior.</th>
+                    <th scope="col" style={{ width: 110 }}>Condição</th>
+                    <th scope="col">Padrão</th>
+                    <th scope="col">TAG</th>
+                    <th scope="col" style={{ width: 110 }}>Origem</th>
+                    <th scope="col" style={{ width: 70, textAlign: 'right' }}>Usos</th>
+                    <th scope="col" style={{ width: 44 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -575,7 +602,7 @@ function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
                           variant="quiet"
                           size="sm"
                           icon="trash"
-                          onClick={() => remove.mutate(rule.id)}
+                          onClick={() => setConfirmingRuleId(rule.id)}
                           title="Remover regra"
                         />
                       </td>
@@ -594,23 +621,24 @@ function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
             <DialogTitle>Nova regra</DialogTitle>
             <div className="stack">
               <div className="field">
-                <label className="field__label">Condição na descrição</label>
+                <label className="field__label" htmlFor={matchTypeFieldId}>Condição na descrição</label>
                 <Select
+                  id={matchTypeFieldId}
                   value={matchType}
                   options={Object.entries(MATCH_LABEL).map(([value, label]) => ({ value, label }))}
                   onChange={(value) => setMatchType(value ?? 'contains')}
                 />
               </div>
               <div className="field">
-                <label className="field__label">Padrão</label>
-                <Input value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder="ex. uber" />
+                <label className="field__label" htmlFor={patternFieldId}>Padrão</label>
+                <Input id={patternFieldId} value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder="ex. uber" />
                 <span className="field__hint">
                   A comparação ignora acentos e maiúsculas: “Padaria” casa com “PADARIA”.
                 </span>
               </div>
               <div className="field">
-                <label className="field__label">TAG</label>
-                <CategorySelect value={categoryId} placeholder="Escolha" onChange={setCategoryId} />
+                <label className="field__label" htmlFor={categoryFieldId}>TAG</label>
+                <CategorySelect id={categoryFieldId} value={categoryId} placeholder="Escolha" onChange={setCategoryId} />
               </div>
             </div>
             <DialogFooter>
@@ -628,6 +656,17 @@ function RulesTable({ rules, isError }: { rules: Rule[]; isError?: boolean }) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
+
+      {confirmingRule && (
+        <ConfirmDeleteModal
+          title={`Excluir regra "${confirmingRule.pattern}"?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel="Excluir regra"
+          pending={remove.isPending}
+          onCancel={() => setConfirmingRuleId(null)}
+          onConfirm={() => remove.mutate(confirmingRule.id)}
+        />
       )}
     </>
   )
@@ -672,11 +711,11 @@ function MemoryTable({ memory, isError }: { memory: Memory[]; isError?: boolean 
           <table className="table">
             <thead>
               <tr>
-                <th>Assinatura do comerciante</th>
-                <th>TAG</th>
-                <th style={{ width: 130, textAlign: 'right' }}>Confirmações</th>
-                <th style={{ width: 120 }}>Status</th>
-                <th style={{ width: 44 }} />
+                <th scope="col">Assinatura do comerciante</th>
+                <th scope="col">TAG</th>
+                <th scope="col" style={{ width: 130, textAlign: 'right' }}>Confirmações</th>
+                <th scope="col" style={{ width: 120 }}>Status</th>
+                <th scope="col" style={{ width: 44 }} />
               </tr>
             </thead>
             <tbody>

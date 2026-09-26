@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { bps, centsToInput, money, parseMoneyInput, date as fmtDate, quantity as fmtQuantity } from '../lib/format'
@@ -70,6 +70,7 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
   const [editingTarget, setEditingTarget] = useState(false)
   const [targetInput, setTargetInput] = useState('')
   const [registering, setRegistering] = useState(false)
+  const targetInputFieldId = useId()
 
   const resumo = useQuery({
     queryKey: ['proventos-resumo'],
@@ -170,8 +171,8 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
             ) : (
               <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-end' }}>
                 <div className="field" style={{ width: 180 }}>
-                  <label className="field__label">Meta mensal de proventos (R$)</label>
-                  <TextInput value={targetInput} onChange={setTargetInput} placeholder="0,00" numeral />
+                  <label className="field__label" htmlFor={targetInputFieldId}>Meta mensal de proventos (R$)</label>
+                  <TextInput id={targetInputFieldId} value={targetInput} onChange={setTargetInput} placeholder="0,00" numeral />
                 </div>
                 <Button
                   variant="primary"
@@ -296,14 +297,14 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
             <table className="table">
               <thead>
                 <tr>
-                  <th>Ano</th>
+                  <th scope="col">Ano</th>
                   {MONTH_LABELS.map((label) => (
-                    <th key={label} className="table__num">
+                    <th key={label} scope="col" className="table__num">
                       {label}
                     </th>
                   ))}
-                  <th className="table__num">Média</th>
-                  <th className="table__num">Total</th>
+                  <th scope="col" className="table__num">Média</th>
+                  <th scope="col" className="table__num">Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -377,16 +378,16 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
             <table className="table">
               <thead>
                 <tr>
-                  <th>Ativo</th>
-                  <th>Tipo de ativo</th>
-                  <th>Status</th>
-                  <th>Tipo de pagamento</th>
-                  <th>Data Com</th>
-                  <th>Data Pagamento</th>
-                  <th className="table__num">Quantidade</th>
-                  <th className="table__num">Valor do div.</th>
-                  <th className="table__num">Valor total</th>
-                  <th className="table__num">Total líquido</th>
+                  <th scope="col">Ativo</th>
+                  <th scope="col">Tipo de ativo</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Tipo de pagamento</th>
+                  <th scope="col">Data Com</th>
+                  <th scope="col">Data Pagamento</th>
+                  <th scope="col" className="table__num">Quantidade</th>
+                  <th scope="col" className="table__num">Valor do div.</th>
+                  <th scope="col" className="table__num">Valor total</th>
+                  <th scope="col" className="table__num">Total líquido</th>
                 </tr>
               </thead>
               <tbody>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { bps, money, parseMoneyInput, parsePercentInput, period as fmtPeriod } from '../../lib/format'
@@ -78,6 +78,13 @@ export function SimulatorModal({
   const [decumulation, setDecumulation] = useState<DecumulationResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const amountFieldId = useId()
+  const debtFieldId = useId()
+  const withdrawalFieldId = useId()
+  const expectedReturnFieldId = useId()
+  const horizonFieldId = useId()
+  const sourceFieldId = useId()
+
   const debts = useQuery({
     queryKey: ['debts-for-simulator'],
     queryFn: () => api.get<{ debts: DebtRow[] }>('/debts'),
@@ -149,8 +156,9 @@ export function SimulatorModal({
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
           {kind === 'expense' && (
             <div className="field" style={{ width: 180 }}>
-              <label className="field__label">Valor</label>
+              <label className="field__label" htmlFor={amountFieldId}>Valor</label>
               <Input
+                id={amountFieldId}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0,00"
@@ -160,8 +168,9 @@ export function SimulatorModal({
           )}
           {kind === 'payoff' && (
             <div className="field" style={{ minWidth: 240, flex: 1 }}>
-              <label className="field__label">Dívida a quitar</label>
+              <label className="field__label" htmlFor={debtFieldId}>Dívida a quitar</label>
               <Select
+                id={debtFieldId}
                 value={debtId}
                 placeholder="Escolha uma dívida"
                 options={(debts.data?.debts ?? []).map((d) => ({
@@ -175,8 +184,9 @@ export function SimulatorModal({
           {kind === 'decumulation' && (
             <>
               <div className="field" style={{ width: 180 }}>
-                <label className="field__label">Retirada mensal</label>
+                <label className="field__label" htmlFor={withdrawalFieldId}>Retirada mensal</label>
                 <Input
+                  id={withdrawalFieldId}
                   value={withdrawal}
                   onChange={(e) => setWithdrawal(e.target.value)}
                   placeholder="0,00"
@@ -184,8 +194,9 @@ export function SimulatorModal({
                 />
               </div>
               <div className="field" style={{ width: 140 }}>
-                <label className="field__label">Retorno esperado (a.a.)</label>
+                <label className="field__label" htmlFor={expectedReturnFieldId}>Retorno esperado (a.a.)</label>
                 <Input
+                  id={expectedReturnFieldId}
                   value={expectedReturn}
                   onChange={(e) => setExpectedReturn(e.target.value)}
                   placeholder="8"
@@ -193,8 +204,9 @@ export function SimulatorModal({
                 />
               </div>
               <div className="field" style={{ width: 140 }}>
-                <label className="field__label">Horizonte (anos)</label>
+                <label className="field__label" htmlFor={horizonFieldId}>Horizonte (anos)</label>
                 <Input
+                  id={horizonFieldId}
                   value={horizonYears}
                   onChange={(e) => setHorizonYears(e.target.value)}
                   placeholder="30"
@@ -205,8 +217,9 @@ export function SimulatorModal({
           )}
           {kind !== 'decumulation' && (
             <div className="field" style={{ minWidth: 200 }}>
-              <label className="field__label">De onde sai o dinheiro</label>
+              <label className="field__label" htmlFor={sourceFieldId}>De onde sai o dinheiro</label>
               <Select
+                id={sourceFieldId}
                 value={source}
                 options={SOURCES.map((s) => ({ value: s.value, label: s.label }))}
                 onChange={(v) => setSource((v ?? 'balance') as Source)}
@@ -249,10 +262,10 @@ export function SimulatorModal({
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Indicador</th>
-                    <th className="table__num">Agora</th>
-                    <th className="table__num">Depois</th>
-                    <th className="table__num">Diferença</th>
+                    <th scope="col">Indicador</th>
+                    <th scope="col" className="table__num">Agora</th>
+                    <th scope="col" className="table__num">Depois</th>
+                    <th scope="col" className="table__num">Diferença</th>
                   </tr>
                 </thead>
                 <tbody>

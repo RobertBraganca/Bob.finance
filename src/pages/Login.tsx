@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useAuth } from '../lib/auth'
 import { Button, Card, TextInput } from '../components/ui'
 import logo from '../assets/logo-red.svg'
@@ -15,6 +15,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const emailFieldId = useId()
+  const passwordFieldId = useId()
 
   const submit = async () => {
     if (!email.trim() || !password) return
@@ -51,12 +53,12 @@ export function LoginPage() {
               </h1>
             </div>
             <div className="field">
-              <label className="field__label">E-mail</label>
-              <TextInput value={email} onChange={setEmail} type="email" placeholder="voce@exemplo.com" />
+              <label className="field__label" htmlFor={emailFieldId}>E-mail</label>
+              <TextInput id={emailFieldId} value={email} onChange={setEmail} type="email" placeholder="voce@exemplo.com" />
             </div>
             <div className="field">
-              <label className="field__label">Senha</label>
-              <TextInput value={password} onChange={setPassword} type="password" />
+              <label className="field__label" htmlFor={passwordFieldId}>Senha</label>
+              <TextInput id={passwordFieldId} value={password} onChange={setPassword} type="password" />
             </div>
             {error && (
               <p className="chart__note" style={{ color: 'var(--status-critical)' }}>

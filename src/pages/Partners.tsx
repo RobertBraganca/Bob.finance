@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useAccounts, useMeta } from '../lib/store'
@@ -14,6 +14,7 @@ import {
   Bento,
   Button,
   Card,
+  ConfirmDeleteModal,
   EmptyState,
   HeroFigure,
   Icon,
@@ -415,6 +416,10 @@ function PlatformModal({ platform, onClose }: { platform?: PlatformRow; onClose:
   const [name, setName] = useState(platform?.name ?? '')
   const [minimum, setMinimum] = useState(centsToInput(platform?.minWithdrawalCents ?? 0))
   const [notes, setNotes] = useState(platform?.notes ?? '')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const nameFieldId = useId()
+  const minimumFieldId = useId()
+  const notesFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -449,6 +454,19 @@ function PlatformModal({ platform, onClose }: { platform?: PlatformRow; onClose:
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
   })
 
+  if (confirmingDelete) {
+    return (
+      <ConfirmDeleteModal
+        title={`Excluir ${platform!.name}?`}
+        body="Isso não pode ser desfeito."
+        confirmLabel="Excluir plataforma"
+        pending={remove.isPending}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => remove.mutate()}
+      />
+    )
+  }
+
   return (
     <Modal
       title={platform ? `Editar ${platform.name}` : 'Cadastrar plataforma'}
@@ -459,7 +477,7 @@ function PlatformModal({ platform, onClose }: { platform?: PlatformRow; onClose:
             <Button
               variant="danger"
               icon="trash"
-              onClick={() => remove.mutate()}
+              onClick={() => setConfirmingDelete(true)}
               disabled={remove.isPending}
             >
               Remover
@@ -476,21 +494,21 @@ function PlatformModal({ platform, onClose }: { platform?: PlatformRow; onClose:
     >
       <div className="stack">
         <div className="field">
-          <label className="field__label">Nome</label>
-          <TextInput value={name} onChange={setName} placeholder="ex. Wbuy" />
+          <label className="field__label" htmlFor={nameFieldId}>Nome</label>
+          <TextInput id={nameFieldId} value={name} onChange={setName} placeholder="ex. Wbuy" />
         </div>
 
         <div className="field">
-          <label className="field__label">Mínimo de saque (R$)</label>
-          <TextInput value={minimum} onChange={setMinimum} placeholder="0,00" numeral />
+          <label className="field__label" htmlFor={minimumFieldId}>Mínimo de saque (R$)</label>
+          <TextInput id={minimumFieldId} value={minimum} onChange={setMinimum} placeholder="0,00" numeral />
           <span className="field__hint">
             Zero significa sem mínimo. Pode ser alterado a qualquer momento.
           </span>
         </div>
 
         <div className="field">
-          <label className="field__label">Notas (opcional)</label>
-          <TextInput value={notes} onChange={setNotes} placeholder="ex. paga todo dia 15" />
+          <label className="field__label" htmlFor={notesFieldId}>Notas (opcional)</label>
+          <TextInput id={notesFieldId} value={notes} onChange={setNotes} placeholder="ex. paga todo dia 15" />
         </div>
 
         {platform && platform.withdrawnCents > 0 && (
@@ -510,6 +528,9 @@ function CommissionModal({ platform, onClose }: { platform: PlatformRow; onClose
   const [earnedOn, setEarnedOn] = useState(() => new Date().toISOString().slice(0, 10))
   const [amount, setAmount] = useState('')
   const [notes, setNotes] = useState('')
+  const earnedOnFieldId = useId()
+  const amountFieldId = useId()
+  const notesFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -548,18 +569,18 @@ function CommissionModal({ platform, onClose }: { platform: PlatformRow; onClose
       <div className="stack">
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Data</label>
-            <TextInput value={earnedOn} onChange={setEarnedOn} type="date" />
+            <label className="field__label" htmlFor={earnedOnFieldId}>Data</label>
+            <TextInput id={earnedOnFieldId} value={earnedOn} onChange={setEarnedOn} type="date" />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Valor (R$)</label>
-            <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={amountFieldId}>Valor (R$)</label>
+            <TextInput id={amountFieldId} value={amount} onChange={setAmount} placeholder="0,00" numeral />
           </div>
         </div>
 
         <div className="field">
-          <label className="field__label">Notas (opcional)</label>
-          <TextInput value={notes} onChange={setNotes} placeholder="ex. comissão de outubro" />
+          <label className="field__label" htmlFor={notesFieldId}>Notas (opcional)</label>
+          <TextInput id={notesFieldId} value={notes} onChange={setNotes} placeholder="ex. comissão de outubro" />
         </div>
 
         <p className="chart__note">
@@ -579,6 +600,10 @@ function WithdrawModal({ platform, onClose }: { platform: PlatformRow; onClose: 
   const [postedOn, setPostedOn] = useState(() => new Date().toISOString().slice(0, 10))
   const [amount, setAmount] = useState(() => centsToInput(platform.balanceCents))
   const [notes, setNotes] = useState('')
+  const accountFieldId = useId()
+  const postedOnFieldId = useId()
+  const amountFieldId = useId()
+  const notesFieldId = useId()
 
   const options = useMemo(
     () =>
@@ -633,8 +658,9 @@ function WithdrawModal({ platform, onClose }: { platform: PlatformRow; onClose: 
     >
       <div className="stack">
         <div className="field">
-          <label className="field__label">Conta de destino</label>
+          <label className="field__label" htmlFor={accountFieldId}>Conta de destino</label>
           <Select
+            id={accountFieldId}
             value={accountId}
             options={options}
             onChange={setAccountId}
@@ -648,12 +674,12 @@ function WithdrawModal({ platform, onClose }: { platform: PlatformRow; onClose: 
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Data</label>
-            <TextInput value={postedOn} onChange={setPostedOn} type="date" />
+            <label className="field__label" htmlFor={postedOnFieldId}>Data</label>
+            <TextInput id={postedOnFieldId} value={postedOn} onChange={setPostedOn} type="date" />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Valor (R$)</label>
-            <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={amountFieldId}>Valor (R$)</label>
+            <TextInput id={amountFieldId} value={amount} onChange={setAmount} placeholder="0,00" numeral />
             {exceeds ? (
               <span className="field__error">
                 acima do acumulado de {money(platform.balanceCents)}
@@ -673,8 +699,8 @@ function WithdrawModal({ platform, onClose }: { platform: PlatformRow; onClose: 
         )}
 
         <div className="field">
-          <label className="field__label">Notas (opcional)</label>
-          <TextInput value={notes} onChange={setNotes} placeholder="ex. saque solicitado dia 10" />
+          <label className="field__label" htmlFor={notesFieldId}>Notas (opcional)</label>
+          <TextInput id={notesFieldId} value={notes} onChange={setNotes} placeholder="ex. saque solicitado dia 10" />
         </div>
 
         <p className="chart__note">
@@ -689,6 +715,7 @@ function WithdrawModal({ platform, onClose }: { platform: PlatformRow; onClose: 
 function HistoryModal({ platform, onClose }: { platform: PlatformRow; onClose: () => void }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  const [confirmingId, setConfirmingId] = useState<number | null>(null)
 
   const commissions = useQuery({
     queryKey: ['partner-commissions', platform.id],
@@ -700,11 +727,13 @@ function HistoryModal({ platform, onClose }: { platform: PlatformRow; onClose: (
     onSuccess: () => {
       toast('Comissão removida')
       queryClient.invalidateQueries()
+      setConfirmingId(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
   const rows = commissions.data?.commissions ?? []
+  const confirmingRow = rows.find((row) => row.id === confirmingId) ?? null
 
   return (
     <Modal
@@ -729,10 +758,10 @@ function HistoryModal({ platform, onClose }: { platform: PlatformRow; onClose: (
           <table className="table">
             <thead>
               <tr>
-                <th>Data</th>
-                <th style={{ textAlign: 'right' }}>Valor</th>
-                <th>Notas</th>
-                <th />
+                <th scope="col">Data</th>
+                <th scope="col" style={{ textAlign: 'right' }}>Valor</th>
+                <th scope="col">Notas</th>
+                <th scope="col" />
               </tr>
             </thead>
             <tbody>
@@ -748,7 +777,7 @@ function HistoryModal({ platform, onClose }: { platform: PlatformRow; onClose: (
                       size="sm"
                       icon="trash"
                       title="Excluir comissão"
-                      onClick={() => remove.mutate(row.id)}
+                      onClick={() => setConfirmingId(row.id)}
                       disabled={remove.isPending}
                     />
                   </td>
@@ -757,6 +786,16 @@ function HistoryModal({ platform, onClose }: { platform: PlatformRow; onClose: (
             </tbody>
           </table>
         </div>
+      )}
+      {confirmingRow && (
+        <ConfirmDeleteModal
+          title={`Excluir comissão de ${money(confirmingRow.amountCents)} de ${fmtDate(confirmingRow.earnedOn)}?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel="Excluir comissão"
+          pending={remove.isPending}
+          onCancel={() => setConfirmingId(null)}
+          onConfirm={() => remove.mutate(confirmingRow.id)}
+        />
       )}
     </Modal>
   )
