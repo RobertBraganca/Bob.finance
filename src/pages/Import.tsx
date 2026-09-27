@@ -388,7 +388,7 @@ export function ImportPage() {
               <EmptyState icon="clock" title="Nenhuma importação ainda" body="O histórico aparece aqui." />
             ) : (
               <div className="table-wrap">
-                <table className="table">
+                <table className="table table--stack-mobile">
                   <thead>
                     <tr>
                       <th scope="col">Arquivo</th>
@@ -404,9 +404,13 @@ export function ImportPage() {
                   <tbody>
                     {(batches.data?.batches ?? []).map((batch) => (
                       <tr key={batch.id}>
-                        <td className="truncate" style={{ maxWidth: 280 }}>{batch.filename}</td>
-                        <td className="muted">{batch.profileName ?? '-'}</td>
-                        <td>
+                        <td data-label="Arquivo">
+                          <span className="truncate" style={{ maxWidth: 280, display: 'inline-block' }}>
+                            {batch.filename}
+                          </span>
+                        </td>
+                        <td className="muted" data-label="Banco">{batch.profileName ?? '-'}</td>
+                        <td data-label="Status">
                           <span
                             className={`badge ${
                               batch.status === 'committed'
@@ -423,11 +427,11 @@ export function ImportPage() {
                                 : 'Descartado'}
                           </span>
                         </td>
-                        <td className="table__num">{batch.rowCount}</td>
-                        <td className="table__num">{batch.duplicateCount}</td>
-                        <td className="table__num">{batch.errorCount}</td>
-                        <td className="table__num">{batch.committedCount}</td>
-                        <td className="table__num">
+                        <td className="table__num" data-label="Linhas">{batch.rowCount}</td>
+                        <td className="table__num" data-label="Duplicatas">{batch.duplicateCount}</td>
+                        <td className="table__num" data-label="Erros">{batch.errorCount}</td>
+                        <td className="table__num" data-label="Gravadas">{batch.committedCount}</td>
+                        <td className="table__num" data-label="__trail">
                           {batch.status === 'staged' ? (
                             <Button size="sm" onClick={() => setActiveBatchId(batch.id)}>
                               Revisar
@@ -611,7 +615,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
             className="table-wrap"
             style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 'var(--r-md)' }}
           >
-            <table className="table">
+            <table className="table table--stack-mobile">
               <thead>
                 <tr>
                   <th scope="col" style={{ width: 40 }}>
@@ -635,7 +639,7 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
                           : undefined
                     }
                   >
-                    <td>
+                    <td data-label="__lead">
                       <input
                         type="checkbox"
                         className="checkbox"
@@ -645,8 +649,8 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
                         aria-label={`Incluir linha ${row.rowIndex}`}
                       />
                     </td>
-                    <td className="tabular">{row.postedOn ? fmtDate(row.postedOn) : '-'}</td>
-                    <td style={{ maxWidth: 300 }}>
+                    <td className="tabular" data-label="Data">{row.postedOn ? fmtDate(row.postedOn) : '-'}</td>
+                    <td style={{ maxWidth: 300 }} data-label="Descrição">
                       <div className="truncate" title={row.description}>
                         {row.description || <span className="muted">(vazio)</span>}
                       </div>
@@ -687,10 +691,11 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
                     </td>
                     <td
                       className={`table__num ${row.amountCents !== null && row.amountCents < 0 ? 'neg' : 'pos'}`}
+                      data-label="Valor"
                     >
                       {row.amountCents === null ? '-' : money(row.amountCents)}
                     </td>
-                    <td>
+                    <td data-label="TAG">
                       <CategorySelect
                         bare
                         value={row.categoryId}

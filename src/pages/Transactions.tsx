@@ -622,7 +622,7 @@ export function TransactionsPage() {
             ) : (
               <>
                 <div className="table-wrap">
-                  <table className="table">
+                  <table className="table table--stack-mobile">
                     <thead>
                       <tr>
                         <th scope="col" style={{ width: 40 }}>
@@ -668,7 +668,7 @@ export function TransactionsPage() {
                             data-settled={settled}
                             data-hidden={row.hidden}
                           >
-                            <td>
+                            <td data-label="__lead">
                               <input
                                 type="checkbox"
                                 className="checkbox"
@@ -677,8 +677,8 @@ export function TransactionsPage() {
                                 aria-label={`Selecionar ${row.description}`}
                               />
                             </td>
-                            <td className="tabular">{fmtDate(row.postedOn)}</td>
-                            <td style={{ maxWidth: 340 }}>
+                            <td className="tabular" data-label="Data">{fmtDate(row.postedOn)}</td>
+                            <td style={{ maxWidth: 340 }} data-label="Descrição">
                               <div className="truncate" title={row.description}>
                                 {row.description}
                               </div>
@@ -693,7 +693,7 @@ export function TransactionsPage() {
                                 {row.hidden && <span className="badge">oculto</span>}
                               </div>
                             </td>
-                          <td>
+                          <td data-label="TAG">
                             <div className="row" style={{ gap: 'var(--sp-2)' }}>
                               {row.categoryColor && (
                                 <span className="swatch" style={{ background: row.categoryColor }} />
@@ -708,13 +708,15 @@ export function TransactionsPage() {
                               />
                             </div>
                           </td>
-                          <td className="muted truncate" style={{ maxWidth: 130 }}>
-                            {row.accountName}
+                          <td className="muted" data-label="Conta">
+                            <span className="truncate" style={{ maxWidth: 130, display: 'inline-block' }}>
+                              {row.accountName}
+                            </span>
                           </td>
-                          <td className={`table__num ${row.amountCents < 0 ? 'neg' : 'pos'}`}>
+                          <td className={`table__num ${row.amountCents < 0 ? 'neg' : 'pos'}`} data-label="Valor">
                             {money(row.amountCents)}
                           </td>
-                          <td>
+                          <td data-label="__trail">
                             <div className="row" style={{ gap: 'var(--sp-1)' }}>
                               <Button
                                 variant="quiet"
@@ -1294,7 +1296,7 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
             <Button variant="quiet" onClick={onClose}>
               Cancelar
             </Button>
-            <Button variant="primary" icon="check" onClick={requestSave} disabled={save.isPending}>
+            <Button variant="primary" icon="check" onClick={requestSave} disabled={save.isPending} loading={save.isPending}>
               Salvar
             </Button>
           </>

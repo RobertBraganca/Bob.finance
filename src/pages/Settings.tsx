@@ -115,7 +115,7 @@ export function SettingsPage() {
 
           <Card span={12} flush title="Contas" subtitle="O saldo é sempre derivado dos lançamentos">
             <div className="table-wrap">
-              <table className="table">
+              <table className="table table--stack-mobile">
                 <thead>
                   <tr>
                     <th scope="col">Conta</th>
@@ -131,13 +131,13 @@ export function SettingsPage() {
                       meta.data?.accounts.find((a) => a.id === account.id)?.balanceCents ?? account.openingBalanceCents
                     return (
                     <tr key={account.id}>
-                      <td>
+                      <td data-label="Conta">
                         <strong>{account.name}</strong>
                       </td>
-                      <td className="muted">{account.institution}</td>
-                      <td className="muted">{ACCOUNT_KIND[account.kind] ?? account.kind}</td>
-                      <td className={`table__num ${balanceCents < 0 ? 'neg' : ''}`}>{money(balanceCents)}</td>
-                      <td>
+                      <td className="muted" data-label="Instituição">{account.institution}</td>
+                      <td className="muted" data-label="Tipo">{ACCOUNT_KIND[account.kind] ?? account.kind}</td>
+                      <td className={`table__num ${balanceCents < 0 ? 'neg' : ''}`} data-label="Saldo atual">{money(balanceCents)}</td>
+                      <td data-label="__trail">
                         <div className="row" style={{ gap: 2 }}>
                           <Button
                             variant="quiet"
@@ -180,7 +180,7 @@ export function SettingsPage() {
               <EmptyState icon="bank" title="Nenhum perfil" body="Cadastre o formato de CSV do seu banco." />
             ) : (
               <div className="table-wrap">
-                <table className="table">
+                <table className="table table--stack-mobile">
                   <thead>
                     <tr>
                       <th scope="col">Perfil</th>
@@ -195,30 +195,30 @@ export function SettingsPage() {
                   <tbody>
                     {(profiles.data?.profiles ?? []).map((profile) => (
                       <tr key={profile.id}>
-                        <td>
+                        <td data-label="Perfil">
                           <strong>{profile.name}</strong>
                           <br />
                           <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
                             assinatura: {profile.headerSignature.join(' · ')}
                           </span>
                         </td>
-                        <td>
+                        <td data-label="Delimitador">
                           <code style={{ fontFamily: 'var(--font-mono)' }}>
                             {profile.delimiter === 'tab' ? '\\t' : profile.delimiter}
                           </code>
                         </td>
-                        <td className="muted">{profile.dateFormat}</td>
-                        <td>
+                        <td className="muted" data-label="Data">{profile.dateFormat}</td>
+                        <td data-label="Decimal">
                           <code style={{ fontFamily: 'var(--font-mono)' }}>
                             {profile.thousandsSeparator || '·'}
                             {profile.decimalSeparator}
                           </code>
                         </td>
-                        <td className="muted" style={{ maxWidth: 250 }}>
+                        <td className="muted" style={{ maxWidth: 250 }} data-label="Convenção de sinal">
                           {SIGN_LABEL[profile.signConvention] ?? profile.signConvention}
                         </td>
-                        <td className="muted">{profile.encoding}</td>
-                        <td>
+                        <td className="muted" data-label="Codificação">{profile.encoding}</td>
+                        <td data-label="__trail">
                           <Button
                             variant="quiet"
                             size="sm"
@@ -455,7 +455,7 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
             <Button variant="quiet" onClick={() => setMode(null)}>
               Voltar
             </Button>
-            <Button variant="primary" icon="check" disabled={launch.isPending} onClick={() => launch.mutate()}>
+            <Button variant="primary" icon="check" disabled={launch.isPending} loading={launch.isPending} onClick={() => launch.mutate()}>
               Confirmar
             </Button>
           </>

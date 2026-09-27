@@ -114,7 +114,7 @@ export function CreditCardsPage() {
 
             <Card span={12} flush title="Cartões cadastrados">
               <div className="table-wrap">
-                <table className="table">
+                <table className="table table--stack-mobile">
                   <thead>
                     <tr>
                       <th scope="col">Cartão</th>
@@ -128,7 +128,7 @@ export function CreditCardsPage() {
                   <tbody>
                     {data.map((card) => (
                       <tr key={card.id}>
-                        <td>
+                        <td data-label="Cartão">
                           <strong>{card.name}</strong>
                           {card.institution && (
                             <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
@@ -137,17 +137,17 @@ export function CreditCardsPage() {
                             </span>
                           )}
                         </td>
-                        <td className="muted">{card.accountName ?? '-'}</td>
-                        <td className="table__center">{fmtDate(card.nextClosingOn)}</td>
-                        <td className="table__center">{fmtDate(card.nextDueOn)}</td>
-                        <td className="table__num">
+                        <td className="muted" data-label="Conta">{card.accountName ?? '-'}</td>
+                        <td className="table__center" data-label="Fechamento">{fmtDate(card.nextClosingOn)}</td>
+                        <td className="table__center" data-label="Vencimento">{fmtDate(card.nextDueOn)}</td>
+                        <td className="table__num" data-label="Limite disponível">
                           {money(card.availableLimitCents)}
                           <br />
                           <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
                             de {money(card.creditLimitCents)} · {bps(Math.max(0, 10_000 - card.usedBps), 0)} livre
                           </span>
                         </td>
-                        <td>
+                        <td data-label="__trail">
                           <div className="row" style={{ gap: 2 }}>
                             <Button
                               variant="quiet"
@@ -493,7 +493,7 @@ function SnapshotModal({ card, onClose }: { card: CardRow; onClose: () => void }
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Registrar
           </Button>
         </DialogFooter>

@@ -22,13 +22,24 @@ import {
   useSidebar,
 } from '../ui/sidebar'
 import { NotificationsBell } from './NotificationsBell'
-import { useMeta, useRange } from '../../lib/store'
+import { useMeta, useRange, useUserProfile } from '../../lib/store'
 import { useTheme } from '../../lib/theme'
 import { useAuth } from '../../lib/auth'
 import { date as fmtDate } from '../../lib/format'
 import logo from '../../assets/logo-red.svg'
 
-type NavItem = { to: string; label: string; icon: IconName }
+type NavItem = {
+  to: string
+  label: string
+  icon: IconName
+  /**
+   * Só aparece pra quem faturou como PJ/freelancer (revisão de UX de
+   * 26/09/2026) — travado em Configurações → Perfil, não aqui. Precificação
+   * e Receita de parceiros são as duas telas do produto que só fazem
+   * sentido pra esse público.
+   */
+  freelancerOnly?: boolean
+}
 type NavSection = { label: string; items: NavItem[] }
 
 const NAV_SECTIONS: NavSection[] = [
@@ -46,8 +57,8 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Planejar',
     items: [
       { to: '/saude', label: 'Saúde financeira', icon: 'sparkle' },
-      { to: '/precificacao', label: 'Precificação', icon: 'calculator' },
-      { to: '/parceiros', label: 'Receita de parceiros', icon: 'banknote' },
+      { to: '/precificacao', label: 'Precificação', icon: 'calculator', freelancerOnly: true },
+      { to: '/parceiros', label: 'Receita de parceiros', icon: 'banknote', freelancerOnly: true },
       { to: '/metas', label: 'Metas do mês', icon: 'target' },
       { to: '/dividas', label: 'Endividamento', icon: 'landmark' },
       { to: '/investimentos', label: 'Investimentos', icon: 'trending' },
@@ -64,6 +75,7 @@ const NAV_SECTIONS: NavSection[] = [
  * primeiro nível — segue existindo e navegável normalmente.
  */
 const SETTINGS_NAV: NavItem[] = [
+  { to: '/perfil', label: 'Perfil', icon: 'user' },
   { to: '/ajustes', label: 'Contas e bancos', icon: 'bank' },
   { to: '/cartoes', label: 'Cartões', icon: 'wallet' },
   { to: '/categorias', label: 'TAGs e regras', icon: 'tags' },
@@ -76,6 +88,8 @@ function isNavActive(pathname: string, to: string) {
 
 export function Sidebar() {
   const meta = useMeta()
+  const profile = useUserProfile()
+  const isPersonalAccount = profile.data?.profile.accountType === 'personal'
   const location = useLocation()
   const uncategorized = meta.data?.ledger.count === 0 ? 0 : undefined
   const { setOpenMobile } = useSidebar()
@@ -108,19 +122,21 @@ export function Sidebar() {
           <SidebarGroup key={section.label}>
             <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
             <SidebarMenu>
-              {section.items.map((item) => (
-                <SidebarMenuItem key={item.to}>
-                  <SidebarMenuButton
-                    isActive={isNavActive(location.pathname, item.to)}
-                    tooltip={item.label}
-                    onClick={() => setOpenMobile(false)}
-                    render={<NavLink to={item.to} end={item.to === '/'} />}
-                  >
-                    <Icon name={item.icon} size={16} />
-                    <span>{item.label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {section.items
+                .filter((item) => !item.freelancerOnly || !isPersonalAccount)
+                .map((item) => (
+                  <SidebarMenuItem key={item.to}>
+                    <SidebarMenuButton
+                      isActive={isNavActive(location.pathname, item.to)}
+                      tooltip={item.label}
+                      onClick={() => setOpenMobile(false)}
+                      render={<NavLink to={item.to} end={item.to === '/'} />}
+                    >
+                      <Icon name={item.icon} size={16} />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
             </SidebarMenu>
           </SidebarGroup>
         ))}

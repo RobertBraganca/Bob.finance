@@ -276,10 +276,14 @@ export function GoalsPage() {
                 <div className="stack stack--loose">
                   {data.caps.map((cap) => (
                     <div key={cap.categoryId} className="stack stack--tight">
-                      <div className="row row--between">
+                      {/* Sem truncate (revisão de responsividade de 26/09/2026): TAG +
+                          valor não cabiam numa linha só num telefone e o nome cortava
+                          ("Aluguel" virava "Al…") — `row--wrap` deixa o valor cair pra
+                          linha de baixo em vez de espremer o nome. */}
+                      <div className="row row--between row--wrap" style={{ rowGap: 'var(--sp-1)' }}>
                         <span className="row" style={{ gap: 'var(--sp-2)', minWidth: 0 }}>
                           <span className="swatch" style={{ background: cap.color }} />
-                          <strong className="truncate" style={{ fontSize: 'var(--text-sm)' }}>
+                          <strong style={{ fontSize: 'var(--text-sm)' }}>
                             {cap.name}
                           </strong>
                           <StatusBadge state={cap.state} />
@@ -495,7 +499,7 @@ function GoalEditor({
           <Button icon="refresh" onClick={() => copy.mutate()} disabled={copy.isPending}>
             Copiar do mês anterior
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </DialogFooter>

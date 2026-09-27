@@ -204,7 +204,7 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
               {/* Same wrapper every wide table in the app uses, so a narrow
                   screen scrolls the table instead of the page. */}
               <div className="table-wrap">
-                <table className="table">
+                <table className="table table--stack-mobile">
                   <thead>
                     <tr>
                       <th scope="col">Destino</th>
@@ -216,21 +216,21 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
                   <tbody>
                     {available.data.destinations.map((destination) => (
                       <tr key={destination.key}>
-                        <td>
+                        <td data-label="Destino">
                           {destination.label}
                           {/* A fórmula anda com a própria linha, como ⓘ, não
                               numa pilha de divulgações embaixo da tabela. */}
                           <Assumptions data={destination.assumptions} compact />
                         </td>
-                        <td className="table__num">
+                        <td className="table__num" data-label="Meta">
                           {destination.targetCents === null ? (
                             <span className="muted">sem meta</span>
                           ) : (
                             money(destination.targetCents)
                           )}
                         </td>
-                        <td className="table__num">{money(destination.realizedCents)}</td>
-                        <td className="table__num">
+                        <td className="table__num" data-label="Realizado">{money(destination.realizedCents)}</td>
+                        <td className="table__num" data-label="Diferença">
                           {destination.differenceCents === null ? (
                             <span className="muted">-</span>
                           ) : (
@@ -556,7 +556,7 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
           <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
             Tudo aqui é escolha sua. O que o app consegue derivar do extrato continua sendo derivado.
           </span>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </DialogFooter>

@@ -717,9 +717,13 @@ function BelowTargetCard({
         />
       ) : (
         <div className="stack stack--tight">
+          {/* Sem truncate (revisão de responsividade de 26/09/2026):
+              "ETFs Internacionais" cortava num telefone, competindo com o
+              desvio+valor na mesma linha — `row--wrap` deixa o valor cair
+              pra linha de baixo em vez de espremer o nome da classe. */}
           {below.map((slice) => (
-            <div key={slice.assetClass} className="row row--between">
-              <span className="truncate">{slice.label}</span>
+            <div key={slice.assetClass} className="row row--between row--wrap" style={{ rowGap: 'var(--sp-1)' }}>
+              <span style={{ minWidth: 0 }}>{slice.label}</span>
               <span className="row" style={{ gap: 'var(--sp-3)' }}>
                 <span className="muted tabular" style={{ fontSize: 'var(--text-xs)' }}>
                   {slice.driftBps === null ? '' : signedPoints(slice.driftBps)}
@@ -1011,7 +1015,7 @@ function ReserveContributeModal({
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             {kind === 'buy' ? 'Registrar aporte' : 'Registrar retirada'}
           </Button>
         </>
@@ -1622,7 +1626,7 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </>
@@ -2251,7 +2255,7 @@ export function TradeModal({
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Adicionar lançamento
           </Button>
         </>
@@ -2629,7 +2633,7 @@ function AllocationModal({
             Soma: {bps(totalBps, 1)}
             {totalBps !== 10_000 && ' (o ideal é 100%)'}
           </span>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </>

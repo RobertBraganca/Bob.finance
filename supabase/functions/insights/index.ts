@@ -18,6 +18,7 @@ import * as goalsService from '../_shared/services/goals.ts'
 import * as investments from '../_shared/services/investments.ts'
 import * as monthlyClosingService from '../_shared/services/monthlyClosing.ts'
 import * as partners from '../_shared/services/partners.ts'
+import * as profileService from '../_shared/services/profile.ts'
 import * as quotesService from '../_shared/services/quotes.ts'
 import * as simulatorService from '../_shared/services/simulator.ts'
 import * as subscriptionsService from '../_shared/services/subscriptions.ts'
@@ -74,6 +75,25 @@ app.onError((error, c) => {
   if (error instanceof partners.PartnerError) return c.json({ error: error.message }, 422)
   console.error(error)
   return c.json({ error: friendlyErrorMessage(error) }, 500)
+})
+
+/**
+ * Perfil (revisão de UX de 26/09/2026): nome de exibição da saudação da
+ * Home + tipo de uso, que a UI usa pra travar as telas de freelancer
+ * quando `accountType` é `personal`. Mesmo singleton GET/PUT de
+ * `/financial-engine/settings` abaixo.
+ */
+app.get('/profile', async (c) => c.json({ profile: await profileService.getProfile() }))
+
+app.put('/profile', async (c) => {
+  const body = z
+    .object({
+      displayName: z.string().trim().min(1).max(80).nullable().optional(),
+      accountType: z.enum(['personal', 'freelancer']).optional(),
+    })
+    .refine((v) => Object.keys(v).length > 0, { message: 'nada para atualizar' })
+    .parse(await c.req.json())
+  return c.json({ profile: await profileService.setProfile(body) })
 })
 
 app.get('/meta', async (c) => {

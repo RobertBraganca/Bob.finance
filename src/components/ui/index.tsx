@@ -421,6 +421,7 @@ export function Button({
   icon,
   onClick,
   disabled,
+  loading,
   type = 'button',
   title,
 }: {
@@ -430,6 +431,10 @@ export function Button({
   icon?: IconName
   onClick?: () => void
   disabled?: boolean
+  /** Ação assíncrona em andamento: troca o ícone por um spinner e bloqueia
+   * o clique — sem isto, `disabled={mutation.isPending}` sozinho deixava a
+   * ação "travar" sem nenhum sinal de que algo estava acontecendo. */
+  loading?: boolean
   type?: 'button' | 'submit'
   title?: string
 }) {
@@ -440,10 +445,15 @@ export function Button({
          ele viraria uma cápsula oval larga em vez de um alvo redondo. */
       className={cx('btn', `btn--${variant}`, size && `btn--${size}`, children === undefined && 'btn--icon')}
       onClick={onClick}
-      disabled={disabled}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
       title={title}
     >
-      {icon && <Icon name={icon} size={size === 'sm' ? 13 : 15} />}
+      {loading ? (
+        <Icon name="loader" size={size === 'sm' ? 13 : 15} className="spin" />
+      ) : (
+        icon && <Icon name={icon} size={size === 'sm' ? 13 : 15} />
+      )}
       {children}
     </button>
   )
@@ -915,7 +925,7 @@ export function ConfirmDeleteModal({
           <Button variant="quiet" onClick={onCancel} disabled={pending}>
             Cancelar
           </Button>
-          <Button variant="danger" onClick={onConfirm} disabled={pending}>
+          <Button variant="danger" onClick={onConfirm} disabled={pending} loading={pending}>
             {confirmLabel}
           </Button>
         </>

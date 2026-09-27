@@ -33,6 +33,13 @@ export type Meta = {
   hasData: boolean
 }
 
+export type AccountType = 'personal' | 'freelancer'
+
+export type UserProfile = {
+  displayName: string | null
+  accountType: AccountType
+}
+
 export type CategoryOption = {
   id: number
   name: string
@@ -212,6 +219,19 @@ export function useRange(): RangeContextValue {
  */
 export const useMeta = () =>
   useQuery({ queryKey: ['meta'], queryFn: () => api.get<Meta>('/meta'), staleTime: 60_000 })
+
+/**
+ * Nome de exibição + tipo de uso (revisão de UX de 26/09/2026) — mesmo
+ * `staleTime` de `useMeta`: muda só quando o próprio usuário mexe em
+ * Configurações → Perfil, e a mutação de lá já invalida `['profile']`.
+ * Usado pelo Shell (trava de nav) e pela saudação da Home.
+ */
+export const useUserProfile = () =>
+  useQuery({
+    queryKey: ['profile'],
+    queryFn: () => api.get<{ profile: UserProfile }>('/profile'),
+    staleTime: 60_000,
+  })
 
 export const useCategories = () =>
   useQuery({

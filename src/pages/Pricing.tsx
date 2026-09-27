@@ -659,7 +659,7 @@ function QuotesTab() {
           />
         ) : (
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table--stack-mobile">
               <thead>
                 <tr>
                   <th scope="col">Cliente ou projeto</th>
@@ -677,7 +677,7 @@ function QuotesTab() {
               <tbody>
                 {rows.map((quote) => (
                   <tr key={quote.id}>
-                    <td>
+                    <td data-label="Cliente ou projeto">
                       {quote.clientLabel}
                       {(quote.installments > 1 || quote.paymentTerms) && (
                         <div className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
@@ -690,14 +690,14 @@ function QuotesTab() {
                         </div>
                       )}
                     </td>
-                    <td className="muted">{fmtDate(quote.createdAt.slice(0, 10))}</td>
-                    <td className="table__num">{quote.estimatedHours.toLocaleString('pt-BR')}</td>
-                    <td className="table__num">{money(quote.hourlyBaseCents)}</td>
-                    <td className="table__num">{money(quote.minimumPriceCents)}</td>
-                    <td className="table__num">
+                    <td className="muted" data-label="Quando">{fmtDate(quote.createdAt.slice(0, 10))}</td>
+                    <td className="table__num" data-label="Horas">{quote.estimatedHours.toLocaleString('pt-BR')}</td>
+                    <td className="table__num" data-label="Hora base">{money(quote.hourlyBaseCents)}</td>
+                    <td className="table__num" data-label="Mínimo">{money(quote.minimumPriceCents)}</td>
+                    <td className="table__num" data-label="Recomendado">
                       <strong>{money(quote.recommendedPriceCents)}</strong>
                     </td>
-                    <td className="table__num">
+                    <td className="table__num" data-label="Fechado por">
                       {quote.actualPriceCents === null ? (
                         <span className="muted">-</span>
                       ) : quote.actualPriceCents === quote.recommendedPriceCents ? (
@@ -708,8 +708,8 @@ function QuotesTab() {
                         </strong>
                       )}
                     </td>
-                    <td className="table__num muted">{money(quote.premiumPriceCents)}</td>
-                    <td>
+                    <td className="table__num muted" data-label="Premium">{money(quote.premiumPriceCents)}</td>
+                    <td data-label="Status">
                       <Select
                         value={quote.status}
                         className={`select--pill select--${QUOTE_STATUS_TONE[quote.status]}`}
@@ -719,7 +719,7 @@ function QuotesTab() {
                         }
                       />
                     </td>
-                    <td>
+                    <td data-label="__trail">
                       <div className="row" style={{ gap: 2, justifyContent: 'flex-end' }}>
                         {quote.status !== 'approved' && (
                           <Button
@@ -1288,7 +1288,7 @@ function ParamsTab() {
                 Ninguém fatura 100% do mês: prospecção, administração e revisão não cobrada entram aqui
               </span>
             </div>
-            <Button variant="primary" icon="check" onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending}>
+            <Button variant="primary" icon="check" onClick={() => saveSettings.mutate()} disabled={saveSettings.isPending} loading={saveSettings.isPending}>
               Salvar
             </Button>
             <p className="chart__note">
@@ -1311,7 +1311,7 @@ function ParamsTab() {
         }
       >
         <div className="table-wrap">
-          <table className="table">
+          <table className="table table--stack-mobile">
             <thead>
               <tr>
                 <th scope="col">Dimensão</th>
@@ -1323,10 +1323,10 @@ function ParamsTab() {
             <tbody>
               {all.map((option) => (
                 <tr key={option.id} style={option.active ? undefined : { opacity: 0.5 }}>
-                  <td className="muted">
+                  <td className="muted" data-label="Dimensão">
                     {dimensions.find((d) => d.value === option.dimension)?.label ?? option.dimension}
                   </td>
-                  <td>
+                  <td data-label="Opção">
                     {option.label}
                     {option.description && (
                       <>
@@ -1337,10 +1337,10 @@ function ParamsTab() {
                       </>
                     )}
                   </td>
-                  <td className="table__num">
+                  <td className="table__num" data-label="Multiplicador">
                     {(option.multiplierBps / 10_000).toLocaleString('pt-BR')}x
                   </td>
-                  <td>
+                  <td data-label="__trail">
                     <span className="row" style={{ gap: 2 }}>
                       <Button
                         variant="quiet"

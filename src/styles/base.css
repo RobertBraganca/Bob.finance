@@ -8,6 +8,22 @@
   margin: 0;
 }
 
+/* Nenhum arquivo do projeto tratava prefers-reduced-motion (WCAG 2.3.3):
+   quem pediu "reduzir movimento" no SO ainda recebia toda transição e
+   slide-in de modal/drawer em duração normal. `!important` é necessário
+   aqui porque as classes utilitárias do Tailwind (Sheet/Dialog) e as
+   `transition:` do design system BOB.OS competem em especificidade. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 html,
 body,
 #root {

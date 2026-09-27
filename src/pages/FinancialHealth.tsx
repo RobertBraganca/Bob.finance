@@ -546,8 +546,11 @@ function RiskRow({ rule }: { rule: RiskRule }) {
   const format = rule.unit === 'points' ? points : bps
   return (
     <div className="stack stack--tight">
-      <div className="row row--between">
-        <strong className="truncate" style={{ fontSize: 'var(--text-sm)' }}>
+      <div className="row row--between" style={{ alignItems: 'flex-start' }}>
+        {/* Sem truncate (revisão de responsividade de 26/09/2026): rótulos
+            longos ("Maior desvio entre carteira e política de alocação")
+            cortavam num telefone — quebra em vez de esconder o fim da frase. */}
+        <strong style={{ fontSize: 'var(--text-sm)', minWidth: 0 }}>
           {rule.label}
         </strong>
         {/*
@@ -775,7 +778,7 @@ function SettingsEditor({ onClose }: { onClose: () => void }) {
           <Button icon="refresh" onClick={restore} disabled={!defaults}>
             Voltar aos valores sugeridos
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </DialogFooter>

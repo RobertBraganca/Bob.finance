@@ -486,7 +486,7 @@ function PlatformModal({ platform, onClose }: { platform?: PlatformRow; onClose:
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </>
@@ -560,7 +560,7 @@ function CommissionModal({ platform, onClose }: { platform: PlatformRow; onClose
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Registrar
           </Button>
         </>

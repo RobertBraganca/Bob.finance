@@ -417,7 +417,7 @@ export function DebtPage() {
 
             <Card span={12} flush title="Dívidas cadastradas">
               <div className="table-wrap">
-                <table className="table">
+                <table className="table table--stack-mobile">
                   <thead>
                     <tr>
                       <th scope="col">Dívida</th>
@@ -435,7 +435,7 @@ export function DebtPage() {
                   <tbody>
                     {data.debts.map((debt) => (
                       <tr key={debt.id}>
-                        <td>
+                        <td data-label="Dívida">
                           <span className="row" style={{ gap: 'var(--sp-2)' }}>
                             <span className="swatch" style={{ background: KIND_COLOR[debt.kind] ?? '#71717a' }} />
                             <span>
@@ -449,18 +449,18 @@ export function DebtPage() {
                             </span>
                           </span>
                         </td>
-                        <td className="muted">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
-                        <td className="table__num">{money(debt.balanceCents)}</td>
-                        <td className="table__num">
+                        <td className="muted" data-label="Tipo">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
+                        <td className="table__num" data-label="Saldo">{money(debt.balanceCents)}</td>
+                        <td className="table__num" data-label="Taxa efetiva">
                           {bps(debt.aprBps)} a.a.
                           <span className="muted" style={{ display: 'block', fontSize: 'var(--text-2xs)' }}>
                             {bps(debt.monthlyRateBps)} a.m.
                           </span>
                         </td>
-                        <td className="table__num neg">{money(debt.monthlyInterestCents)}</td>
-                        <td className="table__num">{money(debt.minimumPaymentCents)}</td>
-                        <td className="table__num">{money(debt.scheduledPaymentCents)}</td>
-                        <td className="table__center">
+                        <td className="table__num neg" data-label="Juros/mês">{money(debt.monthlyInterestCents)}</td>
+                        <td className="table__num" data-label="Mínimo">{money(debt.minimumPaymentCents)}</td>
+                        <td className="table__num" data-label="Programado">{money(debt.scheduledPaymentCents)}</td>
+                        <td className="table__center" data-label="Parcelas">
                           <button
                             type="button"
                             className="badge"
@@ -473,8 +473,8 @@ export function DebtPage() {
                               : `${debt.installmentsPaid} / ${debt.installmentCount}`}
                           </button>
                         </td>
-                        <td className="table__num muted">{bps(debt.shareBps, 0)}</td>
-                        <td>
+                        <td className="table__num muted" data-label="Share">{bps(debt.shareBps, 0)}</td>
+                        <td data-label="__trail">
                           <div className="row" style={{ gap: 2 }}>
                             <Button
                               variant="quiet"
@@ -508,7 +508,7 @@ export function DebtPage() {
                 subtitle="Dívidas cujas parcelas foram todas pagas, saindo da lista ativa automaticamente"
               >
                 <div className="table-wrap">
-                  <table className="table">
+                  <table className="table table--stack-mobile">
                     <thead>
                       <tr>
                         <th scope="col">Dívida</th>
@@ -522,14 +522,14 @@ export function DebtPage() {
                     <tbody>
                       {data.closedDebts.map((debt) => (
                         <tr key={debt.id}>
-                          <td>
+                          <td data-label="Dívida">
                             <span className="row" style={{ gap: 'var(--sp-2)' }}>
                               <span className="swatch" style={{ background: KIND_COLOR[debt.kind] ?? '#71717a' }} />
                               <strong>{debt.name}</strong>
                             </span>
                           </td>
-                          <td className="muted">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
-                          <td className="table__center">
+                          <td className="muted" data-label="Tipo">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
+                          <td className="table__center" data-label="Parcelas">
                             <button
                               type="button"
                               className="badge"
@@ -540,9 +540,9 @@ export function DebtPage() {
                               {debt.installmentCount === null ? '-' : `${debt.installmentCount} / ${debt.installmentCount}`}
                             </button>
                           </td>
-                          <td className="table__num">{money(debt.totalPaidCents)}</td>
-                          <td className="muted">{debt.closedOn ? fmtDate(debt.closedOn) : '-'}</td>
-                          <td>
+                          <td className="table__num" data-label="Total pago">{money(debt.totalPaidCents)}</td>
+                          <td className="muted" data-label="Quitada em">{debt.closedOn ? fmtDate(debt.closedOn) : '-'}</td>
+                          <td data-label="__trail">
                             <div className="row" style={{ gap: 2 }}>
                               <Button
                                 variant="quiet"
@@ -650,8 +650,10 @@ function ReconciliationQueueCard({
             style={{ gap: 'var(--sp-3)' }}
           >
             <div style={{ minWidth: 0, flex: 1 }}>
-              <span className="row" style={{ gap: 'var(--sp-2)' }}>
-                <strong className="truncate">{debtName}</strong>
+              {/* Sem truncate (revisão de responsividade de 26/09/2026):
+                  nome da dívida competindo com o badge cortava num telefone. */}
+              <span className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+                <strong style={{ minWidth: 0 }}>{debtName}</strong>
                 <span className="badge badge--warning">Match sugerido</span>
               </span>
               <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
@@ -689,8 +691,10 @@ function ReconciliationQueueCard({
         {mismatches.map((mismatch) => (
           <div key={mismatch.debtId} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <span className="row" style={{ gap: 'var(--sp-2)' }}>
-                <strong className="truncate">{mismatch.debtName}</strong>
+              {/* Sem truncate (revisão de responsividade de 26/09/2026):
+                  nome da dívida competindo com o badge cortava num telefone. */}
+              <span className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+                <strong style={{ minWidth: 0 }}>{mismatch.debtName}</strong>
                 <span className="badge badge--critical">Divergência de valor</span>
               </span>
               <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
@@ -1143,7 +1147,7 @@ function DebtPaymentModal({ debt, onClose }: { debt: DebtRow; onClose: () => voi
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Registrar
           </Button>
         </>
@@ -1245,7 +1249,7 @@ function DebtPaymentHistoryModal({ debt, onClose }: { debt: DebtRow; onClose: ()
         />
       ) : (
         <div className="table-wrap">
-          <table className="table">
+          <table className="table table--stack-mobile">
             <thead>
               <tr>
                 <th scope="col">Data</th>
@@ -1258,11 +1262,11 @@ function DebtPaymentHistoryModal({ debt, onClose }: { debt: DebtRow; onClose: ()
             <tbody>
               {rows.map((p) => (
                 <tr key={p.id}>
-                  <td>{fmtDate(p.paidOn)}</td>
-                  <td className="muted">{DEBT_PAYMENT_KIND_LABEL[p.kind] ?? p.kind}</td>
-                  <td className={`table__num ${p.kind === 'payment' ? 'pos' : 'neg'}`}>{money(p.amountCents)}</td>
-                  <td className="muted">{p.notes ?? '-'}</td>
-                  <td>
+                  <td data-label="Data">{fmtDate(p.paidOn)}</td>
+                  <td className="muted" data-label="Tipo">{DEBT_PAYMENT_KIND_LABEL[p.kind] ?? p.kind}</td>
+                  <td className={`table__num ${p.kind === 'payment' ? 'pos' : 'neg'}`} data-label="Valor">{money(p.amountCents)}</td>
+                  <td className="muted" data-label="Notas">{p.notes ?? '-'}</td>
+                  <td data-label="__trail">
                     <Button
                       variant="quiet"
                       size="sm"

@@ -174,13 +174,16 @@ export function PatrimonioPage() {
               <>
                 <div className="stack stack--tight">
                   {illiquid.data.items.map((item) => (
-                    <div key={item.assetId} className="asset-row">
-                      <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0 }}>
+                    <div key={item.assetId} className="asset-row" style={{ alignItems: 'flex-start' }}>
+                      <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0, alignItems: 'flex-start' }}>
                         <span className="icon-chip">
                           <Icon name="landmark" size={16} />
                         </span>
                         <span className="stack" style={{ gap: 0, minWidth: 0 }}>
-                          <span className="truncate" style={{ fontWeight: 600 }}>
+                          {/* Sem truncate (revisão de responsividade de 26/09/2026):
+                              nome do bem é texto livre do usuário, cortado virava
+                              "Celular de tr…" num telefone. */}
+                          <span style={{ fontWeight: 600 }}>
                             {item.name}
                           </span>
                           <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
@@ -241,12 +244,17 @@ function CompositionRow({
   negative?: boolean
 }) {
   return (
-    <div className="asset-row">
-      <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0 }}>
+    <div className="asset-row" style={{ alignItems: 'flex-start' }}>
+      <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0, alignItems: 'flex-start' }}>
         <span className="icon-chip icon-chip--sm">
           <Icon name={icon} size={14} />
         </span>
-        <span className="truncate">{label}</span>
+        {/* Sem truncate (revisão de responsividade de 26/09/2026): "Investimentos
+            negociáveis" cortava pra "Investimentos neg…" num telefone — quebrar
+            em duas linhas custa altura, que sobra, nunca legibilidade.
+            `minWidth: 0` sozinho (sem overflow:hidden do truncate) é o que
+            deixa o item de flex encolher e quebrar linha em vez de estourar. */}
+        <span style={{ minWidth: 0 }}>{label}</span>
       </span>
       <span
         className="tabular"
