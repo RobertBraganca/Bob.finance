@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useMeta } from '../lib/store'
@@ -204,33 +204,33 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
               {/* Same wrapper every wide table in the app uses, so a narrow
                   screen scrolls the table instead of the page. */}
               <div className="table-wrap">
-                <table className="table">
+                <table className="table table--stack-mobile">
                   <thead>
                     <tr>
-                      <th>Destino</th>
-                      <th className="table__num">Meta</th>
-                      <th className="table__num">Realizado</th>
-                      <th className="table__num">Diferença</th>
+                      <th scope="col">Destino</th>
+                      <th scope="col" className="table__num">Meta</th>
+                      <th scope="col" className="table__num">Realizado</th>
+                      <th scope="col" className="table__num">Diferença</th>
                     </tr>
                   </thead>
                   <tbody>
                     {available.data.destinations.map((destination) => (
                       <tr key={destination.key}>
-                        <td>
+                        <td data-label="Destino">
                           {destination.label}
                           {/* A fórmula anda com a própria linha, como ⓘ, não
                               numa pilha de divulgações embaixo da tabela. */}
                           <Assumptions data={destination.assumptions} compact />
                         </td>
-                        <td className="table__num">
+                        <td className="table__num" data-label="Meta">
                           {destination.targetCents === null ? (
                             <span className="muted">sem meta</span>
                           ) : (
                             money(destination.targetCents)
                           )}
                         </td>
-                        <td className="table__num">{money(destination.realizedCents)}</td>
-                        <td className="table__num">
+                        <td className="table__num" data-label="Realizado">{money(destination.realizedCents)}</td>
+                        <td className="table__num" data-label="Diferença">
                           {destination.differenceCents === null ? (
                             <span className="muted">-</span>
                           ) : (
@@ -320,8 +320,8 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
                   <table className="table">
                     <thead>
                       <tr>
-                        <th>Componente</th>
-                        <th className="table__num">Valor</th>
+                        <th scope="col">Componente</th>
+                        <th scope="col" className="table__num">Valor</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -398,6 +398,14 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
   const [margin, setMargin] = useState<string | undefined>(undefined)
   const [investmentPlanned, setInvestmentPlanned] = useState<string | undefined>(undefined)
 
+  const pjFieldId = useId()
+  const pfFieldId = useId()
+  const proLaboreFieldId = useId()
+  const taxFieldId = useId()
+  const reserveFieldId = useId()
+  const marginFieldId = useId()
+  const investmentPlannedFieldId = useId()
+
   const save = useMutation({
     mutationFn: () =>
       api.put('/financial-engine/settings', {
@@ -442,8 +450,9 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
             <span className="label">Contas</span>
             <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-end' }}>
               <div className="field" style={{ minWidth: 200 }}>
-                <label className="field__label">Conta PJ</label>
+                <label className="field__label" htmlFor={pjFieldId}>Conta PJ</label>
                 <Select
+                  id={pjFieldId}
                   value={pj === undefined ? current.pjAccountId : pj}
                   placeholder="Todo o ledger"
                   options={accountOptions}
@@ -452,8 +461,9 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
                 <span className="field__hint">De onde saem os custos PJ do ponto de equilíbrio</span>
               </div>
               <div className="field" style={{ minWidth: 200 }}>
-                <label className="field__label">Conta PF</label>
+                <label className="field__label" htmlFor={pfFieldId}>Conta PF</label>
                 <Select
+                  id={pfFieldId}
                   value={pf === undefined ? current.pfAccountId : pf}
                   placeholder="Não informada"
                   options={accountOptions}
@@ -468,8 +478,9 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
             <span className="label">Valores do mês</span>
             <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
               <div className="field" style={{ width: 190 }}>
-                <label className="field__label">Pró-labore (R$)</label>
+                <label className="field__label" htmlFor={proLaboreFieldId}>Pró-labore (R$)</label>
                 <Input
+                  id={proLaboreFieldId}
                   value={proLabore === undefined ? centsToInput(current.proLaboreCents) : proLabore}
                   onChange={(e) => setProLabore(e.target.value)}
                   placeholder="deixe vazio para derivar"
@@ -480,8 +491,9 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
                 </span>
               </div>
               <div className="field" style={{ width: 190 }}>
-                <label className="field__label">Alíquota efetiva (%)</label>
+                <label className="field__label" htmlFor={taxFieldId}>Alíquota efetiva (%)</label>
                 <Input
+                  id={taxFieldId}
                   value={tax === undefined ? bpsToInput(current.taxRateBps) : tax}
                   onChange={(e) => setTax(e.target.value)}
                   className="text-right tabular-nums"
@@ -492,8 +504,9 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
                 </span>
               </div>
               <div className="field" style={{ width: 190 }}>
-                <label className="field__label">Reserva planejada (R$)</label>
+                <label className="field__label" htmlFor={reserveFieldId}>Reserva planejada (R$)</label>
                 <Input
+                  id={reserveFieldId}
                   value={reserve === undefined ? centsToInput(current.reservePlannedCents) : reserve}
                   onChange={(e) => setReserve(e.target.value)}
                   className="text-right tabular-nums"
@@ -504,16 +517,18 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
                 </span>
               </div>
               <div className="field" style={{ width: 150 }}>
-                <label className="field__label">Margem (R$)</label>
+                <label className="field__label" htmlFor={marginFieldId}>Margem (R$)</label>
                 <Input
+                  id={marginFieldId}
                   value={margin === undefined ? centsToInput(current.marginCents) : margin}
                   onChange={(e) => setMargin(e.target.value)}
                   className="text-right tabular-nums"
                 />
               </div>
               <div className="field" style={{ width: 190 }}>
-                <label className="field__label">Investimento planejado (R$)</label>
+                <label className="field__label" htmlFor={investmentPlannedFieldId}>Investimento planejado (R$)</label>
                 <Input
+                  id={investmentPlannedFieldId}
                   value={
                     investmentPlanned === undefined
                       ? centsToInput(current.investmentPlannedCents)
@@ -541,7 +556,7 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
           <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
             Tudo aqui é escolha sua. O que o app consegue derivar do extrato continua sendo derivado.
           </span>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </DialogFooter>

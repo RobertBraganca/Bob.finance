@@ -1,10 +1,16 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { Icon, type IconName } from './Icon'
 
 /**
  * Close-on-outside-click + close-on-Escape, shared by every popover panel
  * anchored to a `.popover-anchor` trigger (this file and PeriodPickerPopover,
  * which used to each carry an identical copy of this effect).
+ *
+ * Escape ALSO returns focus to the trigger button (auditoria de
+ * acessibilidade de 26/09/2026): sem isto, um usuário de teclado fechava o
+ * painel e perdia a posição, com o foco caindo em `<body>`. Um clique fora
+ * não devolve o foco de propósito -- a pessoa já mirou em outra coisa, e
+ * puxar o foco de volta pro gatilho brigaria com esse clique.
  */
 export function usePopoverDismiss(open: boolean, anchorRef: RefObject<HTMLElement | null>, onDismiss: () => void) {
   useEffect(() => {
@@ -13,7 +19,10 @@ export function usePopoverDismiss(open: boolean, anchorRef: RefObject<HTMLElemen
       if (anchorRef.current && !anchorRef.current.contains(event.target as Node)) onDismiss()
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onDismiss()
+      if (event.key === 'Escape') {
+        onDismiss()
+        anchorRef.current?.querySelector<HTMLElement>('button')?.focus()
+      }
     }
     document.addEventListener('mousedown', onDocClick)
     document.addEventListener('keydown', onKey)
@@ -47,15 +56,17 @@ export function DateRangeFields({
   onApply: () => void
   applyLabel?: string
 }) {
+  const fromFieldId = useId()
+  const toFieldId = useId()
   return (
     <>
       <div className="field">
-        <label className="field__label">De</label>
-        <input className="input" type="date" value={from} onChange={(e) => onFromChange(e.target.value)} />
+        <label className="field__label" htmlFor={fromFieldId}>De</label>
+        <input id={fromFieldId} className="input" type="date" value={from} onChange={(e) => onFromChange(e.target.value)} />
       </div>
       <div className="field">
-        <label className="field__label">Até</label>
-        <input className="input" type="date" value={to} onChange={(e) => onToChange(e.target.value)} />
+        <label className="field__label" htmlFor={toFieldId}>Até</label>
+        <input id={toFieldId} className="input" type="date" value={to} onChange={(e) => onToChange(e.target.value)} />
       </div>
       <div className="row row--between" style={{ marginTop: 'var(--sp-1)' }}>
         <button type="button" className="btn btn--quiet btn--sm" onClick={onCancel}>

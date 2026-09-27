@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { currentPeriod } from '../lib/period'
@@ -546,8 +546,11 @@ function RiskRow({ rule }: { rule: RiskRule }) {
   const format = rule.unit === 'points' ? points : bps
   return (
     <div className="stack stack--tight">
-      <div className="row row--between">
-        <strong className="truncate" style={{ fontSize: 'var(--text-sm)' }}>
+      <div className="row row--between" style={{ alignItems: 'flex-start' }}>
+        {/* Sem truncate (revisão de responsividade de 26/09/2026): rótulos
+            longos ("Maior desvio entre carteira e política de alocação")
+            cortavam num telefone — quebra em vez de esconder o fim da frase. */}
+        <strong style={{ fontSize: 'var(--text-sm)', minWidth: 0 }}>
           {rule.label}
         </strong>
         {/*
@@ -775,7 +778,7 @@ function SettingsEditor({ onClose }: { onClose: () => void }) {
           <Button icon="refresh" onClick={restore} disabled={!defaults}>
             Voltar aos valores sugeridos
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </DialogFooter>
@@ -795,10 +798,11 @@ function NumberField({
   value: string
   onChange: (value: string) => void
 }) {
+  const fieldId = useId()
   return (
     <div className="field" style={{ width: 168 }}>
-      <label className="field__label">{label}</label>
-      <Input value={value} onChange={(e) => onChange(e.target.value)} className="text-right tabular-nums" />
+      <label className="field__label" htmlFor={fieldId}>{label}</label>
+      <Input id={fieldId} value={value} onChange={(e) => onChange(e.target.value)} className="text-right tabular-nums" />
       {hint && <span className="field__hint">{hint}</span>}
     </div>
   )

@@ -14,6 +14,7 @@ import * as goalsService from '../services/goals'
 import * as investments from '../services/investments'
 import * as monthlyClosingService from '../services/monthlyClosing'
 import * as partners from '../services/partners'
+import * as profileService from '../services/profile'
 import * as quotesService from '../services/quotes'
 import * as subscriptionsService from '../services/subscriptions'
 import { ledgerBounds } from '../services/transactions'
@@ -42,6 +43,25 @@ async function resolveRange(query: z.infer<typeof rangeQuery>): Promise<analytic
 }
 
 export async function insightsRoutes(app: FastifyInstance) {
+  /**
+   * Perfil (revisão de UX de 26/09/2026): nome de exibição da saudação da
+   * Home + tipo de uso, que a UI usa pra travar as telas de freelancer
+   * quando `accountType` é `personal`. Mesmo singleton GET/PUT de
+   * `/financial-engine/settings` acima.
+   */
+  app.get('/profile', async () => ({ profile: await profileService.getProfile() }))
+
+  app.put('/profile', async (req) => {
+    const body = z
+      .object({
+        displayName: z.string().trim().min(1).max(80).nullable().optional(),
+        accountType: z.enum(['personal', 'freelancer']).optional(),
+      })
+      .refine((v) => Object.keys(v).length > 0, { message: 'nada para atualizar' })
+      .parse(req.body)
+    return { profile: await profileService.setProfile(body) }
+  })
+
   app.get('/meta', async () => {
     const bounds = await ledgerBounds()
     return {

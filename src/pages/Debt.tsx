@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { telemetry } from '../lib/telemetry'
@@ -21,6 +21,7 @@ import {
   Bento,
   Button,
   Card,
+  ConfirmDeleteModal,
   EmptyState,
   FilterSelect,
   HeroFigure,
@@ -179,6 +180,7 @@ export function DebtPage() {
   const [paymentModal, setPaymentModal] = useState<DebtRow | null>(null)
   const [paymentHistory, setPaymentHistory] = useState<DebtRow | null>(null)
   const [mismatchDetail, setMismatchDetail] = useState<ValueMismatch | null>(null)
+  const strategyFieldId = useId()
 
   const extraMonthlyCents = EXTRA_STEPS[extraIndex] ?? 0
 
@@ -378,8 +380,9 @@ export function DebtPage() {
                   />
                 </div>
                 <div className="field" style={{ minWidth: 190 }}>
-                  <label className="field__label">Estratégia</label>
+                  <label className="field__label" htmlFor={strategyFieldId}>Estratégia</label>
                   <Select
+                    id={strategyFieldId}
                     value={strategy}
                     options={[
                       { value: 'avalanche', label: 'Avalanche (maior taxa)' },
@@ -414,25 +417,25 @@ export function DebtPage() {
 
             <Card span={12} flush title="Dívidas cadastradas">
               <div className="table-wrap">
-                <table className="table">
+                <table className="table table--stack-mobile">
                   <thead>
                     <tr>
-                      <th>Dívida</th>
-                      <th>Tipo</th>
-                      <th className="table__num">Saldo</th>
-                      <th className="table__num">Taxa efetiva</th>
-                      <th className="table__num">Juros/mês</th>
-                      <th className="table__num">Mínimo</th>
-                      <th className="table__num">Programado</th>
-                      <th className="table__center">Parcelas</th>
-                      <th className="table__num">Share</th>
-                      <th style={{ width: 108 }} />
+                      <th scope="col">Dívida</th>
+                      <th scope="col">Tipo</th>
+                      <th scope="col" className="table__num">Saldo</th>
+                      <th scope="col" className="table__num">Taxa efetiva</th>
+                      <th scope="col" className="table__num">Juros/mês</th>
+                      <th scope="col" className="table__num">Mínimo</th>
+                      <th scope="col" className="table__num">Programado</th>
+                      <th scope="col" className="table__center">Parcelas</th>
+                      <th scope="col" className="table__num">Share</th>
+                      <th scope="col" style={{ width: 108 }} />
                     </tr>
                   </thead>
                   <tbody>
                     {data.debts.map((debt) => (
                       <tr key={debt.id}>
-                        <td>
+                        <td data-label="Dívida">
                           <span className="row" style={{ gap: 'var(--sp-2)' }}>
                             <span className="swatch" style={{ background: KIND_COLOR[debt.kind] ?? '#71717a' }} />
                             <span>
@@ -446,18 +449,18 @@ export function DebtPage() {
                             </span>
                           </span>
                         </td>
-                        <td className="muted">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
-                        <td className="table__num">{money(debt.balanceCents)}</td>
-                        <td className="table__num">
+                        <td className="muted" data-label="Tipo">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
+                        <td className="table__num" data-label="Saldo">{money(debt.balanceCents)}</td>
+                        <td className="table__num" data-label="Taxa efetiva">
                           {bps(debt.aprBps)} a.a.
                           <span className="muted" style={{ display: 'block', fontSize: 'var(--text-2xs)' }}>
                             {bps(debt.monthlyRateBps)} a.m.
                           </span>
                         </td>
-                        <td className="table__num neg">{money(debt.monthlyInterestCents)}</td>
-                        <td className="table__num">{money(debt.minimumPaymentCents)}</td>
-                        <td className="table__num">{money(debt.scheduledPaymentCents)}</td>
-                        <td className="table__center">
+                        <td className="table__num neg" data-label="Juros/mês">{money(debt.monthlyInterestCents)}</td>
+                        <td className="table__num" data-label="Mínimo">{money(debt.minimumPaymentCents)}</td>
+                        <td className="table__num" data-label="Programado">{money(debt.scheduledPaymentCents)}</td>
+                        <td className="table__center" data-label="Parcelas">
                           <button
                             type="button"
                             className="badge"
@@ -470,8 +473,8 @@ export function DebtPage() {
                               : `${debt.installmentsPaid} / ${debt.installmentCount}`}
                           </button>
                         </td>
-                        <td className="table__num muted">{bps(debt.shareBps, 0)}</td>
-                        <td>
+                        <td className="table__num muted" data-label="Share">{bps(debt.shareBps, 0)}</td>
+                        <td data-label="__trail">
                           <div className="row" style={{ gap: 2 }}>
                             <Button
                               variant="quiet"
@@ -505,28 +508,28 @@ export function DebtPage() {
                 subtitle="Dívidas cujas parcelas foram todas pagas, saindo da lista ativa automaticamente"
               >
                 <div className="table-wrap">
-                  <table className="table">
+                  <table className="table table--stack-mobile">
                     <thead>
                       <tr>
-                        <th>Dívida</th>
-                        <th>Tipo</th>
-                        <th className="table__center">Parcelas</th>
-                        <th className="table__num">Total pago</th>
-                        <th>Quitada em</th>
-                        <th />
+                        <th scope="col">Dívida</th>
+                        <th scope="col">Tipo</th>
+                        <th scope="col" className="table__center">Parcelas</th>
+                        <th scope="col" className="table__num">Total pago</th>
+                        <th scope="col">Quitada em</th>
+                        <th scope="col" />
                       </tr>
                     </thead>
                     <tbody>
                       {data.closedDebts.map((debt) => (
                         <tr key={debt.id}>
-                          <td>
+                          <td data-label="Dívida">
                             <span className="row" style={{ gap: 'var(--sp-2)' }}>
                               <span className="swatch" style={{ background: KIND_COLOR[debt.kind] ?? '#71717a' }} />
                               <strong>{debt.name}</strong>
                             </span>
                           </td>
-                          <td className="muted">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
-                          <td className="table__center">
+                          <td className="muted" data-label="Tipo">{KIND_LABEL[debt.kind] ?? debt.kind}</td>
+                          <td className="table__center" data-label="Parcelas">
                             <button
                               type="button"
                               className="badge"
@@ -537,9 +540,9 @@ export function DebtPage() {
                               {debt.installmentCount === null ? '-' : `${debt.installmentCount} / ${debt.installmentCount}`}
                             </button>
                           </td>
-                          <td className="table__num">{money(debt.totalPaidCents)}</td>
-                          <td className="muted">{debt.closedOn ? fmtDate(debt.closedOn) : '-'}</td>
-                          <td>
+                          <td className="table__num" data-label="Total pago">{money(debt.totalPaidCents)}</td>
+                          <td className="muted" data-label="Quitada em">{debt.closedOn ? fmtDate(debt.closedOn) : '-'}</td>
+                          <td data-label="__trail">
                             <div className="row" style={{ gap: 2 }}>
                               <Button
                                 variant="quiet"
@@ -647,8 +650,10 @@ function ReconciliationQueueCard({
             style={{ gap: 'var(--sp-3)' }}
           >
             <div style={{ minWidth: 0, flex: 1 }}>
-              <span className="row" style={{ gap: 'var(--sp-2)' }}>
-                <strong className="truncate">{debtName}</strong>
+              {/* Sem truncate (revisão de responsividade de 26/09/2026):
+                  nome da dívida competindo com o badge cortava num telefone. */}
+              <span className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+                <strong style={{ minWidth: 0 }}>{debtName}</strong>
                 <span className="badge badge--warning">Match sugerido</span>
               </span>
               <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
@@ -686,8 +691,10 @@ function ReconciliationQueueCard({
         {mismatches.map((mismatch) => (
           <div key={mismatch.debtId} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <span className="row" style={{ gap: 'var(--sp-2)' }}>
-                <strong className="truncate">{mismatch.debtName}</strong>
+              {/* Sem truncate (revisão de responsividade de 26/09/2026):
+                  nome da dívida competindo com o badge cortava num telefone. */}
+              <span className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+                <strong style={{ minWidth: 0 }}>{mismatch.debtName}</strong>
                 <span className="badge badge--critical">Divergência de valor</span>
               </span>
               <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
@@ -754,8 +761,8 @@ function ValueMismatchDetailModal({ mismatch, onClose }: { mismatch: ValueMismat
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Data</th>
-                    <th className="table__num">Valor</th>
+                    <th scope="col">Data</th>
+                    <th scope="col" className="table__num">Valor</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -776,8 +783,8 @@ function ValueMismatchDetailModal({ mismatch, onClose }: { mismatch: ValueMismat
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Data</th>
-                    <th className="table__num">Valor</th>
+                    <th scope="col">Data</th>
+                    <th scope="col" className="table__num">Valor</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -801,25 +808,39 @@ function ValueMismatchDetailModal({ mismatch, onClose }: { mismatch: ValueMismat
 function DeleteDebtButton({ debtId, name }: { debtId: number; name: string }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
 
   const remove = useMutation({
     mutationFn: () => api.del(`/debts/${debtId}`),
     onSuccess: () => {
       toast(`${name} removida`)
       queryClient.invalidateQueries()
+      setConfirming(false)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
   return (
-    <Button
-      variant="quiet"
-      size="sm"
-      icon="trash"
-      onClick={() => remove.mutate()}
-      disabled={remove.isPending}
-      title="Excluir dívida"
-    />
+    <>
+      <Button
+        variant="quiet"
+        size="sm"
+        icon="trash"
+        onClick={() => setConfirming(true)}
+        disabled={remove.isPending}
+        title="Excluir dívida"
+      />
+      {confirming && (
+        <ConfirmDeleteModal
+          title={`Excluir ${name}?`}
+          body="Pagamentos e saldos registrados para esta dívida também são apagados. Isso não pode ser desfeito."
+          confirmLabel="Excluir dívida"
+          pending={remove.isPending}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => remove.mutate()}
+        />
+      )}
+    </>
   )
 }
 
@@ -849,6 +870,16 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
   )
   const [accountId, setAccountId] = useState<number | null>(debt?.accountId ?? null)
   const accounts = useAccounts()
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const nameFieldId = useId()
+  const kindFieldId = useId()
+  const institutionFieldId = useId()
+  const balanceFieldId = useId()
+  const minimumFieldId = useId()
+  const scheduledFieldId = useId()
+  const installmentsFieldId = useId()
+  const dueDayFieldId = useId()
+  const accountFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -921,6 +952,19 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
         ? `Efetiva ao ano, equivale a ${bpsToInput(monthlyRateBpsFromAnnual(Math.abs(typedRateBps)))}% ao mês.`
         : `Gravada como ${bpsToInput(annualRateBpsFromMonthly(Math.abs(typedRateBps)))}% efetivos ao ano.`
 
+  if (confirmingDelete) {
+    return (
+      <ConfirmDeleteModal
+        title={`Excluir ${debt!.name}?`}
+        body="Pagamentos e saldos registrados para esta dívida também são apagados. Isso não pode ser desfeito."
+        confirmLabel="Excluir dívida"
+        pending={remove.isPending}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => remove.mutate()}
+      />
+    )
+  }
+
   return (
     <Modal
       title={debt ? `Editar ${debt.name}` : 'Nova dívida'}
@@ -928,7 +972,7 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
       footer={
         <>
           {debt ? (
-            <Button variant="danger" icon="trash" onClick={() => remove.mutate()}>
+            <Button variant="danger" icon="trash" onClick={() => setConfirmingDelete(true)}>
               Remover
             </Button>
           ) : (
@@ -955,12 +999,13 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
       <div className="stack">
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 200 }}>
-            <label className="field__label">Nome</label>
-            <TextInput value={name} onChange={setName} placeholder="ex. Cartão Nubank" />
+            <label className="field__label" htmlFor={nameFieldId}>Nome</label>
+            <TextInput id={nameFieldId} value={name} onChange={setName} placeholder="ex. Cartão Nubank" />
           </div>
           <div className="field" style={{ minWidth: 190 }}>
-            <label className="field__label">Tipo</label>
+            <label className="field__label" htmlFor={kindFieldId}>Tipo</label>
             <Select
+              id={kindFieldId}
               value={kind}
               options={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))}
               onChange={(value) => setKind(value ?? 'credit_card')}
@@ -969,14 +1014,14 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
         </div>
 
         <div className="field">
-          <label className="field__label">Instituição</label>
-          <TextInput value={institution} onChange={setInstitution} placeholder="opcional" />
+          <label className="field__label" htmlFor={institutionFieldId}>Instituição</label>
+          <TextInput id={institutionFieldId} value={institution} onChange={setInstitution} placeholder="opcional" />
         </div>
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Saldo devedor (R$)</label>
-            <TextInput value={balance} onChange={setBalance} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={balanceFieldId}>Saldo devedor (R$)</label>
+            <TextInput id={balanceFieldId} value={balance} onChange={setBalance} placeholder="0,00" numeral />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
             <label className="field__label">Taxa de juros (%)</label>
@@ -1015,33 +1060,34 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Pagamento mínimo (R$)</label>
-            <TextInput value={minimum} onChange={setMinimum} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={minimumFieldId}>Pagamento mínimo (R$)</label>
+            <TextInput id={minimumFieldId} value={minimum} onChange={setMinimum} placeholder="0,00" numeral />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Pagamento programado (R$)</label>
-            <TextInput value={scheduled} onChange={setScheduled} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={scheduledFieldId}>Pagamento programado (R$)</label>
+            <TextInput id={scheduledFieldId} value={scheduled} onChange={setScheduled} placeholder="0,00" numeral />
             <span className="field__hint">O que você realmente paga por mês.</span>
           </div>
         </div>
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ maxWidth: 220 }}>
-            <label className="field__label">Nº de parcelas (opcional)</label>
-            <TextInput value={installments} onChange={setInstallments} placeholder="ex. 48" numeral />
+            <label className="field__label" htmlFor={installmentsFieldId}>Nº de parcelas (opcional)</label>
+            <TextInput id={installmentsFieldId} value={installments} onChange={setInstallments} placeholder="ex. 48" numeral />
             <span className="field__hint">
               Deixe em branco para dívida rotativa (cartão, cheque especial), sem número fixo de parcelas.
             </span>
           </div>
           <div className="field" style={{ maxWidth: 160 }}>
-            <label className="field__label">Dia de vencimento</label>
-            <TextInput value={dueDay} onChange={setDueDay} placeholder="ex. 10" numeral />
+            <label className="field__label" htmlFor={dueDayFieldId}>Dia de vencimento</label>
+            <TextInput id={dueDayFieldId} value={dueDay} onChange={setDueDay} placeholder="ex. 10" numeral />
           </div>
         </div>
 
         <div className="field">
-          <label className="field__label">Conta de pagamento</label>
+          <label className="field__label" htmlFor={accountFieldId}>Conta de pagamento</label>
           <Select
+            id={accountFieldId}
             value={accountId}
             options={(accounts.data?.accounts ?? []).map((a) => ({ value: a.id, label: a.name }))}
             placeholder="Nenhuma"
@@ -1068,6 +1114,9 @@ function DebtPaymentModal({ debt, onClose }: { debt: DebtRow; onClose: () => voi
   const [paidOn, setPaidOn] = useState(() => new Date().toISOString().slice(0, 10))
   const [amount, setAmount] = useState('')
   const [notes, setNotes] = useState('')
+  const paidOnFieldId = useId()
+  const amountFieldId = useId()
+  const notesFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -1098,7 +1147,7 @@ function DebtPaymentModal({ debt, onClose }: { debt: DebtRow; onClose: () => voi
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Registrar
           </Button>
         </>
@@ -1126,18 +1175,18 @@ function DebtPaymentModal({ debt, onClose }: { debt: DebtRow; onClose: () => voi
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Data</label>
-            <TextInput value={paidOn} onChange={setPaidOn} type="date" />
+            <label className="field__label" htmlFor={paidOnFieldId}>Data</label>
+            <TextInput id={paidOnFieldId} value={paidOn} onChange={setPaidOn} type="date" />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Valor (R$)</label>
-            <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={amountFieldId}>Valor (R$)</label>
+            <TextInput id={amountFieldId} value={amount} onChange={setAmount} placeholder="0,00" numeral />
           </div>
         </div>
 
         <div className="field">
-          <label className="field__label">Notas (opcional)</label>
-          <TextInput value={notes} onChange={setNotes} placeholder="ex. parcela 12 de 48" />
+          <label className="field__label" htmlFor={notesFieldId}>Notas (opcional)</label>
+          <TextInput id={notesFieldId} value={notes} onChange={setNotes} placeholder="ex. parcela 12 de 48" />
         </div>
 
         <p className="chart__note">
@@ -1161,16 +1210,20 @@ function DebtPaymentHistoryModal({ debt, onClose }: { debt: DebtRow; onClose: ()
     queryFn: () => api.get<{ payments: PaymentRow[] }>('/debts/payments', { debtId: debt.id }),
   })
 
+  const [confirmingId, setConfirmingId] = useState<number | null>(null)
+
   const remove = useMutation({
     mutationFn: (id: number) => api.del<{ removed: number }>(`/debts/payments/${id}`),
     onSuccess: () => {
       toast('Lançamento removido')
       queryClient.invalidateQueries()
+      setConfirmingId(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
   const rows = payments.data?.payments ?? []
+  const confirmingPayment = rows.find((p) => p.id === confirmingId) ?? null
 
   return (
     <Modal
@@ -1196,29 +1249,29 @@ function DebtPaymentHistoryModal({ debt, onClose }: { debt: DebtRow; onClose: ()
         />
       ) : (
         <div className="table-wrap">
-          <table className="table">
+          <table className="table table--stack-mobile">
             <thead>
               <tr>
-                <th>Data</th>
-                <th>Tipo</th>
-                <th className="table__num">Valor</th>
-                <th>Notas</th>
-                <th style={{ width: 40 }} />
+                <th scope="col">Data</th>
+                <th scope="col">Tipo</th>
+                <th scope="col" className="table__num">Valor</th>
+                <th scope="col">Notas</th>
+                <th scope="col" style={{ width: 40 }} />
               </tr>
             </thead>
             <tbody>
               {rows.map((p) => (
                 <tr key={p.id}>
-                  <td>{fmtDate(p.paidOn)}</td>
-                  <td className="muted">{DEBT_PAYMENT_KIND_LABEL[p.kind] ?? p.kind}</td>
-                  <td className={`table__num ${p.kind === 'payment' ? 'pos' : 'neg'}`}>{money(p.amountCents)}</td>
-                  <td className="muted">{p.notes ?? '-'}</td>
-                  <td>
+                  <td data-label="Data">{fmtDate(p.paidOn)}</td>
+                  <td className="muted" data-label="Tipo">{DEBT_PAYMENT_KIND_LABEL[p.kind] ?? p.kind}</td>
+                  <td className={`table__num ${p.kind === 'payment' ? 'pos' : 'neg'}`} data-label="Valor">{money(p.amountCents)}</td>
+                  <td className="muted" data-label="Notas">{p.notes ?? '-'}</td>
+                  <td data-label="__trail">
                     <Button
                       variant="quiet"
                       size="sm"
                       icon="trash"
-                      onClick={() => remove.mutate(p.id)}
+                      onClick={() => setConfirmingId(p.id)}
                       disabled={remove.isPending}
                       title="Excluir lançamento"
                     />
@@ -1228,6 +1281,16 @@ function DebtPaymentHistoryModal({ debt, onClose }: { debt: DebtRow; onClose: ()
             </tbody>
           </table>
         </div>
+      )}
+      {confirmingPayment && (
+        <ConfirmDeleteModal
+          title={`Excluir o lançamento de ${money(confirmingPayment.amountCents)} em ${fmtDate(confirmingPayment.paidOn)}?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel="Excluir lançamento"
+          pending={remove.isPending}
+          onCancel={() => setConfirmingId(null)}
+          onConfirm={() => remove.mutate(confirmingPayment.id)}
+        />
       )}
     </Modal>
   )

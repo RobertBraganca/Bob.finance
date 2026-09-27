@@ -40,6 +40,14 @@ export const accountKindEnum = pgEnum('account_kind', [
   'loan',
   'cash',
 ])
+/**
+ * `personal` trava, na UI, as telas pensadas só pra quem fatura como PJ/
+ * freelancer (Precificação, Receita de parceiros) — não apaga nem esconde
+ * dado já existente nelas, só o ACESSO daqui pra frente (revisão de UX de
+ * 26/09/2026). `freelancer` é o padrão: é o público que o produto já
+ * assumia por completo antes deste campo existir (ver `docs/PRD.md`).
+ */
+export const accountTypeEnum = pgEnum('account_type', ['personal', 'freelancer'])
 export const csvDelimiterEnum = pgEnum('csv_delimiter', [',', ';', 'tab', 'auto'])
 export const csvDateFormatEnum = pgEnum('csv_date_format', [
   'dd/MM/yyyy',
@@ -612,6 +620,23 @@ export const assets = pgTable(
     createdAt: text('created_at').notNull().default(now),
   },
   (t) => [index('assets_account_idx').on(t.accountId), uniqueIndex('assets_name_uq').on(t.name)],
+)
+
+/**
+ * Singleton settings row (id is always 1) — o único lugar no app inteiro
+ * com um nome de exibição e o "tipo de uso" (specs/dashboard, saudação da
+ * Home). `displayName` null é o padrão (saudação sem nome, nunca um
+ * placeholder inventado); `accountType` começa em `freelancer` pra não
+ * mudar o comportamento de quem já usa o produto hoje.
+ */
+export const profileSettings = pgTable(
+  'profile_settings',
+  {
+    id: singletonId(),
+    displayName: text('display_name'),
+    accountType: accountTypeEnum('account_type').notNull().default('freelancer'),
+  },
+  () => [check('profile_settings_singleton', sql`id = 1`)],
 )
 
 /**

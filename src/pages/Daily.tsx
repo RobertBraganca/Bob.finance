@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useAccounts, useMeta } from '../lib/store'
@@ -231,6 +231,12 @@ function QuickAdd({ today }: { today: string }) {
   const [day, setDay] = useState(today)
   const [accountId, setAccountId] = useState<number | null>(null)
 
+  const amountFieldId = useId()
+  const categoryFieldId = useId()
+  const noteFieldId = useId()
+  const dayFieldId = useId()
+  const accountFieldId = useId()
+
   const defaultAccount = accountId ?? accounts.data?.accounts[0]?.id ?? null
 
   const add = useMutation({
@@ -269,8 +275,9 @@ function QuickAdd({ today }: { today: string }) {
         }}
       >
         <div className="field" style={{ width: 150 }} ref={amountRef}>
-          <label className="field__label">Valor</label>
+          <label className="field__label" htmlFor={amountFieldId}>Valor</label>
           <Input
+            id={amountFieldId}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="0,00"
@@ -278,20 +285,21 @@ function QuickAdd({ today }: { today: string }) {
           />
         </div>
         <div className="field" style={{ minWidth: 200, flex: 1 }}>
-          <label className="field__label">TAG</label>
-          <CategorySelect value={categoryId} direction="out" onChange={setCategoryId} />
+          <label className="field__label" htmlFor={categoryFieldId}>TAG</label>
+          <CategorySelect id={categoryFieldId} value={categoryId} direction="out" onChange={setCategoryId} />
         </div>
         <div className="field" style={{ minWidth: 180, flex: 1 }}>
-          <label className="field__label">Nota</label>
-          <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ex. almoço com cliente" />
+          <label className="field__label" htmlFor={noteFieldId}>Nota</label>
+          <Input id={noteFieldId} value={note} onChange={(e) => setNote(e.target.value)} placeholder="ex. almoço com cliente" />
         </div>
         <div className="field" style={{ width: 150 }}>
-          <label className="field__label">Data</label>
-          <Input value={day} onChange={(e) => setDay(e.target.value)} type="date" max={today} />
+          <label className="field__label" htmlFor={dayFieldId}>Data</label>
+          <Input id={dayFieldId} value={day} onChange={(e) => setDay(e.target.value)} type="date" max={today} />
         </div>
         <div className="field" style={{ minWidth: 160 }}>
-          <label className="field__label">Conta</label>
+          <label className="field__label" htmlFor={accountFieldId}>Conta</label>
           <Select
+            id={accountFieldId}
             value={defaultAccount}
             options={(accounts.data?.accounts ?? []).map((account) => ({
               value: account.id,
@@ -349,10 +357,10 @@ function RecentDaily({ period }: { period: string }) {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ width: 110 }}>Data</th>
-                <th>Nota</th>
-                <th style={{ width: 200 }}>TAG</th>
-                <th className="table__num" style={{ width: 130 }}>Valor</th>
+                <th scope="col" style={{ width: 110 }}>Data</th>
+                <th scope="col">Nota</th>
+                <th scope="col" style={{ width: 200 }}>TAG</th>
+                <th scope="col" className="table__num" style={{ width: 130 }}>Valor</th>
               </tr>
             </thead>
             <tbody>

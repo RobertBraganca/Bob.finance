@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useMeta } from '../lib/store'
@@ -95,6 +95,11 @@ export function AposentadoriaTab() {
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null)
   /** 'today' (padrão, comportamento inalterado) ou 'projected' — ver a seção "Simular a partir de". */
   const [startingPoint, setStartingPoint] = useState<'today' | 'projected'>('today')
+
+  const withdrawalFieldId = useId()
+  const expectedReturnFieldId = useId()
+  const ageFieldId = useId()
+  const horizonYearsFieldId = useId()
 
   // Acumulação: a mesma rota que Investimentos > Metas já chama — nenhuma
   // rota nova. Só filtra por `purpose === 'retirement'` no cliente, porque
@@ -328,8 +333,9 @@ export function AposentadoriaTab() {
             )}
             <div className="row row--wrap" style={{ gap: 'var(--sp-4)', alignItems: 'flex-end' }}>
               <div className="field" style={{ minWidth: 160, flex: '1 1 160px' }}>
-                <label className="field__label">Retirada mensal</label>
+                <label className="field__label" htmlFor={withdrawalFieldId}>Retirada mensal</label>
                 <Input
+                  id={withdrawalFieldId}
                   value={withdrawal}
                   onChange={(e) => setWithdrawal(e.target.value)}
                   placeholder="12.000,00"
@@ -337,8 +343,9 @@ export function AposentadoriaTab() {
                 />
               </div>
               <div className="field" style={{ minWidth: 130, flex: '1 1 130px' }}>
-                <label className="field__label">Retorno real (a.a.)</label>
+                <label className="field__label" htmlFor={expectedReturnFieldId}>Retorno real (a.a.)</label>
                 <Input
+                  id={expectedReturnFieldId}
                   value={expectedReturn}
                   onChange={(e) => setExpectedReturn(e.target.value)}
                   placeholder="5"
@@ -346,8 +353,9 @@ export function AposentadoriaTab() {
                 />
               </div>
               <div className="field" style={{ minWidth: 130, flex: '1 1 130px' }}>
-                <label className="field__label">Sua idade hoje</label>
+                <label className="field__label" htmlFor={ageFieldId}>Sua idade hoje</label>
                 <Input
+                  id={ageFieldId}
                   value={age}
                   onChange={(e) => setAge(e.target.value)}
                   placeholder="opcional"
@@ -355,8 +363,9 @@ export function AposentadoriaTab() {
                 />
               </div>
               <div className="field" style={{ minWidth: 130, flex: '1 1 130px' }}>
-                <label className="field__label">Horizonte (anos)</label>
+                <label className="field__label" htmlFor={horizonYearsFieldId}>Horizonte (anos)</label>
                 <Input
+                  id={horizonYearsFieldId}
                   value={horizonYears}
                   onChange={(e) => setHorizonYears(e.target.value)}
                   placeholder="40"

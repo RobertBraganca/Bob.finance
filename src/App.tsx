@@ -5,6 +5,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from './components/ui/s
 import { Card, Icon, PageSkeleton } from './components/ui'
 import { telemetry } from './lib/telemetry'
 import { useAuth } from './lib/auth'
+import { useUserProfile } from './lib/store'
 import { LoginPage } from './pages/Login'
 
 /**
@@ -33,6 +34,7 @@ const FinancialHealthPage = lazy(() =>
 const PricingPage = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.PricingPage })))
 const PartnersPage = lazy(() => import('./pages/Partners').then((m) => ({ default: m.PartnersPage })))
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })))
+const ProfilePage = lazy(() => import('./pages/Profile').then((m) => ({ default: m.ProfilePage })))
 
 /** Fallback do Suspense enquanto o chunk da rota baixa — só aparece na
  * primeira visita a cada tela (chunk fica em cache do navegador depois).
@@ -51,11 +53,11 @@ function RouteFallback() {
 
 /**
  * `.claude/launch.json` keeps `autoPort: true` on purpose (vite.config.ts's
- * own comment: another session's dev server may already hold 5173), but
- * `bentoLayout.ts`'s personalização do Painel is keyed to `localStorage`,
- * which is scoped by origin (host + porta). Trocar de porta entre reinícios
- * silenciosamente reresetava o arranjo salvo — isso avisa em vez de deixar
- * o usuário achar que é bug do componente de layout.
+ * own comment: another session's dev server may already hold 5173), mas
+ * preferências como tema (`lib/theme.tsx`) e notificações dispensadas
+ * (`lib/insights.ts`) ficam em `localStorage`, escopado por origem (host +
+ * porta). Trocar de porta entre reinícios silenciosamente reseta essas
+ * preferências — isso avisa em vez de deixar o usuário achar que é bug.
  */
 function PortWarning() {
   const [port] = useState(() => window.location.port)
@@ -65,8 +67,9 @@ function PortWarning() {
       <Card muted className="row row--wrap">
         <Icon name="alert" size={16} />
         <span style={{ fontSize: 'var(--text-xs)' }}>
-          Servidor nesta sessão está na porta {port}, não a 5173 padrão. Personalizações salvas
-          neste navegador (ex. arranjo do Painel) podem não persistir entre reinícios do servidor.
+          Servidor nesta sessão está na porta {port}, não a 5173 padrão. Preferências salvas
+          neste navegador (ex. tema, notificações dispensadas) podem não persistir entre
+          reinícios do servidor.
         </span>
       </Card>
     </div>
@@ -90,6 +93,7 @@ const FEATURE_BY_PATH: Record<string, string> = {
   '/importar': 'import',
   '/categorias': 'categories',
   '/ajustes': 'settings',
+  '/perfil': 'profile',
 }
 
 /** Uma chamada por navegação cobre toda página sem precisar instrumentar cada uma. */
@@ -101,15 +105,53 @@ function usePageViewTelemetry() {
   }, [location.pathname])
 }
 
-export function App() {
-  usePageViewTelemetry()
-  const { session, loading } = useAuth()
+/** Mesmo rótulo do item de navegação lateral (Shell.tsx) para cada rota. */
+const PAGE_TITLE_BY_PATH: Record<string, string> = {
+  '/': 'Visão geral',
+  '/patrimonio': 'Patrimônio',
+  '/diario': 'Diário',
+  '/lancamentos': 'Lançamentos',
+  '/dre': 'DRE',
+  '/saude': 'Saúde financeira',
+  '/precificacao': 'Precificação',
+  '/parceiros': 'Receita de parceiros',
+  '/metas': 'Metas do mês',
+  '/dividas': 'Endividamento',
+  '/investimentos': 'Investimentos',
+  '/ajustes': 'Contas e bancos',
+  '/cartoes': 'Cartões',
+  '/categorias': 'TAGs e regras',
+  '/importar': 'Importar',
+  '/perfil': 'Perfil',
+}
 
-  // Nada renderiza (nem a tela de login) até saber se já existe uma sessão
-  // salva — evita o flash de "login" antes do redirect silencioso de quem
-  // já estava logado.
-  if (loading) return null
-  if (!session) return <LoginPage />
+/**
+ * Auditoria de acessibilidade de 26/09/2026: numa SPA, trocar de rota não
+ * recarrega a página, então o título da aba (e o que um leitor de tela
+ * anuncia ao navegar) ficava travado em "Finanças" pras 15 rotas do app.
+ * Mesmo mapa de rótulos da navegação lateral, pra nunca discordar dela.
+ */
+function usePageTitle() {
+  const location = useLocation()
+  useEffect(() => {
+    const label = PAGE_TITLE_BY_PATH[location.pathname]
+    document.title = label ? `${label} · Finanças` : 'Finanças'
+  }, [location.pathname])
+}
+
+/**
+ * Só monta depois do gate de sessão em `App`, então `useUserProfile` (e
+ * qualquer outra query autenticada) nunca dispara com um 401 previsível
+ * enquanto ninguém logou ainda.
+ */
+function AuthedApp() {
+  // Revisão de UX de 26/09/2026: modo "Pessoal" trava telas pensadas só pra
+  // quem fatura como PJ/freelancer. Enquanto o perfil ainda carrega, o
+  // padrão é `freelancer` (permissivo) — nunca bloqueia de forma
+  // momentânea quem já tem acesso, só quando o servidor de fato confirma
+  // `personal`.
+  const profile = useUserProfile()
+  const isPersonalAccount = profile.data?.profile.accountType === 'personal'
 
   return (
     <SidebarProvider>
@@ -133,11 +175,18 @@ export function App() {
               <Route path="/investimentos" element={<InvestmentsPage />} />
               <Route path="/patrimonio" element={<PatrimonioPage />} />
               <Route path="/saude" element={<FinancialHealthPage />} />
-              <Route path="/precificacao" element={<PricingPage />} />
-              <Route path="/parceiros" element={<PartnersPage />} />
+              <Route
+                path="/precificacao"
+                element={isPersonalAccount ? <Navigate to="/" replace /> : <PricingPage />}
+              />
+              <Route
+                path="/parceiros"
+                element={isPersonalAccount ? <Navigate to="/" replace /> : <PartnersPage />}
+              />
               <Route path="/importar" element={<ImportPage />} />
               <Route path="/categorias" element={<CategoriesPage />} />
               <Route path="/ajustes" element={<SettingsPage />} />
+              <Route path="/perfil" element={<ProfilePage />} />
               {/* Rotas absorvidas como aba em revisão de sidebar (07/09/2026) — redirect para quem
                   não tinha o link salvo com o hash da aba nova. */}
               <Route path="/parcelamentos" element={<Navigate to="/lancamentos" replace />} />
@@ -149,4 +198,18 @@ export function App() {
       </SidebarInset>
     </SidebarProvider>
   )
+}
+
+export function App() {
+  usePageViewTelemetry()
+  usePageTitle()
+  const { session, loading } = useAuth()
+
+  // Nada renderiza (nem a tela de login) até saber se já existe uma sessão
+  // salva — evita o flash de "login" antes do redirect silencioso de quem
+  // já estava logado.
+  if (loading) return null
+  if (!session) return <LoginPage />
+
+  return <AuthedApp />
 }

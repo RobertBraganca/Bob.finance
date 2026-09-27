@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { useAccounts } from '../../lib/store'
 import { CategorySelect, Segmented, Select, TextInput } from '../ui'
 
@@ -36,11 +37,18 @@ export function TransactionForm({
 }) {
   const accounts = useAccounts()
 
+  const descriptionFieldId = useId()
+  const postedOnFieldId = useId()
+  const accountFieldId = useId()
+  const amountFieldId = useId()
+  const categoryFieldId = useId()
+
   return (
     <div className="stack">
       <div className="field">
-        <label className="field__label">Descrição</label>
+        <label className="field__label" htmlFor={descriptionFieldId}>Descrição</label>
         <TextInput
+          id={descriptionFieldId}
           value={value.description}
           onChange={(description) => onChange({ description })}
           placeholder={descriptionPlaceholder}
@@ -49,12 +57,13 @@ export function TransactionForm({
 
       <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
         <div className="field" style={{ flex: 1, minWidth: 150 }}>
-          <label className="field__label">Data</label>
-          <TextInput value={value.postedOn} onChange={(postedOn) => onChange({ postedOn })} type="date" />
+          <label className="field__label" htmlFor={postedOnFieldId}>Data</label>
+          <TextInput id={postedOnFieldId} value={value.postedOn} onChange={(postedOn) => onChange({ postedOn })} type="date" />
         </div>
         <div className="field" style={{ flex: 1, minWidth: 150 }}>
-          <label className="field__label">Conta</label>
+          <label className="field__label" htmlFor={accountFieldId}>Conta</label>
           <Select
+            id={accountFieldId}
             value={value.accountId}
             options={(accounts.data?.accounts ?? []).map((a) => ({ value: a.id, label: a.name }))}
             onChange={(accountId) => onChange({ accountId })}
@@ -84,12 +93,13 @@ export function TransactionForm({
 
       <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
         <div className="field" style={{ flex: 1, minWidth: 150 }}>
-          <label className="field__label">Valor (R$)</label>
-          <TextInput value={value.amount} onChange={(amount) => onChange({ amount })} placeholder="0,00" numeral />
+          <label className="field__label" htmlFor={amountFieldId}>Valor (R$)</label>
+          <TextInput id={amountFieldId} value={value.amount} onChange={(amount) => onChange({ amount })} placeholder="0,00" numeral />
         </div>
         <div className="field" style={{ flex: 1, minWidth: 150 }}>
-          <label className="field__label">TAG</label>
+          <label className="field__label" htmlFor={categoryFieldId}>TAG</label>
           <CategorySelect
+            id={categoryFieldId}
             value={value.categoryId}
             direction={value.direction}
             onChange={(categoryId) => onChange({ categoryId })}

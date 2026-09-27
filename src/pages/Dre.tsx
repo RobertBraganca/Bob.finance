@@ -79,6 +79,11 @@ type FlowEdge = {
   count: number
 }
 
+type FinancialEngineSettingsLite = {
+  pjAccountId: number | null
+  pfAccountId: number | null
+}
+
 /**
  * DRE separado por conta, lado a lado. Deliberadamente ignora o filtro de
  * conta global (Shell.tsx) — essa é justamente a página que sempre mostra
@@ -88,8 +93,20 @@ export function DrePage() {
   const range = useRange()
   const meta = useMeta()
 
-  const pj = (meta.data?.accounts ?? []).find((account) => account.name === 'Nubank PJ')
-  const pf = (meta.data?.accounts ?? []).find((account) => account.name === 'Nubank PF')
+  // As contas PJ/PF já são configuradas uma vez em Saúde financeira →
+  // Motor financeiro (`financialEngineSettings.pjAccountId/pfAccountId`,
+  // usado por todo o resto do motor financeiro) — casar por NOME aqui era
+  // um segundo mecanismo pro mesmo conceito, que quebrava silenciosamente
+  // se a conta fosse renomeada (achado de 26/09/2026). Mesma fonte única
+  // de verdade das duas telas agora.
+  const engineSettings = useQuery({
+    queryKey: ['financial-engine-settings'],
+    queryFn: () => api.get<{ settings: FinancialEngineSettingsLite }>('/financial-engine/settings'),
+  })
+  const pjAccountId = engineSettings.data?.settings.pjAccountId ?? null
+  const pfAccountId = engineSettings.data?.settings.pfAccountId ?? null
+  const pj = (meta.data?.accounts ?? []).find((account) => account.id === pjAccountId)
+  const pf = (meta.data?.accounts ?? []).find((account) => account.id === pfAccountId)
 
   // Same query key/fn the two DreColumn instances use below, so this never
   // costs an extra request — React Query serves it from the shared cache.
@@ -140,7 +157,7 @@ export function DrePage() {
       />
 
       <div className="page">
-        {!meta.isSuccess ? (
+        {!meta.isSuccess || !engineSettings.isSuccess ? (
           <Card>
             <SkeletonLines lines={2} />
           </Card>
@@ -149,7 +166,7 @@ export function DrePage() {
             <EmptyState
               icon="sparkle"
               title="Nenhum dado importado ainda"
-              body="Importe os extratos da Nubank PJ e PF para ver o resultado do período."
+              body="Importe os extratos das contas PJ e PF para ver o resultado do período."
               action={
                 <Link to="/importar">
                   <Button variant="primary" icon="upload">
@@ -159,15 +176,28 @@ export function DrePage() {
               }
             />
           </Card>
+        ) : !pjAccountId || !pfAccountId ? (
+          <Card>
+            <EmptyState
+              icon="alert"
+              title="Contas PJ e PF ainda não configuradas"
+              body="Esta página usa as mesmas contas do Motor financeiro (Saúde financeira). Configure qual conta é PJ e qual é PF por lá primeiro."
+              action={
+                <Link to="/saude">
+                  <Button icon="settings">Ver Motor financeiro</Button>
+                </Link>
+              }
+            />
+          </Card>
         ) : !pj || !pf ? (
           <Card>
             <EmptyState
               icon="alert"
-              title="Contas 'Nubank PJ' e 'Nubank PF' não encontradas"
-              body="Esta página espera contas com esses nomes exatos. Confira os nomes em Contas e bancos."
+              title="Conta PJ ou PF configurada não existe mais"
+              body="O Motor financeiro aponta para uma conta que não está mais em Contas e bancos. Escolha outra conta lá."
               action={
-                <Link to="/ajustes">
-                  <Button icon="settings">Ver contas</Button>
+                <Link to="/saude">
+                  <Button icon="settings">Ver Motor financeiro</Button>
                 </Link>
               }
             />
@@ -308,6 +338,8 @@ type Reconciliation = {
   pjAfterCents: number
   pfAfterCents: number
   combinedCents: number
+  /** receita bruta da PJ no período — denominador do "repasse em % da receita" abaixo */
+  pjIncomeCents: number
 }
 
 function computeReconciliation(
@@ -325,6 +357,7 @@ function computeReconciliation(
   const pfResultCents = pfDre.totals.incomeCents - pfDre.totals.expenseCents
 
   return {
+    pjIncomeCents: pjDre.totals.incomeCents,
     pjResultCents,
     pfResultCents,
     netToPfCents,
@@ -343,7 +376,11 @@ function ReconciliationSlab({
   pjLabel: string
   pfLabel: string
 }) {
-  const { pjResultCents, pfResultCents, netToPfCents, pjAfterCents, pfAfterCents, combinedCents } = data
+  const { pjResultCents, pfResultCents, netToPfCents, pjAfterCents, pfAfterCents, combinedCents, pjIncomeCents } = data
+  // Percentual sempre em relação à receita da PJ (o "de onde saiu"), nas
+  // duas linhas — mesmo denominador dos dois lados, só o sinal de
+  // `netToPfCents` já conta a direção (positivo = PJ pagou a PF).
+  const shareOfPjIncomeBps = pjIncomeCents > 0 ? Math.round((netToPfCents / pjIncomeCents) * 10_000) : null
 
   // Badge tone classes go neutral on an ink card by design (contrast, not a
   // bug — see .on-slab .badge in components.css), so severity here rides on
@@ -396,7 +433,12 @@ function ReconciliationSlab({
           <span className="kv__k">{pjLabel}, resultado isolado</span>
           <span className="kv__v">{money(pjResultCents)}</span>
           <span className="kv__k">Repasse líquido com a {pfLabel}</span>
-          <span className={`kv__v ${-netToPfCents < 0 ? 'neg' : 'pos'}`}>{money(-netToPfCents)}</span>
+          <span className={`kv__v ${-netToPfCents < 0 ? 'neg' : 'pos'}`}>
+            {money(-netToPfCents)}
+            {shareOfPjIncomeBps !== null && (
+              <span className="muted" style={{ fontWeight: 400 }}> ({bps(-shareOfPjIncomeBps)} da receita da {pjLabel})</span>
+            )}
+          </span>
           <span className="kv__k">= {pjLabel} após o repasse</span>
           <span className={`kv__v ${pjAfterCents < 0 ? 'neg' : 'pos'}`}>{money(pjAfterCents)}</span>
         </div>
@@ -404,7 +446,12 @@ function ReconciliationSlab({
           <span className="kv__k">{pfLabel}, resultado isolado</span>
           <span className="kv__v">{money(pfResultCents)}</span>
           <span className="kv__k">Repasse líquido com a {pjLabel}</span>
-          <span className={`kv__v ${netToPfCents < 0 ? 'neg' : 'pos'}`}>{money(netToPfCents)}</span>
+          <span className={`kv__v ${netToPfCents < 0 ? 'neg' : 'pos'}`}>
+            {money(netToPfCents)}
+            {shareOfPjIncomeBps !== null && (
+              <span className="muted" style={{ fontWeight: 400 }}> ({bps(shareOfPjIncomeBps)} da receita da {pjLabel})</span>
+            )}
+          </span>
           <span className="kv__k">= {pfLabel} após o repasse</span>
           <span className={`kv__v ${pfAfterCents < 0 ? 'neg' : 'pos'}`}>{money(pfAfterCents)}</span>
         </div>
@@ -556,13 +603,13 @@ function DreColumn({
       )}
 
       <div className="table-wrap">
-        <table className="table">
+        <table className="table table--stack-mobile">
           <thead>
             <tr>
-              <th>TAG</th>
-              <th className="table__num" style={{ width: 64 }}>Qtde</th>
-              <th className="table__num" style={{ width: 64 }}>%</th>
-              <th className="table__num" style={{ width: 120 }}>Valor</th>
+              <th scope="col">TAG</th>
+              <th scope="col" className="table__num" style={{ width: 64 }}>Qtde</th>
+              <th scope="col" className="table__num" style={{ width: 64 }}>%</th>
+              <th scope="col" className="table__num" style={{ width: 120 }}>Valor</th>
             </tr>
           </thead>
           <tbody>
@@ -620,18 +667,18 @@ function StatementSection({
             key={`${label}-${line.categoryId ?? 'none'}`}
             className={line.categoryId === null ? 'table__row--warn' : undefined}
           >
-            <td>
-              <span className="row" style={{ gap: 'var(--sp-2)' }}>
+            <td data-label="TAG">
+              <span className="row" style={{ gap: 'var(--sp-2)', minWidth: 0 }}>
                 <span className="swatch" style={{ background: line.color }} />
-                <span className="truncate">{line.name}</span>
+                <span style={{ minWidth: 0 }}>{line.name}</span>
                 {line.categoryId === null && (
                   <Icon name="alert" size={12} className="muted" />
                 )}
               </span>
             </td>
-            <td className="table__num">{line.transactionCount}</td>
-            <td className="table__num">{bps(line.shareBps, 1)}</td>
-            <td className="table__num">{money(line.amountCents)}</td>
+            <td className="table__num" data-label="Qtde">{line.transactionCount}</td>
+            <td className="table__num" data-label="%">{bps(line.shareBps, 1)}</td>
+            <td className="table__num" data-label="Valor">{money(line.amountCents)}</td>
           </tr>
         ))
       )}

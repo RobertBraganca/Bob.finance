@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { currentPeriod, shiftPeriod } from '../lib/period'
@@ -18,6 +18,7 @@ import {
   Bento,
   Button,
   Card,
+  ConfirmDeleteModal,
   EmptyState,
   HeroFigure,
   Icon,
@@ -275,10 +276,14 @@ export function GoalsPage() {
                 <div className="stack stack--loose">
                   {data.caps.map((cap) => (
                     <div key={cap.categoryId} className="stack stack--tight">
-                      <div className="row row--between">
+                      {/* Sem truncate (revisão de responsividade de 26/09/2026): TAG +
+                          valor não cabiam numa linha só num telefone e o nome cortava
+                          ("Aluguel" virava "Al…") — `row--wrap` deixa o valor cair pra
+                          linha de baixo em vez de espremer o nome. */}
+                      <div className="row row--between row--wrap" style={{ rowGap: 'var(--sp-1)' }}>
                         <span className="row" style={{ gap: 'var(--sp-2)', minWidth: 0 }}>
                           <span className="swatch" style={{ background: cap.color }} />
-                          <strong className="truncate" style={{ fontSize: 'var(--text-sm)' }}>
+                          <strong style={{ fontSize: 'var(--text-sm)' }}>
                             {cap.name}
                           </strong>
                           <StatusBadge state={cap.state} />
@@ -416,6 +421,10 @@ function GoalEditor({
   const [cap, setCap] = useState(centsToInput(current.spendCapCents))
   const [savings, setSavings] = useState(bpsToInput(current.savingsRateTargetBps))
 
+  const incomeFieldId = useId()
+  const capFieldId = useId()
+  const savingsFieldId = useId()
+
   const save = useMutation({
     mutationFn: () =>
       api.put(`/goals/${period}`, {
@@ -449,8 +458,9 @@ function GoalEditor({
         <DialogTitle>{`Metas de ${periodLong(period)}`}</DialogTitle>
         <div className="stack">
           <div className="field">
-            <label className="field__label">Meta de receita (R$)</label>
+            <label className="field__label" htmlFor={incomeFieldId}>Meta de receita (R$)</label>
             <Input
+              id={incomeFieldId}
               value={income}
               onChange={(e) => setIncome(e.target.value)}
               placeholder="ex. 15.000,00"
@@ -458,8 +468,9 @@ function GoalEditor({
             />
           </div>
           <div className="field">
-            <label className="field__label">Teto de gastos (R$)</label>
+            <label className="field__label" htmlFor={capFieldId}>Teto de gastos (R$)</label>
             <Input
+              id={capFieldId}
               value={cap}
               onChange={(e) => setCap(e.target.value)}
               placeholder="ex. 9.500,00"
@@ -467,8 +478,9 @@ function GoalEditor({
             />
           </div>
           <div className="field">
-            <label className="field__label">Taxa de poupança-alvo (%)</label>
+            <label className="field__label" htmlFor={savingsFieldId}>Taxa de poupança-alvo (%)</label>
             <Input
+              id={savingsFieldId}
               value={savings}
               onChange={(e) => setSavings(e.target.value)}
               placeholder="ex. 20"
@@ -487,7 +499,7 @@ function GoalEditor({
           <Button icon="refresh" onClick={() => copy.mutate()} disabled={copy.isPending}>
             Copiar do mês anterior
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </DialogFooter>
@@ -509,6 +521,10 @@ function CapEditor({
   const queryClient = useQueryClient()
   const [categoryId, setCategoryId] = useState<number | null>(null)
   const [amount, setAmount] = useState('')
+  const [confirmingCapCategoryId, setConfirmingCapCategoryId] = useState<number | null>(null)
+
+  const categoryFieldId = useId()
+  const capAmountFieldId = useId()
 
   const suggestions = useQuery({
     queryKey: ['cap-suggestions', period],
@@ -535,14 +551,17 @@ function CapEditor({
     onSuccess: () => {
       toast('Teto removido')
       queryClient.invalidateQueries()
+      setConfirmingCapCategoryId(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
   })
 
   const existing = new Set(caps.map((cap) => cap.categoryId))
   const available = (suggestions.data?.suggestions ?? []).filter((s) => !existing.has(s.categoryId))
+  const confirmingCap = caps.find((cap) => cap.categoryId === confirmingCapCategoryId) ?? null
 
   return (
+    <>
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[880px]">
         <DialogTitle>{`Tetos por TAG de ${periodLong(period)}`}</DialogTitle>
@@ -562,7 +581,7 @@ function CapEditor({
                     variant="quiet"
                     size="sm"
                     icon="trash"
-                    onClick={() => removeCap.mutate(cap.categoryId)}
+                    onClick={() => setConfirmingCapCategoryId(cap.categoryId)}
                     title="Remover teto"
                   />
                 </span>
@@ -575,8 +594,9 @@ function CapEditor({
           <span className="label">Adicionar teto</span>
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-end' }}>
             <div className="field" style={{ minWidth: 240, flex: 1 }}>
-              <label className="field__label">TAG</label>
+              <label className="field__label" htmlFor={categoryFieldId}>TAG</label>
               <Select
+                id={categoryFieldId}
                 value={categoryId}
                 placeholder="Escolha"
                 options={(suggestions.data?.suggestions ?? [])
@@ -590,8 +610,9 @@ function CapEditor({
               />
             </div>
             <div className="field" style={{ width: 160 }}>
-              <label className="field__label">Teto (R$)</label>
+              <label className="field__label" htmlFor={capAmountFieldId}>Teto (R$)</label>
               <Input
+                id={capAmountFieldId}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0,00"
@@ -639,5 +660,16 @@ function CapEditor({
       </div>
       </DialogContent>
     </Dialog>
+    {confirmingCap && (
+      <ConfirmDeleteModal
+        title={`Excluir o teto de ${confirmingCap.name}?`}
+        body="Isso não pode ser desfeito."
+        confirmLabel="Excluir teto"
+        pending={removeCap.isPending}
+        onCancel={() => setConfirmingCapCategoryId(null)}
+        onConfirm={() => removeCap.mutate(confirmingCap.categoryId)}
+      />
+    )}
+    </>
   )
 }

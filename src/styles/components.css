@@ -346,6 +346,17 @@
   padding: 0;
 }
 
+/* Girar via `transform`, não width/height (CLS zero) — a duração cai pra
+   0.01ms sozinha sob prefers-reduced-motion pela regra global de base.css. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 0.6s linear infinite;
+}
+
 .btn--slab {
   background: var(--slab-overlay-weak);
   border-color: var(--slab-overlay-strong);
@@ -1100,6 +1111,118 @@
    `overflowY: 'auto'` explícito — não depende mais deste default. */
 .table-wrap {
   overflow-x: auto;
+}
+
+/* ---- Ledger table on phone: rows stack instead of scrolling sideways ---
+ * Revisão de responsividade de 26/09/2026: a tabela de Lançamentos tem 6
+ * colunas de largura fixa somando bem mais que os ~340px úteis de um
+ * telefone — o scroll horizontal ficava sem nenhuma pista visual de que
+ * existia, e a coluna mais importante (Valor) sempre caía fora da
+ * primeira dobra. `.table--stack-mobile` (opt-in, só onde já testado)
+ * empilha cada linha como um mini-cartão abaixo de 768px: cabeçalho
+ * vira rótulo por célula via `data-label`, sem duplicar JSX por
+ * breakpoint. Acima de 768px nada muda — vira a mesma tabela de sempre. */
+@media (max-width: 767px) {
+  .table--stack-mobile thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .table--stack-mobile,
+  .table--stack-mobile tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .table--stack-mobile tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px var(--sp-2);
+    padding: var(--sp-3) 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .table--stack-mobile tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .table--stack-mobile td {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 2px 0;
+    border-bottom: none;
+    flex: 1 1 100%;
+  }
+
+  /* Checkbox (sem rótulo) e ações ficam juntos numa linha de topo, o
+     resto empilha abaixo — a mesma ordem de leitura de um cartão. */
+  .table--stack-mobile td[data-label='__lead'] {
+    flex: 0 0 auto;
+    order: -2;
+  }
+  .table--stack-mobile td[data-label='__trail'] {
+    flex: 1 1 auto;
+    order: -1;
+    justify-content: flex-end;
+  }
+
+  .table--stack-mobile td[data-label]:not([data-label='__lead']):not([data-label='__trail'])::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    min-width: 88px;
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-3);
+  }
+
+  .table--stack-mobile td.table__num {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .table-wrap:has(> .table--stack-mobile) {
+    overflow-x: visible;
+  }
+
+  /* Coluna secundária (ex.: "Qtde", "%") que só existe pra completar o
+     detalhe de desktop — some no telefone pra sobrar largura pra coluna
+     que importa (nome + valor), em vez de forçar rolagem horizontal numa
+     tabela que já tem `colSpan` (não dá pra empilhar como `.table--stack-
+     mobile` faz). */
+  .table__col--secondary {
+    display: none;
+  }
+
+  /* Todo `.popover-panel` (período, filtro de conta, sino de notificações)
+     vazava da tela no telefone: a largura era shrink-to-fit do CONTEÚDO
+     (grade de meses + abas 3m/6m/12m/Ano/Máximo/Personalizado), sem teto
+     nenhum contra a viewport — só o painel do sino tinha esse teto.
+     Reproduzido ao vivo em 375px: o seletor de período cortava "ABR",
+     "AGO" e o botão "Mês atual" na borda direita. */
+  .popover-panel {
+    max-width: calc(100vw - var(--sp-4) * 2);
+  }
+
+  /* `--right` ancora pela borda direita do gatilho — certo num toolbar de
+     desktop largo, onde o sino fica na ponta direita. No mobile o cabeçalho
+     empilha (`.topbar__actions` quebra linha) e o sino vira o PRIMEIRO item
+     da sua própria linha, perto da borda ESQUERDA: ancorar pela direita
+     jogava o painel inteiro (360px) pra fora da tela à esquerda, sobrando
+     só uma tira dos botões "x" no canto esquerdo (reproduzido ao vivo).
+     Ancorar pela esquerda, igual ao popover padrão, é o que casa com onde
+     o gatilho realmente está nesse layout. */
+  .popover-panel--right {
+    left: 0;
+    right: auto;
+  }
 }
 
 /* ---- Collapsible asset-class group card -------------------------- */

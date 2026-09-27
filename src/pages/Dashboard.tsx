@@ -1,8 +1,16 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { useId, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { forwardBoundsFor, useAccounts, useMeta, useRange, type Account, type RangeContextValue } from '../lib/store'
+import {
+  forwardBoundsFor,
+  useAccounts,
+  useMeta,
+  useRange,
+  useUserProfile,
+  type Account,
+  type RangeContextValue,
+} from '../lib/store'
 import { shiftPeriod, singleMonthOf } from '../lib/period'
 import { AccountModal, BalanceCheckModal } from './Settings'
 import { SimulatorModal } from '../components/ui/SimulatorModal'
@@ -15,26 +23,17 @@ import {
   periodLong as fmtPeriodLong,
   date as fmtDate,
   points,
+  signedBps,
 } from '../lib/format'
-import {
-  BENTO_CARD_LABELS,
-  BENTO_SPAN_LABELS,
-  BENTO_SPAN_OPTIONS,
-  DEFAULT_BENTO_LAYOUT,
-  useBentoLayout,
-  type BentoCardId,
-  type BentoSpan,
-} from '../lib/bentoLayout'
 import {
   Bento,
   Button,
   Card,
   CategorySelect,
+  ConfirmDeleteModal,
   Delta,
   EmptyState,
-  HeroFigure,
   Icon,
-  Meter,
   Modal,
   PendingEditScopeModal,
   PendingScopeModal,
@@ -54,7 +53,7 @@ import { IncomeExpenseChart } from '../components/charts/IncomeExpenseChart'
 import { TransactionForm, type TransactionFormValue } from '../components/forms/TransactionForm'
 import { CategoryRing, type Slice } from '../components/charts/CategoryRing'
 import { NetFlowChart } from '../components/charts/NetFlowChart'
-import { AccountFlowSankey, type FlowEdge, type FlowNode, type LooseLeg } from '../components/charts/AccountFlowSankey'
+import { type FlowEdge } from '../components/charts/AccountFlowSankey'
 import { CARD_USAGE_BANDS, DebtServiceGauge } from '../components/charts/DebtCharts'
 import { SpendingPaceChart, type SpendingPacePoint } from '../components/charts/SpendingPaceChart'
 import { AnnualPaceChart, type AnnualPacePoint } from '../components/charts/AnnualPaceChart'
@@ -94,9 +93,7 @@ type DashboardResponse = {
 }
 
 type FlowResponse = {
-  nodes: FlowNode[]
   edges: FlowEdge[]
-  loose: LooseLeg[]
   totals: { internalCents: number; internalCount: number; looseCents: number; looseCount: number; pairedBps: number }
 }
 
@@ -147,33 +144,30 @@ type CardRow = {
   nextDueOn: string
 }
 
-/** Formato de cada card no skeleton do primeiro carregamento — espelha
- * o que `DEFAULT_BENTO_LAYOUT` normalmente desenha ali (linhas de texto
- * pros cards de lista, pares label+valor pras estatísticas, um bloco
- * só pros gráficos), não uma grade de retângulos iguais. */
-const DASHBOARD_SKELETON_VARIANT: Partial<Record<BentoCardId, 'lines' | 'stats' | 'block'>> = {
-  'month-mode': 'stats',
-  'spending-pace': 'block',
-  'spending-heatmap': 'block',
-  hero: 'stats',
-  'income-expense-kpi': 'stats',
-  'income-expense-chart': 'block',
-  'income-by-category': 'block',
-  'expense-by-category': 'block',
-  'net-flow': 'block',
-  'account-flow': 'block',
-}
+/** Formato do skeleton do primeiro carregamento — espelha a forma fixa da
+ * tela real (saudação, duas linhas de dois cards, lista de pendências),
+ * não uma grade de retângulos iguais. */
+const DASHBOARD_SKELETON_CARDS: Array<{ span: 6 | 12; variant: 'lines' | 'stats' | 'block'; height?: number }> = [
+  { span: 12, variant: 'stats', height: 200 },
+  { span: 6, variant: 'block', height: 140 },
+  { span: 6, variant: 'block', height: 140 },
+  { span: 6, variant: 'block', height: 150 },
+  { span: 6, variant: 'block', height: 150 },
+  { span: 12, variant: 'lines', height: 180 },
+]
 
 export function Dashboard() {
   const range = useRange()
   const navigate = useNavigate()
   const meta = useMeta()
   const accountsQuery = useAccounts()
-  const bento = useBentoLayout()
-  const [customizing, setCustomizing] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [balanceCheckAccount, setBalanceCheckAccount] = useState<Account | null>(null)
   const [simulating, setSimulating] = useState(false)
+  // Revisão de UX de 26/09/2026 (Direção A do estudo de densidade): o Bento
+  // arrastável/redimensionável saiu desta tela -- layout fixo, e só este
+  // acordeão único controla o que fica sempre visível vs. atrás de um clique.
+  const [showMore, setShowMore] = useState(false)
 
   const dashboard = useQuery({
     queryKey: ['dashboard', range.from, range.to, range.accountId, range.preset],
@@ -214,12 +208,7 @@ export function Dashboard() {
       <>
         <PageHeader title="Visão geral" actions={<RangeFilter />} />
         <div className="page">
-          <PageSkeleton
-            cards={DEFAULT_BENTO_LAYOUT.filter((c) => c.visible).map((c) => ({
-              span: c.span,
-              variant: DASHBOARD_SKELETON_VARIANT[c.id] ?? 'lines',
-            }))}
-          />
+          <PageSkeleton cards={DASHBOARD_SKELETON_CARDS} />
         </div>
       </>
     )
@@ -247,255 +236,12 @@ export function Dashboard() {
   const useDailyBars = daily.length > 0
   const flowSeries = useDailyBars ? daily : monthly
 
-  const spanOf = (id: BentoCardId): BentoSpan => bento.layout.find((c) => c.id === id)?.span ?? 4
-  const isVisible = (id: BentoCardId): boolean => bento.layout.find((c) => c.id === id)?.visible ?? true
-
-  // Every card as a React element, keyed by id — built once per render, then
-  // laid out (order, span, visibility) purely from `bento.layout` below.
-  // Hidden cards still get built (cheap: just an element, not a mount) so
-  // toggling visibility never has to re-derive anything.
-  const cardsById: Record<BentoCardId, ReactNode> = {
-    hero: (
-      // The one hero figure on this view. Exactly one per page.
-      <Slab span={spanOf('hero')} accent>
-        <HeroFigure
-          label="Resultado do período"
-          value={money(totals.netCents)}
-          delta={deltas.netBps}
-          deltaLabel="vs. período anterior"
-        />
-        <div className="kv" style={{ marginTop: 'var(--sp-2)' }}>
-          <span className="kv__k">Taxa de poupança</span>
-          {/* Sem receita no período, "0,0%" lia como neutro em vez de "não
-              dá pra medir" (achado da auditoria de 07/09/2026) — um
-              período com despesa mas nenhuma entrada é um déficit, não
-              uma taxa de poupança de zero. */}
-          <span className="kv__v">{totals.incomeCents > 0 ? bps(totals.savingsRateBps) : '-'}</span>
-          <span className="kv__k" title="Aportes menos resgates, já que varreduras automáticas RDB entram e saem constantemente e só o líquido significa algo">
-            Investido no período (líquido)
-          </span>
-          <span className="kv__v">{money(totals.investedCents)}</span>
-          <span className="kv__k">Saldo somado das contas</span>
-          <span className="kv__v">{money(balance)}</span>
-        </div>
-      </Slab>
-    ),
-    /* Três KPI lado a lado, não empilhados com filete entre eles: eram
-       três números hero em coluna, o que fazia deste o card mais alto de
-       toda a linha, e a separação vinha de borda em vez de espaço (revisão
-       de design de 01/09/2026). `auto-fit` volta a empilhar sozinho quando
-       o card é estreito demais para três. */
-    'income-expense-kpi': (
-      <Card span={spanOf('income-expense-kpi')}>
-        <div
-          style={{
-            display: 'grid',
-            // 190px, não 150: valor exato ("R$ 11.364,31"), não mais o
-            // `moneyCompact` truncado, precisa de mais coluna pra não
-            // depender só da quebra de `overflow-wrap` (07/09/2026).
-            gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-            gap: 'var(--sp-5)',
-          }}
-        >
-          <StatTile
-            label="Entradas"
-            value={money(totals.incomeCents)}
-            delta={deltas.incomeBps}
-            deltaLabel="vs. anterior"
-            large
-          />
-          <StatTile
-            label="Saídas"
-            value={money(totals.expenseCents)}
-            delta={deltas.expenseBps}
-            deltaLabel="vs. anterior"
-            deltaInvert
-            large
-          />
-          <StatTile
-            label="A receber"
-            value={money(totals.receivableCents)}
-            delta={deltas.receivableBps}
-            deltaLabel="vs. anterior"
-            large
-          />
-        </div>
-      </Card>
-    ),
-    accounts: (
-      <Card
-        span={spanOf('accounts')}
-        title="Contas"
-        subtitle="Saldo derivado dos lançamentos, nunca armazenado"
-        actions={
-          <Link to="/ajustes" className="btn btn--ghost btn--sm">
-            Gerenciar
-          </Link>
-        }
-      >
-        <div className="kv">
-          {(meta.data?.accounts ?? []).map((account) => (
-            <span key={account.id} style={{ display: 'contents' }}>
-              <span className="kv__k truncate">
-                {account.name}
-                <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-                  {' '}
-                  · {account.institution}
-                </span>
-              </span>
-              <span className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
-                <span className={`kv__v ${account.balanceCents < 0 ? 'neg' : ''}`}>{money(account.balanceCents)}</span>
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  icon="scale"
-                  title="Conferir saldo"
-                  onClick={() => {
-                    const full = accountsQuery.data?.accounts.find((a) => a.id === account.id)
-                    if (full) setBalanceCheckAccount(full)
-                  }}
-                />
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  icon="pencil"
-                  title="Editar conta"
-                  onClick={() => {
-                    const full = accountsQuery.data?.accounts.find((a) => a.id === account.id)
-                    if (full) setEditingAccount(full)
-                  }}
-                />
-              </span>
-            </span>
-          ))}
-        </div>
-      </Card>
-    ),
-    'month-mode':
-      range.preset === 'max' ? (
-        <YearModeCard span={spanOf('month-mode')} rangeAnchor={range.anchor} accountId={range.accountId} />
-      ) : (
-        <MonthModeCard span={spanOf('month-mode')} rangeTo={range.to} rangeAnchor={range.anchor} accountId={range.accountId} />
-      ),
-    'spending-pace': <SpendingPaceCard span={spanOf('spending-pace')} range={range} />,
-    'spending-heatmap': <SpendingHeatmapCard span={spanOf('spending-heatmap')} range={range} />,
-    'credit-cards': (
-      <CreditCardsSlab cards={cards.data?.cards ?? []} isError={cards.isError} span={spanOf('credit-cards')} />
-    ),
-    reconciliation: <ReconciliationCard span={spanOf('reconciliation')} />,
-    subscriptions: <SubscriptionsCard span={spanOf('subscriptions')} />,
-    'pending-income': <PendingCard flow="income" title="Receitas pendentes" span={spanOf('pending-income')} />,
-    'pending-expense': <PendingCard flow="expense" title="Despesas pendentes" span={spanOf('pending-expense')} />,
-    'income-expense-chart': (
-      <Card
-        span={spanOf('income-expense-chart')}
-        title="Entradas e saídas"
-        subtitle={useDailyBars ? 'Comparação dia a dia no período selecionado' : 'Comparação mês a mês no período selecionado'}
-      >
-        <IncomeExpenseChart
-          data={flowSeries}
-          surface="paper"
-          height={280}
-          granularity={useDailyBars ? 'day' : 'month'}
-        />
-      </Card>
-    ),
-    'income-by-category': (
-      <Card span={spanOf('income-by-category')} title="Entradas por TAG" subtitle="Agrupado por TAG-mãe">
-        <CategoryRing
-          slices={incomeByCategory}
-          childSlices={incomeByCategoryLeaf}
-          surface="paper"
-          totalLabel="Total de entradas"
-          height={200}
-          paddingAngle={5}
-          cornerRadius={6}
-          onSliceClick={(categoryId) => navigate(`/lancamentos?parentCategoryId=${categoryId}`)}
-        />
-      </Card>
-    ),
-    'expense-by-category': (
-      <Card span={spanOf('expense-by-category')} title="Gastos por TAG" subtitle="Agrupado por TAG-mãe">
-        <CategoryRing
-          slices={byCategory}
-          childSlices={byCategoryLeaf}
-          surface="paper"
-          totalLabel="Total de saídas"
-          height={200}
-          paddingAngle={5}
-          cornerRadius={6}
-          onSliceClick={(categoryId) => navigate(`/lancamentos?parentCategoryId=${categoryId}`)}
-        />
-      </Card>
-    ),
-    'net-flow': (
-      <Card span={spanOf('net-flow')} title="Resultado acumulado" subtitle="Quanto sobrou, somado mês a mês">
-        <NetFlowChart data={netFlow} surface="paper" height={200} />
-      </Card>
-    ),
-    'top-merchants': (
-      <Card span={spanOf('top-merchants')} title="Onde o dinheiro mais foi" subtitle="Maiores saídas do período">
-        {dashboard.isError ? (
-          <EmptyState
-            icon="alert"
-            title="Falha ao carregar"
-            body="Não foi possível carregar as maiores saídas agora. Tente novamente em instantes."
-          />
-        ) : topMerchants.length === 0 ? (
-          <EmptyState icon="search" title="Nada a listar" body="Sem saídas registradas no período." />
-        ) : (
-          <ul className="ranked">
-            {topMerchants.map((merchant) => (
-              <li key={merchant.signature} className="ranked__item" style={{ gridTemplateColumns: 'minmax(0,1fr) auto auto' }}>
-                <span className="truncate">{merchant.signature}</span>
-                <span className="ranked__share">{merchant.count}x</span>
-                <span className="ranked__value">{money(merchant.amount)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-    ),
-    'account-flow': (
-      <Card
-        span={spanOf('account-flow')}
-        title="Fluxo entre contas"
-        subtitle="Transferências entre suas próprias contas: cada perna do banco é pareada com a outra ponta para não contar em dobro"
-      >
-        {flows.data ? (
-          <AccountFlowSankey
-            nodes={flows.data.nodes}
-            edges={flows.data.edges}
-            loose={flows.data.loose}
-            totals={flows.data.totals}
-            surface="paper"
-            height={320}
-          />
-        ) : (
-          <SkeletonBlock height={320} />
-        )}
-      </Card>
-    ),
-    'uncategorized-banner': totals.uncategorizedCount > 0 ? (
-      <Card span={spanOf('uncategorized-banner')} muted>
-        <div className="row row--between row--wrap">
-          <span className="row">
-            <Icon name="alert" size={16} />
-            <span>
-              <strong className="tabular">{totals.uncategorizedCount}</strong> lançamentos sem
-              TAG no período, e os gráficos os contam pelo sinal, o que pode distorcer a
-              quebra por TAG.
-            </span>
-          </span>
-          <Link to="/lancamentos?uncategorized=1">
-            <Button variant="primary" size="sm" icon="tags">
-              Categorizar agora
-            </Button>
-          </Link>
-        </div>
-      </Card>
-    ) : null,
-  }
+  // Ordem fixa (revisão de UX de 26/09/2026): saudação -> ritmo do mês lado
+  // a lado com o mapa de calor -> composição por TAG -> pendências
+  // unificadas -> tudo o mais atrás do acordeão "Mostrar mais". `balance`
+  // (saldo somado das contas) e as StatTiles de Entradas/Saídas/A receber
+  // saíram daqui: o primeiro número já está narrado na saudação, o segundo
+  // é redundante com ela, e "A receber" já aparece na lista de pendências.
 
   return (
     <>
@@ -508,22 +254,210 @@ export function Dashboard() {
             <Button variant="ghost" size="sm" icon="sparkle" onClick={() => setSimulating(true)}>
               Simular
             </Button>
-            <Button variant="ghost" size="sm" icon="settings" onClick={() => setCustomizing(true)}>
-              Personalizar
-            </Button>
           </div>
         }
       />
 
-      <div className="page" style={{ opacity: dashboard.isFetching ? 0.72 : 1, transition: 'opacity 120ms' }}>
+      <div
+        className="page stack stack--loose"
+        style={{ opacity: dashboard.isFetching ? 0.72 : 1, transition: 'opacity 120ms' }}
+      >
+        <GreetingHero range={range} netCents={totals.netCents} netDeltaBps={deltas.netBps} />
+
+        <PjTransferNote range={range} />
+
+        {totals.uncategorizedCount > 0 && (
+          <Card muted>
+            <div className="row row--between row--wrap">
+              <span className="row">
+                <Icon name="alert" size={16} />
+                <span>
+                  <strong className="tabular">{totals.uncategorizedCount}</strong> lançamentos sem TAG no
+                  período, e os gráficos os contam pelo sinal, o que pode distorcer a quebra por TAG.
+                </span>
+              </span>
+              <Link to="/lancamentos?uncategorized=1">
+                <Button variant="primary" size="sm" icon="tags">
+                  Categorizar agora
+                </Button>
+              </Link>
+            </div>
+          </Card>
+        )}
+
         <Bento>
-          {bento.layout
-            .filter((c) => isVisible(c.id))
-            .map((c) => <Fragment key={c.id}>{cardsById[c.id]}</Fragment>)}
+          <SpendingPaceCard span={6} range={range} />
+          <SpendingHeatmapCard span={6} range={range} />
         </Bento>
+
+        <Bento>
+          <Card span={6} title="Entradas por TAG" subtitle="Agrupado por TAG-mãe">
+            <CategoryRing
+              slices={incomeByCategory}
+              childSlices={incomeByCategoryLeaf}
+              surface="paper"
+              totalLabel="Total de entradas"
+              height={200}
+              paddingAngle={5}
+              cornerRadius={6}
+              onSliceClick={(categoryId) => navigate(`/lancamentos?parentCategoryId=${categoryId}`)}
+            />
+          </Card>
+          <Card span={6} title="Gastos por TAG" subtitle="Agrupado por TAG-mãe">
+            <CategoryRing
+              slices={byCategory}
+              childSlices={byCategoryLeaf}
+              surface="paper"
+              totalLabel="Total de saídas"
+              height={200}
+              paddingAngle={5}
+              cornerRadius={6}
+              onSliceClick={(categoryId) => navigate(`/lancamentos?parentCategoryId=${categoryId}`)}
+            />
+          </Card>
+        </Bento>
+
+        <Card title="Pendências e sugestões">
+          <Bento>
+            <div className="col-6">
+              <ReconciliationSection />
+            </div>
+            <div className="col-6">
+              <SubscriptionsSection />
+            </div>
+            <div className="col-6">
+              <PendingSection flow="income" title="Receitas pendentes" />
+            </div>
+            <div className="col-6">
+              <PendingSection flow="expense" title="Despesas pendentes" />
+            </div>
+          </Bento>
+        </Card>
+
+        <button
+          type="button"
+          className="btn btn--ghost"
+          style={{ width: '100%', justifyContent: 'center', gap: 'var(--sp-2)' }}
+          aria-expanded={showMore}
+          onClick={() => setShowMore((v) => !v)}
+        >
+          {showMore ? 'Mostrar menos' : 'Mostrar mais'}
+          <span
+            style={{
+              display: 'inline-flex',
+              transition: 'transform 150ms',
+              transform: showMore ? 'rotate(180deg)' : undefined,
+            }}
+          >
+            <Icon name="chevronDown" size={13} />
+          </span>
+        </button>
+
+        {showMore && (
+          <div className="stack stack--loose">
+            <Bento>
+              <Card
+                span={6}
+                title="Contas"
+                subtitle="Saldo derivado dos lançamentos, nunca armazenado"
+                actions={
+                  <Link to="/ajustes" className="btn btn--ghost btn--sm">
+                    Gerenciar
+                  </Link>
+                }
+              >
+                <div className="kv">
+                  {(meta.data?.accounts ?? []).map((account) => (
+                    <span key={account.id} style={{ display: 'contents' }}>
+                      <span className="kv__k truncate">
+                        {account.name}
+                        <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                          {' '}
+                          · {account.institution}
+                        </span>
+                      </span>
+                      <span className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
+                        <span className={`kv__v ${account.balanceCents < 0 ? 'neg' : ''}`}>
+                          {money(account.balanceCents)}
+                        </span>
+                        <Button
+                          variant="quiet"
+                          size="sm"
+                          icon="scale"
+                          title="Conferir saldo"
+                          onClick={() => {
+                            const full = accountsQuery.data?.accounts.find((a) => a.id === account.id)
+                            if (full) setBalanceCheckAccount(full)
+                          }}
+                        />
+                        <Button
+                          variant="quiet"
+                          size="sm"
+                          icon="pencil"
+                          title="Editar conta"
+                          onClick={() => {
+                            const full = accountsQuery.data?.accounts.find((a) => a.id === account.id)
+                            if (full) setEditingAccount(full)
+                          }}
+                        />
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </Card>
+              <CreditCardsSlab span={6} cards={cards.data?.cards ?? []} isError={cards.isError} />
+            </Bento>
+
+            <Bento>
+              <Card span={6} title="Resultado acumulado" subtitle="Quanto sobrou, somado mês a mês">
+                <NetFlowChart data={netFlow} surface="paper" height={200} />
+              </Card>
+              <Card span={6} title="Onde o dinheiro mais foi" subtitle="Maiores saídas do período">
+                {dashboard.isError ? (
+                  <EmptyState
+                    icon="alert"
+                    title="Falha ao carregar"
+                    body="Não foi possível carregar as maiores saídas agora. Tente novamente em instantes."
+                  />
+                ) : topMerchants.length === 0 ? (
+                  <EmptyState icon="search" title="Nada a listar" body="Sem saídas registradas no período." />
+                ) : (
+                  <ul className="ranked">
+                    {topMerchants.map((merchant) => (
+                      <li
+                        key={merchant.signature}
+                        className="ranked__item"
+                        style={{ gridTemplateColumns: 'minmax(0,1fr) auto auto' }}
+                      >
+                        <span className="truncate">{merchant.signature}</span>
+                        <span className="ranked__share">{merchant.count}x</span>
+                        <span className="ranked__value">{money(merchant.amount)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            </Bento>
+
+            <Card
+              title="Entradas e saídas"
+              subtitle={
+                useDailyBars ? 'Comparação dia a dia no período selecionado' : 'Comparação mês a mês no período selecionado'
+              }
+            >
+              <IncomeExpenseChart
+                data={flowSeries}
+                surface="paper"
+                height={280}
+                granularity={useDailyBars ? 'day' : 'month'}
+              />
+            </Card>
+
+            <AccountFlowSimple edges={flows.data?.edges} totals={flows.data?.totals} isLoading={!flows.data} />
+          </div>
+        )}
       </div>
 
-      {customizing && <BentoSettingsModal bento={bento} onClose={() => setCustomizing(false)} />}
       {editingAccount && <AccountModal account={editingAccount} onClose={() => setEditingAccount(null)} />}
       {balanceCheckAccount && (
         <BalanceCheckModal account={balanceCheckAccount} onClose={() => setBalanceCheckAccount(null)} />
@@ -533,156 +467,6 @@ export function Dashboard() {
   )
 }
 
-/**
- * Which cards show, how wide, in what order — all local to this browser
- * (see `lib/bentoLayout.ts`). Reordering is native HTML5 drag-and-drop off
- * a dedicated handle (no drag library — `draggable` + the browser's own
- * drag events), with the same up/down step still one click away: a mouse-
- * only reorder gesture would otherwise regress the keyboard/screen-reader
- * access the old "posição" dropdown gave for free.
- */
-function BentoSettingsModal({
-  bento,
-  onClose,
-}: {
-  bento: ReturnType<typeof useBentoLayout>
-  onClose: () => void
-}) {
-  const [draggedId, setDraggedId] = useState<BentoCardId | null>(null)
-  const [dragOverId, setDragOverId] = useState<BentoCardId | null>(null)
-
-  const dropOn = (targetId: BentoCardId) => {
-    if (draggedId && draggedId !== targetId) {
-      const targetIndex = bento.layout.findIndex((c) => c.id === targetId)
-      bento.moveTo(draggedId, targetIndex)
-    }
-    setDraggedId(null)
-    setDragOverId(null)
-  }
-
-  return (
-    <Modal
-      title="Personalizar a visão geral"
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="quiet" onClick={bento.reset}>
-            Restaurar padrão
-          </Button>
-          <Button variant="primary" icon="check" onClick={onClose}>
-            Concluído
-          </Button>
-        </>
-      }
-    >
-      <p className="chart__note" style={{ marginBottom: 'var(--sp-3)' }}>
-        Escolha quais cards aparecem, o quanto cada um ocupa da largura (de 3 a 12, numa grade de
-        12 colunas) e arraste pelo ícone <Icon name="grip" size={11} strokeWidth={3} /> para reordenar.
-        Vale só neste navegador.
-      </p>
-      <div className="stack stack--tight">
-        {bento.layout.map((card, index) => (
-          <div
-            key={card.id}
-            onDragOver={(e) => {
-              if (!draggedId) return
-              e.preventDefault()
-              e.dataTransfer.dropEffect = 'move'
-              if (dragOverId !== card.id) setDragOverId(card.id)
-            }}
-            onDrop={(e) => {
-              e.preventDefault()
-              dropOn(card.id)
-            }}
-            className="row row--between row--wrap"
-            style={{
-              gap: 'var(--sp-3)',
-              padding: 'var(--sp-3)',
-              borderRadius: 'var(--r-sm)',
-              background: 'var(--surface-muted)',
-              opacity: card.visible ? (draggedId === card.id ? 0.4 : 1) : draggedId === card.id ? 0.4 : 0.55,
-              boxShadow: dragOverId === card.id && draggedId !== card.id ? 'inset 0 2px 0 var(--brand)' : 'none',
-              transition: 'box-shadow 100ms',
-            }}
-          >
-            <div className="row" style={{ gap: 'var(--sp-2)', flex: 1, minWidth: 180 }}>
-              <span
-                draggable
-                onDragStart={(e) => {
-                  setDraggedId(card.id)
-                  e.dataTransfer.effectAllowed = 'move'
-                }}
-                onDragEnd={() => {
-                  setDraggedId(null)
-                  setDragOverId(null)
-                }}
-                title="Arrastar para reordenar"
-                aria-hidden="true"
-                style={{ display: 'flex', cursor: 'grab', color: 'var(--ink-3)', touchAction: 'none' }}
-              >
-                <Icon name="grip" size={14} strokeWidth={2.6} />
-              </span>
-              <div className="row" style={{ gap: 1 }}>
-                <button
-                  type="button"
-                  className="btn btn--quiet btn--sm"
-                  style={{ width: 22, minWidth: 22, padding: 0 }}
-                  disabled={index === 0}
-                  title="Mover para cima"
-                  onClick={() => bento.move(card.id, -1)}
-                >
-                  <span style={{ display: 'inline-flex', transform: 'rotate(-90deg)' }}>
-                    <Icon name="chevronRight" size={13} />
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--quiet btn--sm"
-                  style={{ width: 22, minWidth: 22, padding: 0 }}
-                  disabled={index === bento.layout.length - 1}
-                  title="Mover para baixo"
-                  onClick={() => bento.move(card.id, 1)}
-                >
-                  <span style={{ display: 'inline-flex', transform: 'rotate(90deg)' }}>
-                    <Icon name="chevronRight" size={13} />
-                  </span>
-                </button>
-              </div>
-              <label className="row" style={{ gap: 'var(--sp-2)' }}>
-                <input
-                  type="checkbox"
-                  checked={card.visible}
-                  onChange={(e) => bento.setVisible(card.id, e.target.checked)}
-                />
-                <span className="truncate">{BENTO_CARD_LABELS[card.id]}</span>
-              </label>
-            </div>
-
-            <div className="field" style={{ minWidth: 110 }}>
-              <label className="field__label">Largura</label>
-              <Select
-                value={card.span}
-                options={BENTO_SPAN_OPTIONS.map((span) => ({
-                  value: span,
-                  label: BENTO_SPAN_LABELS[span] ?? `${span}/12`,
-                }))}
-                onChange={(span) => bento.setSpan(card.id, (span ?? card.span) as BentoSpan)}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    </Modal>
-  )
-}
-
-/**
- * Same ink-card family as every other KPI slab on this page (Reserva,
- * Receitas/Despesas pendentes) instead of the lone paper table it used to
- * be. One page at a time — the consolidated total across every card first,
- * then one page per card — because "limite total" and "limite disponível"
- * don't mean anything summed across cards with different due dates.
- */
 /* ================================================================== *
  * "Modo mês"
  *
@@ -706,148 +490,97 @@ type AvailableLite = {
 
 type RadarLite = { rules: Array<{ key: string; label: string; outsideRange: boolean }> }
 
-type MonthLine = {
-  key: string
-  label: string
-  realizedCents: number
-  /** null quando o usuário não configurou meta para esta linha */
-  targetCents: number | null
-  /** true quando passar da meta é o objetivo (receita, investimento), false quando é o limite (gasto) */
-  higherIsBetter: boolean
-  /** verde/amarelo/vermelho — o mesmo veredito que o servidor já calcula para Metas do mês e Motor financeiro, nunca um segundo limite inventado aqui */
-  state: MeterState
+function greetingWord(displayName: string | null | undefined): string {
+  const hour = new Date().getHours()
+  const word = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite'
+  return displayName ? `${word}, ${displayName}` : word
 }
 
-function MonthModeCard({
-  span,
-  rangeTo,
-  rangeAnchor,
-  accountId,
+type Destination = { targetCents: number | null; realizedCents: number; state: MeterState }
+const NO_TARGET_DESTINATION: Destination = { targetCents: null, realizedCents: 0, state: 'no_target' }
+const DESTINATION_LABEL: Record<'investment' | 'debt' | 'reserve', string> = {
+  investment: 'Investimento',
+  debt: 'Dívida',
+  reserve: 'Reserva',
+}
+
+/**
+ * Substitui o antigo par "Modo mês"/"Modo ano": em vez de uma grade de
+ * tiles separada da saudação, a receita/gasto/resultado do período viram
+ * prosa dentro da própria saudação, e investimento/dívida/reserva encolhem
+ * para uma linha compacta abaixo — revisão de UX de 26/09/2026 (o estudo de
+ * densidade concluiu que o "Modo mês" duplicava, em outro formato, números
+ * que a saudação já ia contar). Mesmos dados, mesmos vereditos do Radar de
+ * risco: nada recalculado aqui, só reapresentado.
+ */
+function GreetingHero({
+  range,
+  netCents,
+  netDeltaBps,
 }: {
-  span: BentoSpan
-  rangeTo: string
-  rangeAnchor: string
-  accountId: number | null
+  range: RangeSubset
+  netCents: number
+  netDeltaBps: number | null
 }) {
-  // Segue o seletor de período global, sempre — nunca deriva nem substitui
-  // o próprio mês. Uma versão anterior recuava um mês sempre que o fim do
-  // período selecionado caía no mês corrente, para nunca comparar uma
-  // meta contra um mês ainda incompleto (mesma regra de
-  // "mês corrente nunca é o padrão" de specs/debt). Isso quebrava o
-  // propósito do próprio card: com a visão padrão do Painel (6 meses,
-  // terminando hoje), "Modo mês" sempre mostrava o mês ANTERIOR ao atual,
-  // silenciosamente — confirmado como bug num teste de uso real (o card
-  // mostrava julho com o app já em agosto). "Mês corrente sempre mostra
-  // progresso, nunca um veredito prematuro" (specs/monthly-goals) é a
-  // regra certa aqui: mostra o mês corrente como está, em andamento, em
-  // vez de trocá-lo por outro nos bastidores.
-  const currentPeriod = rangeAnchor.slice(0, 7)
-  const period = rangeTo.slice(0, 7)
-  const isCurrentPeriod = period === currentPeriod
+  const isYear = range.preset === 'max'
+  const period = range.to.slice(0, 7)
+  const year = range.anchor.slice(0, 4)
+  const currentPeriod = range.anchor.slice(0, 7)
+  const profile = useUserProfile()
 
-  const goals = useQuery({
-    queryKey: ['month-mode-goals', period, accountId],
-    queryFn: () => api.get<PeriodProgressLite>(`/goals/${period}`, { accountId: accountId ?? undefined }),
-    enabled: period !== null,
+  const monthGoals = useQuery({
+    queryKey: ['month-mode-goals', period, range.accountId],
+    queryFn: () => api.get<PeriodProgressLite>(`/goals/${period}`, { accountId: range.accountId ?? undefined }),
+    enabled: !isYear,
   })
-
-  // Traz, num payload só, meta e realizado do mês para investimento,
-  // dívida e reserva — os três já compostos por `specs/motor-financeiro`.
-  // Sem `accountId`: `/financial-engine/available` não aceita esse filtro
-  // hoje (achado da auditoria de 07/09/2026) — as outras duas chamadas
-  // deste card já respeitam a conta selecionada, esta continua olhando
-  // todas as contas até o Motor financeiro ganhar o mesmo filtro.
-  const available = useQuery({
+  const monthAvailable = useQuery({
     queryKey: ['month-mode-available', period],
     queryFn: () => api.get<AvailableLite>('/financial-engine/available', { period }),
-    enabled: period !== null,
+    enabled: !isYear,
   })
-
+  const yearGoals = useQuery({
+    queryKey: ['year-mode-goals', year, range.accountId],
+    queryFn: () => api.get<YearProgressLite>(`/goals-year/${year}`, { accountId: range.accountId ?? undefined }),
+    enabled: isYear,
+  })
+  const yearAvailable = useQuery({
+    queryKey: ['year-mode-available', year],
+    queryFn: () => api.get<YearDestinationsLite>('/financial-engine/available-year', { year }),
+    enabled: isYear,
+  })
   const radar = useQuery({
-    queryKey: ['financial-health-radar', period, accountId],
-    queryFn: () => api.get<RadarLite>('/financial-health/risk-radar', { period, accountId: accountId ?? undefined }),
-    enabled: period !== null,
+    queryKey: ['financial-health-radar', isYear ? currentPeriod : period, range.accountId],
+    queryFn: () =>
+      api.get<RadarLite>('/financial-health/risk-radar', {
+        period: isYear ? currentPeriod : period,
+        accountId: range.accountId ?? undefined,
+      }),
   })
 
-  if (goals.isError || available.isError) {
-    return (
-      <Card span={span} title="Modo mês">
-        <EmptyState
-          icon="alert"
-          title="Falha ao carregar"
-          body="Não foi possível carregar os dados do mês agora. Tente novamente em instantes."
-        />
-      </Card>
-    )
+  const isError = isYear ? yearGoals.isError || yearAvailable.isError : monthGoals.isError || monthAvailable.isError
+  const goalsData = isYear ? yearGoals.data : monthGoals.data
+  const hasAvailable = isYear ? !!yearAvailable.data : !!monthAvailable.data
+  const isLoading = !goalsData || !hasAvailable
+
+  const destino = (key: 'investment' | 'debt' | 'reserve'): Destination => {
+    if (isYear) return yearAvailable.data?.[key] ?? NO_TARGET_DESTINATION
+    return monthAvailable.data?.destinations.find((d) => d.key === key) ?? NO_TARGET_DESTINATION
   }
 
-  if (!goals.data || !available.data) {
-    return (
-      <Card span={span} title="Modo mês">
-        <EmptyState title="Compondo o mês…" />
-      </Card>
-    )
-  }
-
-  const destino = (key: string) => available.data!.destinations.find((d) => d.key === key)
-
-  const lines: MonthLine[] = [
-    {
-      key: 'income',
-      label: 'Receita',
-      realizedCents: goals.data.actual.incomeCents,
-      targetCents: goals.data.goal.incomeTargetCents,
-      higherIsBetter: true,
-      state: goals.data.progress.income.state,
-    },
-    {
-      key: 'spend',
-      label: 'Gasto',
-      realizedCents: goals.data.actual.expenseCents,
-      targetCents: goals.data.goal.spendCapCents,
-      higherIsBetter: false,
-      state: goals.data.progress.spend.state,
-    },
-    {
-      key: 'investment',
-      label: 'Investimento',
-      realizedCents: destino('investment')?.realizedCents ?? 0,
-      targetCents: destino('investment')?.targetCents ?? null,
-      higherIsBetter: true,
-      state: destino('investment')?.state ?? 'no_target',
-    },
-    {
-      key: 'debt',
-      label: 'Dívida',
-      realizedCents: destino('debt')?.realizedCents ?? 0,
-      targetCents: destino('debt')?.targetCents ?? null,
-      higherIsBetter: true,
-      state: destino('debt')?.state ?? 'no_target',
-    },
-    {
-      key: 'reserve',
-      label: 'Reserva',
-      realizedCents: destino('reserve')?.realizedCents ?? 0,
-      targetCents: destino('reserve')?.targetCents ?? null,
-      higherIsBetter: true,
-      state: destino('reserve')?.state ?? 'no_target',
-    },
-  ]
-
-  /*
-   * "Atenção" quando ao menos uma regra do Radar está fora da faixa. O
-   * limite é o do Radar, não um inventado aqui: dois limites para a mesma
-   * decisão divergiriam no primeiro ajuste que o usuário fizesse.
-   */
   const foraDaFaixa = (radar.data?.rules ?? []).filter((r) => r.outsideRange)
   const atencao = foraDaFaixa.length > 0
   const semRadar = !radar.data
 
+  const incomeCents = goalsData?.actual.incomeCents ?? 0
+  const expenseCents = goalsData?.actual.expenseCents ?? 0
+  const incomeTargetCents = goalsData?.goal.incomeTargetCents ?? null
+  const spendCapCents = goalsData?.goal.spendCapCents ?? null
+  const periodLabel = isYear ? year : fmtPeriodLong(period)
+
   return (
-    <Card
-      span={span}
-      title="Modo mês"
-      subtitle={period ? `${fmtPeriodLong(period)}${isCurrentPeriod ? ' · em andamento' : ''}` : undefined}
+    <Slab
+      accent
+      title={`${greetingWord(profile.data?.profile.displayName)}.`}
       actions={
         semRadar ? undefined : (
           <span className={`badge ${atencao ? 'badge--warning' : 'badge--good'}`}>
@@ -857,29 +590,117 @@ function MonthModeCard({
         )
       }
     >
-      {/* São 5 linhas fixas, e 5 não divide 12: num grid de 12 colunas elas
-          ocupavam 10 e deixavam 2 permanentemente vazias à direita. Um grid
-          próprio de faixa distribui as 5 igualmente e quebra sozinho quando
-          não cabem (auditoria de layout de 01/09/2026). */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-          gap: 'var(--sp-4)',
-        }}
-      >
-        {lines.map((line) => (
-          <div key={line.key} style={{ minWidth: 0 }}>
-            <MonthLineTile line={line} />
+      {isLoading ? (
+        <EmptyState title="Compondo o período…" />
+      ) : isError ? (
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar"
+          body="Não foi possível carregar os dados do período agora. Tente novamente em instantes."
+        />
+      ) : (
+        <>
+          <p style={{ margin: 0, maxWidth: '62ch', lineHeight: 1.6 }}>
+            {isYear ? `Em ${periodLabel}, sua receita está em ` : `Neste período (${periodLabel}), sua receita está em `}
+            <strong>{money(incomeCents)}</strong>
+            {incomeTargetCents != null && (
+              <>, {incomeCents >= incomeTargetCents ? 'acima' : 'abaixo'} da meta de {money(incomeTargetCents)}</>
+            )}
+            . Os gastos somam{' '}
+            <strong style={spendCapCents != null && expenseCents > spendCapCents ? { color: 'var(--brand-yellow)' } : undefined}>
+              {money(expenseCents)}
+            </strong>
+            {spendCapCents != null && <>, de um teto de {money(spendCapCents)}</>}. Resultado do período:{' '}
+            <strong>{money(netCents)}</strong>
+            {netDeltaBps != null && <> ({signedBps(netDeltaBps)} vs. período anterior)</>}.
+          </p>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+              gap: 'var(--sp-4)',
+              marginTop: 'var(--sp-3)',
+            }}
+          >
+            {(['investment', 'debt', 'reserve'] as const).map((key) => {
+              const d = destino(key)
+              return (
+                <div key={key} className="stack stack--tight" style={{ minWidth: 0 }}>
+                  <span className="stat__label">{DESTINATION_LABEL[key]}</span>
+                  <span className="tabular" style={{ fontWeight: 600 }}>
+                    {money(d.realizedCents)}
+                    {d.targetCents != null && (
+                      <span className="muted" style={{ fontWeight: 400 }}> / {money(d.targetCents)}</span>
+                    )}
+                  </span>
+                </div>
+              )
+            })}
           </div>
-        ))}
-      </div>
-      {atencao && (
-        <p className="chart__note">
-          {foraDaFaixa.length === 1 ? 'Um indicador está' : `${foraDaFaixa.length} indicadores estão`} fora
-          da faixa configurada no Radar de risco: {foraDaFaixa.map((r) => r.label).join(', ')}.
-        </p>
+          {atencao && (
+            <p className="chart__note">
+              {foraDaFaixa.length === 1 ? 'Um indicador está' : `${foraDaFaixa.length} indicadores estão`} fora da
+              faixa configurada no Radar de risco: {foraDaFaixa.map((r) => r.label).join(', ')}.
+            </p>
+          )}
+        </>
       )}
+    </Slab>
+  )
+}
+
+type FinancialEngineSettingsLite = { pjAccountId: number | null; pfAccountId: number | null }
+
+/**
+ * Pedido de 26/09/2026: uma frase no Painel sobre quanto da conta PJ foi
+ * repassado para a PF, mesmo cálculo que a DRE já mostra (Dre.tsx,
+ * `ReconciliationSlab`, "repasse em % da receita"). Só aparece quando as
+ * duas contas estão configuradas no Motor financeiro E houve de fato um
+ * repasse PJ→PF no período — sem isso, "0%" não diria nada de útil.
+ */
+function PjTransferNote({ range }: { range: RangeSubset }) {
+  const engineSettings = useQuery({
+    queryKey: ['financial-engine-settings'],
+    queryFn: () => api.get<{ settings: FinancialEngineSettingsLite }>('/financial-engine/settings'),
+  })
+  const pjAccountId = engineSettings.data?.settings.pjAccountId ?? null
+  const pfAccountId = engineSettings.data?.settings.pfAccountId ?? null
+
+  const pjTotals = useQuery({
+    queryKey: ['dashboard', range.from, range.to, pjAccountId],
+    queryFn: () =>
+      api.get<{ totals: { incomeCents: number } }>('/dashboard', {
+        from: range.from,
+        to: range.to,
+        accountId: pjAccountId ?? undefined,
+      }),
+    enabled: pjAccountId != null,
+  })
+  // Mesma queryKey de `flows` na Dashboard() e no Dre.tsx — o React Query
+  // serve do cache já buscado por eles, nunca uma requisição extra.
+  const flows = useQuery({
+    queryKey: ['flows', range.from, range.to],
+    queryFn: () => api.get<{ edges: FlowEdge[] }>('/analytics/flows', { from: range.from, to: range.to }),
+  })
+
+  if (!pjAccountId || !pfAccountId) return null
+  if (!pjTotals.data || !flows.data) return null
+
+  const pjToPfCents = flows.data.edges.find((e) => e.fromAccountId === pjAccountId && e.toAccountId === pfAccountId)?.amountCents ?? 0
+  const pjIncomeCents = pjTotals.data.totals.incomeCents
+  if (pjIncomeCents <= 0 || pjToPfCents <= 0) return null
+
+  const shareBps = Math.round((pjToPfCents / pjIncomeCents) * 10_000)
+
+  return (
+    <Card muted>
+      <div className="row" style={{ gap: 'var(--sp-2)' }}>
+        <Icon name="info" size={16} />
+        <span>
+          Sua conta PJ transferiu <strong className="tabular">{bps(shareBps)}</strong> da receita do período (
+          {money(pjToPfCents)}) para a conta PF.
+        </span>
+      </div>
     </Card>
   )
 }
@@ -896,146 +717,6 @@ type YearDestinationsLite = {
   reserve: { targetCents: number; realizedCents: number; state: MeterState }
 }
 
-/**
- * Pedido em 07/09/2026: "Modo mês" vira "Modo ano" quando o seletor de
- * período do Painel está em "Máximo" — mesmas 5 linhas, mesmos vereditos
- * (nunca recalculados aqui), só a fonte muda pra `/goals-year` e
- * `/financial-engine/available-year` (specs/dashboard). Radar de risco
- * continua olhando só o mês corrente: é um fato de "agora" (limite de
- * cartão comprometido, desvio de carteira), não algo que um ano inteiro
- * mudaria — mesmo motivo de "Reserva" não somar doze meses de meta.
- */
-function YearModeCard({
-  span,
-  rangeAnchor,
-  accountId,
-}: {
-  span: BentoSpan
-  rangeAnchor: string
-  accountId: number | null
-}) {
-  const year = rangeAnchor.slice(0, 4)
-  const currentPeriod = rangeAnchor.slice(0, 7)
-
-  const goals = useQuery({
-    queryKey: ['year-mode-goals', year, accountId],
-    queryFn: () => api.get<YearProgressLite>(`/goals-year/${year}`, { accountId: accountId ?? undefined }),
-  })
-
-  const available = useQuery({
-    queryKey: ['year-mode-available', year],
-    queryFn: () => api.get<YearDestinationsLite>('/financial-engine/available-year', { year }),
-  })
-
-  const radar = useQuery({
-    queryKey: ['financial-health-radar', currentPeriod, accountId],
-    queryFn: () => api.get<RadarLite>('/financial-health/risk-radar', { period: currentPeriod, accountId: accountId ?? undefined }),
-  })
-
-  if (goals.isError || available.isError) {
-    return (
-      <Card span={span} title="Modo ano">
-        <EmptyState
-          icon="alert"
-          title="Falha ao carregar"
-          body="Não foi possível carregar os dados do ano agora. Tente novamente em instantes."
-        />
-      </Card>
-    )
-  }
-
-  if (!goals.data || !available.data) {
-    return (
-      <Card span={span} title="Modo ano">
-        <EmptyState title="Compondo o ano…" />
-      </Card>
-    )
-  }
-
-  const lines: MonthLine[] = [
-    {
-      key: 'income',
-      label: 'Receita',
-      realizedCents: goals.data.actual.incomeCents,
-      targetCents: goals.data.goal.incomeTargetCents,
-      higherIsBetter: true,
-      state: goals.data.progress.income.state,
-    },
-    {
-      key: 'spend',
-      label: 'Gasto',
-      realizedCents: goals.data.actual.expenseCents,
-      targetCents: goals.data.goal.spendCapCents,
-      higherIsBetter: false,
-      state: goals.data.progress.spend.state,
-    },
-    {
-      key: 'investment',
-      label: 'Investimento',
-      realizedCents: available.data.investment.realizedCents,
-      targetCents: available.data.investment.targetCents,
-      higherIsBetter: true,
-      state: available.data.investment.state,
-    },
-    {
-      key: 'debt',
-      label: 'Dívida',
-      realizedCents: available.data.debt.realizedCents,
-      targetCents: available.data.debt.targetCents,
-      higherIsBetter: true,
-      state: available.data.debt.state,
-    },
-    {
-      key: 'reserve',
-      label: 'Reserva',
-      realizedCents: available.data.reserve.realizedCents,
-      targetCents: available.data.reserve.targetCents,
-      higherIsBetter: true,
-      state: available.data.reserve.state,
-    },
-  ]
-
-  const foraDaFaixa = (radar.data?.rules ?? []).filter((r) => r.outsideRange)
-  const atencao = foraDaFaixa.length > 0
-  const semRadar = !radar.data
-
-  return (
-    <Card
-      span={span}
-      title="Modo ano"
-      subtitle={`${year} · em andamento`}
-      actions={
-        semRadar ? undefined : (
-          <span className={`badge ${atencao ? 'badge--warning' : 'badge--good'}`}>
-            <Icon name={atencao ? 'alert' : 'check'} size={11} strokeWidth={2.4} />
-            {atencao ? 'Atenção' : 'No caminho'}
-          </span>
-        )
-      }
-    >
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-          gap: 'var(--sp-4)',
-        }}
-      >
-        {lines.map((line) => (
-          <div key={line.key} style={{ minWidth: 0 }}>
-            <MonthLineTile line={line} />
-          </div>
-        ))}
-      </div>
-      {atencao && (
-        <p className="chart__note">
-          {foraDaFaixa.length === 1 ? 'Um indicador está' : `${foraDaFaixa.length} indicadores estão`} fora
-          da faixa configurada no Radar de risco: {foraDaFaixa.map((r) => r.label).join(', ')}.
-        </p>
-      )}
-    </Card>
-  )
-}
-
 type RangeSubset = Pick<RangeContextValue, 'preset' | 'from' | 'to' | 'anchor' | 'accountId'>
 
 /**
@@ -1050,7 +731,7 @@ type RangeSubset = Pick<RangeContextValue, 'preset' | 'from' | 'to' | 'anchor' |
  * completo e sempre mostrava o mês corrente, não importava o que
  * estivesse selecionado ali).
  */
-function SpendingPaceCard({ span, range }: { span: BentoSpan; range: RangeSubset }) {
+function SpendingPaceCard({ span, range }: { span?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12; range: RangeSubset }) {
   const singleMonth = singleMonthOf(range)
   return singleMonth ? (
     <MonthlyPaceCard span={span} period={singleMonth} anchor={range.anchor} accountId={range.accountId} />
@@ -1065,7 +746,7 @@ function MonthlyPaceCard({
   anchor,
   accountId,
 }: {
-  span: BentoSpan
+  span?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
   period: string
   anchor: string
   accountId: number | null
@@ -1145,7 +826,15 @@ function MonthlyPaceCard({
  * ano contra o mesmo trecho do ano passado" no canto (útil pra manter),
  * mas o gráfico em si virou duas colunas por mês, não uma linha corrida.
  */
-function AnnualPaceCard({ span, anchor, accountId }: { span: BentoSpan; anchor: string; accountId: number | null }) {
+function AnnualPaceCard({
+  span,
+  anchor,
+  accountId,
+}: {
+  span?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
+  anchor: string
+  accountId: number | null
+}) {
   const currentYear = Number(anchor.slice(0, 4))
   const previousYear = currentYear - 1
   const cutoffMonth = Number(anchor.slice(5, 7))
@@ -1232,7 +921,7 @@ function AnnualPaceCard({ span, anchor, accountId }: { span: BentoSpan; anchor: 
  * Mesma generalização de `SpendingPaceCard` (07/09/2026): sem um único mês
  * em foco, vira um mapa de calor por mês do ano em vez de por dia do mês.
  */
-function SpendingHeatmapCard({ span, range }: { span: BentoSpan; range: RangeSubset }) {
+function SpendingHeatmapCard({ span, range }: { span?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12; range: RangeSubset }) {
   const singleMonth = singleMonthOf(range)
   return singleMonth ? (
     <MonthlyHeatmapCard span={span} period={singleMonth} accountId={range.accountId} />
@@ -1241,7 +930,15 @@ function SpendingHeatmapCard({ span, range }: { span: BentoSpan; range: RangeSub
   )
 }
 
-function MonthlyHeatmapCard({ span, period, accountId }: { span: BentoSpan; period: string; accountId: number | null }) {
+function MonthlyHeatmapCard({
+  span,
+  period,
+  accountId,
+}: {
+  span?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
+  period: string
+  accountId: number | null
+}) {
   const current = useQuery({
     queryKey: ['daily-series', period, accountId],
     queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number; transactionCount: number }> }>('/analytics/daily', { period, accountId: accountId ?? undefined }),
@@ -1254,7 +951,15 @@ function MonthlyHeatmapCard({ span, period, accountId }: { span: BentoSpan; peri
   )
 }
 
-function AnnualHeatmapCard({ span, anchor, accountId }: { span: BentoSpan; anchor: string; accountId: number | null }) {
+function AnnualHeatmapCard({
+  span,
+  anchor,
+  accountId,
+}: {
+  span?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
+  anchor: string
+  accountId: number | null
+}) {
   const year = Number(anchor.slice(0, 4))
   const current = useQuery({
     queryKey: ['monthly-series', year, accountId],
@@ -1278,40 +983,6 @@ function daysInMonthOf(period: string): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate()
 }
 
-function MonthLineTile({ line }: { line: MonthLine }) {
-  const hasTarget = line.targetCents !== null && line.targetCents > 0
-  const usedBps = hasTarget
-    ? Math.max(0, Math.round((line.realizedCents / line.targetCents!) * 10_000))
-    : 0
-
-  return (
-    <div className="stack stack--tight">
-      <span className="stat__label">{line.label}</span>
-      <span className="tabular" style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>
-        {money(line.realizedCents)}
-      </span>
-      {hasTarget ? (
-        <>
-          {/* Verde/amarelo/vermelho, mesmo padrão de cor usado em Metas do
-              mês e nos cartões de crédito — confirmado por uso real que a
-              barra neutra escondia justamente o sinal que este card existe
-              para dar. */}
-          <Meter usedBps={Math.min(usedBps, 10_000)} state={line.state} />
-          <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-            {line.higherIsBetter ? 'de' : 'do teto de'} {money(line.targetCents!)} ({bps(usedBps, 0)})
-          </span>
-        </>
-      ) : (
-        // Sem meta configurada: mostra o valor e para aí, sem inventar uma
-        // meta nem esconder a linha.
-        <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-          sem meta configurada
-        </span>
-      )}
-    </div>
-  )
-}
-
 function CreditCardsSlab({
   cards,
   isError,
@@ -1319,7 +990,7 @@ function CreditCardsSlab({
 }: {
   cards: CardRow[]
   isError: boolean
-  span: BentoSpan
+  span?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
 }) {
   const [page, setPage] = useState(0)
   const pageCount = cards.length + 1
@@ -1431,6 +1102,61 @@ function CreditCardsSlab({
   )
 }
 
+/**
+ * Substitui o diagrama Sankey por uma lista ranqueada dos mesmos dados
+ * (`FlowEdge[]`) — revisão de UX de 26/09/2026 ("fluxo entre contas não
+ * fica claro como o fluxo funciona exatamente"). `AccountFlowSankey` e
+ * `shared/accountFlowGraph.ts` continuam existindo (têm cobertura própria
+ * em `scripts/verify.ts`), só deixam de ser usados nesta tela.
+ */
+function AccountFlowSimple({
+  edges,
+  totals,
+  isLoading,
+}: {
+  edges: FlowEdge[] | undefined
+  totals: { looseCents: number; looseCount: number } | undefined
+  isLoading: boolean
+}) {
+  return (
+    <Card
+      title="Fluxo entre contas"
+      subtitle="Transferências entre suas próprias contas, da maior para a menor"
+    >
+      {isLoading ? (
+        <SkeletonBlock height={160} />
+      ) : !edges || edges.length === 0 ? (
+        <EmptyState icon="search" title="Nada a listar" body="Sem transferências entre contas próprias no período." />
+      ) : (
+        <div className="stack stack--tight">
+          <ul className="ranked">
+            {[...edges]
+              .sort((a, b) => b.amountCents - a.amountCents)
+              .map((edge) => (
+                <li
+                  key={`${edge.fromAccountId}-${edge.toAccountId}`}
+                  className="ranked__item"
+                  style={{ gridTemplateColumns: 'minmax(0,1fr) auto auto' }}
+                >
+                  <span className="truncate">
+                    {edge.fromName} <Icon name="arrowUpRight" size={12} strokeWidth={2.2} /> {edge.toName}
+                  </span>
+                  <span className="ranked__share">{edge.count}x</span>
+                  <span className="ranked__value">{money(edge.amountCents)}</span>
+                </li>
+              ))}
+          </ul>
+          {totals && totals.looseCount > 0 && (
+            <p className="chart__note">
+              {totals.looseCount} transferência(s) sem par identificado, {money(totals.looseCents)} no total.
+            </p>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 /* ------------------------------------------------------------------ *
  * Pending — a confirmed future receipt/expense the bank hasn't posted
  * yet (a freelancer's recurring retainer, an already-agreed installment
@@ -1439,7 +1165,7 @@ function CreditCardsSlab({
  * excludes it by default, so it can never inflate a closed period's
  * real Entradas/Saídas until reconciled against the real posted row.
  * ------------------------------------------------------------------ */
-function PendingCard({ flow, title, span }: { flow: 'income' | 'expense'; title: string; span: BentoSpan }) {
+function PendingSection({ flow, title }: { flow: 'income' | 'expense'; title: string }) {
   const range = useRange()
   const [adding, setAdding] = useState(false)
   const [listing, setListing] = useState(false)
@@ -1479,24 +1205,26 @@ function PendingCard({ flow, title, span }: { flow: 'income' | 'expense'; title:
       !rows.some((r) => r.forecastId === f.id),
   )
 
+  const subtitle =
+    range.preset === 'custom'
+      ? 'No período selecionado'
+      : // "Máximo" no seletor principal é todo o histórico do ledger PRA
+        // TRÁS; aqui, pendência é sempre sobre o futuro, e o mesmo preset
+        // vira 24 meses À FRENTE (forwardBoundsFor) — mesmo rótulo,
+        // sentido oposto, confirmado como fonte real de confusão. O card
+        // nunca repete a palavra "Máximo" para essa janela.
+        range.preset === 'max'
+        ? 'Todo o horizonte à frente'
+        : `${fmtDate(from)} a ${fmtDate(to)}`
+
   return (
     <>
-      <Card
-        span={span}
-        title={title}
-        subtitle={
-          range.preset === 'custom'
-            ? 'No período selecionado'
-            : // "Máximo" no seletor principal é todo o histórico do ledger PRA
-              // TRÁS; aqui, pendência é sempre sobre o futuro, e o mesmo preset
-              // vira 24 meses À FRENTE (forwardBoundsFor) — mesmo rótulo,
-              // sentido oposto, confirmado como fonte real de confusão. O card
-              // nunca repete a palavra "Máximo" para essa janela.
-              range.preset === 'max'
-              ? 'Todo o horizonte à frente'
-              : `${fmtDate(from)} a ${fmtDate(to)}`
-        }
-        actions={
+      <div className="stack stack--tight">
+        <div className="row row--between row--wrap">
+          <div>
+            <span className="stat__label">{title}</span>
+            <p className="chart__note" style={{ margin: 0 }}>{subtitle}</p>
+          </div>
           <div className="row" style={{ gap: 'var(--sp-2)' }}>
             {(rows.length > 0 || invisibleForecasts.length > 0) && (
               <Button variant="ghost" size="sm" icon="list" onClick={() => setListing(true)}>
@@ -1507,22 +1235,21 @@ function PendingCard({ flow, title, span }: { flow: 'income' | 'expense'; title:
               Novo
             </Button>
           </div>
-        }
-      >
+        </div>
         <StatTile label={flow === 'income' ? 'Ainda não caiu na conta' : 'Ainda não saiu da conta'} value={money(totalCents)} large />
         {overdueCount > 0 && (
-          <p className="chart__note" style={{ marginTop: 'var(--sp-2)' }}>
+          <p className="chart__note">
             <span className="badge badge--critical">Atrasado</span> {overdueCount} de período(s) anterior(es) ainda{' '}
             {flow === 'income' ? 'não recebido(s)' : 'não pago(s)'}
           </p>
         )}
         {invisibleForecasts.length > 0 && (
-          <p className="chart__note" style={{ marginTop: 'var(--sp-2)' }}>
+          <p className="chart__note">
             <Icon name="info" size={12} /> {invisibleForecasts.length} previsão(ões) só aparecerá(ão) mais perto da
             data, confira em "Ver lançamentos"
           </p>
         )}
-      </Card>
+      </div>
 
       {adding && <PendingModal flow={flow} onClose={() => setAdding(false)} />}
       {listing && (
@@ -1558,6 +1285,9 @@ function PendingListModal({
   // Só pergunta escopo quando a linha vem de um template (forecastId) —
   // uma pendência avulsa exclui direto, sem modal extra (decisions/0020).
   const [scopeTarget, setScopeTarget] = useState<PendingRow | null>(null)
+  // Mas "direto" não é mais "sem perguntar nada" (revisão de UX copy de
+  // 26/09/2026): só não pergunta o ESCOPO, ainda confirma a exclusão.
+  const [confirmingPending, setConfirmingPending] = useState<PendingRow | null>(null)
 
   const remove = useMutation({
     mutationFn: ({ id, scope }: { id: number; scope?: PendingDeleteScope }) =>
@@ -1566,17 +1296,20 @@ function PendingListModal({
       toast('Pendência removida')
       queryClient.invalidateQueries()
       setScopeTarget(null)
+      setConfirmingPending(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
   // decisions/0024: essas linhas não têm transação real ainda — o "remover"
   // aqui apaga a PREVISÃO inteira (endpoint de forecast, não de pendência).
+  const [confirmingForecast, setConfirmingForecast] = useState<ForecastEntry | null>(null)
   const removeForecast = useMutation({
     mutationFn: (id: number) => api.del(`/cash-flow/forecasts/${id}`),
     onSuccess: () => {
       toast('Previsão removida')
       queryClient.invalidateQueries()
+      setConfirmingForecast(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
@@ -1596,10 +1329,10 @@ function PendingListModal({
         <table className="table">
           <thead>
             <tr>
-              <th>Descrição</th>
-              <th>Data</th>
-              <th className="table__num">Valor</th>
-              <th style={{ width: 104 }} />
+              <th scope="col">Descrição</th>
+              <th scope="col">Data</th>
+              <th scope="col" className="table__num">Valor</th>
+              <th scope="col" style={{ width: 104 }} />
             </tr>
           </thead>
           <tbody>
@@ -1654,7 +1387,7 @@ function PendingListModal({
                       size="sm"
                       icon="trash"
                       onClick={() =>
-                        r.forecastId !== null || r.debtId !== null ? setScopeTarget(r) : remove.mutate({ id: r.id })
+                        r.forecastId !== null || r.debtId !== null ? setScopeTarget(r) : setConfirmingPending(r)
                       }
                       disabled={remove.isPending}
                       title="Remover pendência"
@@ -1691,7 +1424,7 @@ function PendingListModal({
                         variant="quiet"
                         size="sm"
                         icon="trash"
-                        onClick={() => removeForecast.mutate(f.id)}
+                        onClick={() => setConfirmingForecast(f)}
                         disabled={removeForecast.isPending}
                         title="Remover previsão"
                       />
@@ -1710,6 +1443,26 @@ function PendingListModal({
           pending={remove.isPending}
           onCancel={() => setScopeTarget(null)}
           onConfirm={(scope) => remove.mutate({ id: scopeTarget.id, scope })}
+        />
+      )}
+      {confirmingPending && (
+        <ConfirmDeleteModal
+          title={`Excluir ${confirmingPending.description}?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel="Excluir pendência"
+          pending={remove.isPending}
+          onCancel={() => setConfirmingPending(null)}
+          onConfirm={() => remove.mutate({ id: confirmingPending.id })}
+        />
+      )}
+      {confirmingForecast && (
+        <ConfirmDeleteModal
+          title={`Excluir a previsão de ${confirmingForecast.description}?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel="Excluir previsão"
+          pending={removeForecast.isPending}
+          onCancel={() => setConfirmingForecast(null)}
+          onConfirm={() => removeForecast.mutate(confirmingForecast.id)}
         />
       )}
     </Modal>
@@ -1807,7 +1560,7 @@ function EditPendingModal({
             <Button variant="quiet" onClick={onClose}>
               Cancelar
             </Button>
-            <Button variant="primary" icon="check" onClick={requestSave} disabled={save.isPending}>
+            <Button variant="primary" icon="check" onClick={requestSave} disabled={save.isPending} loading={save.isPending}>
               Salvar
             </Button>
           </>
@@ -1851,6 +1604,13 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
    * (02/09/2026). Vazio = sem fim previsto, que segue sendo o padrão.
    */
   const [endMonth, setEndMonth] = useState('')
+  const descriptionFieldId = useId()
+  const amountFieldId = useId()
+  const paymentDateFieldId = useId()
+  const accountFieldId = useId()
+  const categoryFieldId = useId()
+  const installmentCountFieldId = useId()
+  const installmentsRealizedFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -1912,8 +1672,13 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
     >
       <div className="stack">
         <div className="field">
-          <label className="field__label">Descrição</label>
-          <TextInput value={description} onChange={setDescription} placeholder="ex. BERA, Design UI/UX E-commerce DME" />
+          <label className="field__label" htmlFor={descriptionFieldId}>Descrição</label>
+          <TextInput
+            id={descriptionFieldId}
+            value={description}
+            onChange={setDescription}
+            placeholder="ex. BERA, Design UI/UX E-commerce DME"
+          />
         </div>
 
         <div className="field">
@@ -1939,14 +1704,14 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">
+            <label className="field__label" htmlFor={amountFieldId}>
               Valor {kind === 'recurring' ? 'por mês' : kind === 'installment' ? 'por parcela' : ''} (R$)
             </label>
-            <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+            <TextInput id={amountFieldId} value={amount} onChange={setAmount} placeholder="0,00" numeral />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Data de pagamento</label>
-            <TextInput value={paymentDate} onChange={setPaymentDate} type="date" />
+            <label className="field__label" htmlFor={paymentDateFieldId}>Data de pagamento</label>
+            <TextInput id={paymentDateFieldId} value={paymentDate} onChange={setPaymentDate} type="date" />
             {kind !== 'single' && (
               <span className="field__hint">O dia (não o mês) se repete nas próximas ocorrências.</span>
             )}
@@ -1955,8 +1720,9 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">Conta esperada</label>
+            <label className="field__label" htmlFor={accountFieldId}>Conta esperada</label>
             <Select
+              id={accountFieldId}
               value={accountId}
               placeholder="Selecione"
               options={(meta.data?.accounts ?? []).map((a) => ({ value: a.id, label: a.name }))}
@@ -1965,8 +1731,9 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
             <span className="field__hint">Usada para sugerir a conciliação quando o extrato real chegar.</span>
           </div>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">TAG (opcional)</label>
+            <label className="field__label" htmlFor={categoryFieldId}>TAG (opcional)</label>
             <CategorySelect
+              id={categoryFieldId}
               value={categoryId}
               direction={flow === 'income' ? 'in' : 'out'}
               onChange={setCategoryId}
@@ -1997,12 +1764,26 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
         {kind === 'installment' && (
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Total de parcelas</label>
-              <TextInput value={installmentCount} onChange={setInstallmentCount} placeholder="ex. 3" numeral />
+              <label className="field__label" htmlFor={installmentCountFieldId}>Total de parcelas</label>
+              <TextInput
+                id={installmentCountFieldId}
+                value={installmentCount}
+                onChange={setInstallmentCount}
+                placeholder="ex. 3"
+                numeral
+              />
             </div>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Parcelas já confirmadas/recebidas</label>
-              <TextInput value={installmentsRealized} onChange={setInstallmentsRealized} placeholder="ex. 1" numeral />
+              <label className="field__label" htmlFor={installmentsRealizedFieldId}>
+                Parcelas já confirmadas/recebidas
+              </label>
+              <TextInput
+                id={installmentsRealizedFieldId}
+                value={installmentsRealized}
+                onChange={setInstallmentsRealized}
+                placeholder="ex. 1"
+                numeral
+              />
               <span className="field__hint">A pendência só materializa as parcelas futuras, a partir da próxima.</span>
             </div>
           </div>
@@ -2017,7 +1798,7 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
  * never proof, so the user confirms each one by hand before the
  * pending placeholder is dropped in favour of the real posted row.
  */
-function ReconciliationCard({ span }: { span: BentoSpan }) {
+function ReconciliationSection() {
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -2047,41 +1828,43 @@ function ReconciliationCard({ span }: { span: BentoSpan }) {
   if (rows.length === 0) return null
 
   return (
-    <Card span={span} muted title="Possíveis conciliações" subtitle="Mesma conta, mesmo valor, data próxima: confirme se é o mesmo lançamento">
-      <div className="stack stack--tight">
-        {rows.map(({ pending, match }) => (
-          <div key={`${pending.id}-${match.id}`} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="truncate">
-                <strong>{pending.description}</strong>
-                <span className="muted"> · previsto para {fmtPeriod(pending.postedOn.slice(0, 7))}</span>
-              </div>
-              <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                Recebido em {fmtDate(match.postedOn)}
-              </div>
-            </div>
-            <span className="row" style={{ gap: 'var(--sp-2)' }}>
-              <strong className="tabular">{money(match.amountCents)}</strong>
-              <Button
-                size="sm"
-                variant="primary"
-                icon="check"
-                onClick={() => confirm.mutate({ pendingId: pending.id, matchId: match.id })}
-              >
-                É o mesmo
-              </Button>
-              <Button
-                variant="quiet"
-                size="sm"
-                icon="x"
-                title="Não é o mesmo, remover esta sugestão"
-                onClick={() => dismiss.mutate({ pendingId: pending.id, matchId: match.id })}
-              />
-            </span>
-          </div>
-        ))}
+    <div className="stack stack--tight">
+      <div>
+        <span className="stat__label">Possíveis conciliações</span>
+        <p className="chart__note" style={{ margin: 0 }}>Mesma conta, mesmo valor, data próxima: confirme se é o mesmo lançamento</p>
       </div>
-    </Card>
+      {rows.map(({ pending, match }) => (
+        <div key={`${pending.id}-${match.id}`} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="truncate">
+              <strong>{pending.description}</strong>
+              <span className="muted"> · previsto para {fmtPeriod(pending.postedOn.slice(0, 7))}</span>
+            </div>
+            <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+              Recebido em {fmtDate(match.postedOn)}
+            </div>
+          </div>
+          <span className="row" style={{ gap: 'var(--sp-2)' }}>
+            <strong className="tabular">{money(match.amountCents)}</strong>
+            <Button
+              size="sm"
+              variant="primary"
+              icon="check"
+              onClick={() => confirm.mutate({ pendingId: pending.id, matchId: match.id })}
+            >
+              É o mesmo
+            </Button>
+            <Button
+              variant="quiet"
+              size="sm"
+              icon="x"
+              title="Não é o mesmo, remover esta sugestão"
+              onClick={() => dismiss.mutate({ pendingId: pending.id, matchId: match.id })}
+            />
+          </span>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -2098,12 +1881,12 @@ type SubscriptionCandidate = {
 /**
  * Item 8 do backlog de 07/09/2026: sugestão de assinatura recorrente por
  * padrão de comerciante — mesmo padrão de sugestão revisável de
- * `ReconciliationCard` acima, nunca aplicação automática (decisions/0003).
+ * `ReconciliationSection` acima, nunca aplicação automática (decisions/0003).
  * "Aceitar" vira uma previsão recorrente de verdade (Motor financeiro/
  * Painel passam a mostrá-la); "Não é assinatura" descarta e nunca mais
  * sugere este comerciante.
  */
-function SubscriptionsCard({ span }: { span: BentoSpan }) {
+function SubscriptionsSection() {
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -2131,47 +1914,44 @@ function SubscriptionsCard({ span }: { span: BentoSpan }) {
   if (rows.length === 0) return null
 
   return (
-    <Card
-      span={span}
-      muted
-      title="Possíveis assinaturas"
-      subtitle="Mesmo valor, todo mês, no mesmo comerciante: confirme se é uma assinatura"
-    >
-      <div className="stack stack--tight">
-        {rows.map((candidate) => (
-          <div key={candidate.signature} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="truncate">
-                <strong>{candidate.description}</strong>
-              </div>
-              <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                {candidate.occurrences}x, última em {fmtDate(candidate.lastPostedOn)}
-              </div>
-            </div>
-            <span className="row" style={{ gap: 'var(--sp-2)' }}>
-              <strong className="tabular">{money(candidate.avgAmountCents)}</strong>
-              <Button
-                size="sm"
-                variant="primary"
-                icon="check"
-                disabled={confirm.isPending}
-                onClick={() => confirm.mutate(candidate.signature)}
-              >
-                É assinatura
-              </Button>
-              <Button
-                variant="quiet"
-                size="sm"
-                icon="x"
-                title="Não é uma assinatura, remover esta sugestão"
-                disabled={dismiss.isPending}
-                onClick={() => dismiss.mutate(candidate.signature)}
-              />
-            </span>
-          </div>
-        ))}
+    <div className="stack stack--tight">
+      <div>
+        <span className="stat__label">Possíveis assinaturas</span>
+        <p className="chart__note" style={{ margin: 0 }}>Mesmo valor, todo mês, no mesmo comerciante: confirme se é uma assinatura</p>
       </div>
-    </Card>
+      {rows.map((candidate) => (
+        <div key={candidate.signature} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="truncate">
+              <strong>{candidate.description}</strong>
+            </div>
+            <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+              {candidate.occurrences}x, última em {fmtDate(candidate.lastPostedOn)}
+            </div>
+          </div>
+          <span className="row" style={{ gap: 'var(--sp-2)' }}>
+            <strong className="tabular">{money(candidate.avgAmountCents)}</strong>
+            <Button
+              size="sm"
+              variant="primary"
+              icon="check"
+              disabled={confirm.isPending}
+              onClick={() => confirm.mutate(candidate.signature)}
+            >
+              É assinatura
+            </Button>
+            <Button
+              variant="quiet"
+              size="sm"
+              icon="x"
+              title="Não é uma assinatura, remover esta sugestão"
+              disabled={dismiss.isPending}
+              onClick={() => dismiss.mutate(candidate.signature)}
+            />
+          </span>
+        </div>
+      ))}
+    </div>
   )
 }
 

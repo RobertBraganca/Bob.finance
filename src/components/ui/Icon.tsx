@@ -45,6 +45,8 @@ import {
   IconLogout,
   IconEyeOff,
   IconBellFilled,
+  IconUserFilled,
+  IconLoader2,
   type Icon as TablerIcon,
 } from '@tabler/icons-react'
 
@@ -136,6 +138,11 @@ const ICONS: Record<string, TablerIcon> = {
   // Sem "eye-off" filled na Tabler — outline mantido (ocultar lançamento).
   eyeOff: IconEyeOff,
   bell: IconBellFilled,
+  user: IconUserFilled,
+  // Estado de carregamento (botão "Salvando..."/ação assíncrona) — nenhum
+  // ícone do app girava antes disto, então nenhuma ação assíncrona dava
+  // qualquer sinal visual além do cursor "disabled" (revisão 27/09/2026).
+  loader: IconLoader2,
 }
 
 export type IconName = keyof typeof ICONS

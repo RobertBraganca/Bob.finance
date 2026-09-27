@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { telemetry } from '../lib/telemetry'
@@ -21,6 +21,7 @@ import {
   Bento,
   Button,
   Card,
+  ConfirmDeleteModal,
   EmptyState,
   FilterSelect,
   HeroFigure,
@@ -716,9 +717,13 @@ function BelowTargetCard({
         />
       ) : (
         <div className="stack stack--tight">
+          {/* Sem truncate (revisão de responsividade de 26/09/2026):
+              "ETFs Internacionais" cortava num telefone, competindo com o
+              desvio+valor na mesma linha — `row--wrap` deixa o valor cair
+              pra linha de baixo em vez de espremer o nome da classe. */}
           {below.map((slice) => (
-            <div key={slice.assetClass} className="row row--between">
-              <span className="truncate">{slice.label}</span>
+            <div key={slice.assetClass} className="row row--between row--wrap" style={{ rowGap: 'var(--sp-1)' }}>
+              <span style={{ minWidth: 0 }}>{slice.label}</span>
               <span className="row" style={{ gap: 'var(--sp-3)' }}>
                 <span className="muted tabular" style={{ fontSize: 'var(--text-xs)' }}>
                   {slice.driftBps === null ? '' : signedPoints(slice.driftBps)}
@@ -799,10 +804,10 @@ function AllocationDeviationCard() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Classe</th>
-                  <th className="table__num">Atual</th>
-                  <th className="table__num">Meta</th>
-                  <th className="table__num">Desvio</th>
+                  <th scope="col">Classe</th>
+                  <th scope="col" className="table__num">Atual</th>
+                  <th scope="col" className="table__num">Meta</th>
+                  <th scope="col" className="table__num">Desvio</th>
                 </tr>
               </thead>
               <tbody>
@@ -830,6 +835,7 @@ function ReserveCard() {
   const [costInput, setCostInput] = useState('')
   const [contributing, setContributing] = useState(false)
   const [viewingHistory, setViewingHistory] = useState(false)
+  const costInputFieldId = useId()
 
   const reserve = useQuery({
     queryKey: ['investment-reserve'],
@@ -921,8 +927,8 @@ function ReserveCard() {
           ) : (
             <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-end' }}>
               <div className="field" style={{ width: 180 }}>
-                <label className="field__label">Custo de vida mensal (R$)</label>
-                <TextInput value={costInput} onChange={setCostInput} placeholder="0,00" numeral />
+                <label className="field__label" htmlFor={costInputFieldId}>Custo de vida mensal (R$)</label>
+                <TextInput id={costInputFieldId} value={costInput} onChange={setCostInput} placeholder="0,00" numeral />
               </div>
               <Button
                 variant="primary"
@@ -983,6 +989,8 @@ function ReserveContributeModal({
   const [kind, setKind] = useState<'buy' | 'sell'>('buy')
   const [amount, setAmount] = useState(initialAmountCents ? centsToInput(initialAmountCents) : '')
   const [tradedOn, setTradedOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const amountFieldId = useId()
+  const tradedOnFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -1007,7 +1015,7 @@ function ReserveContributeModal({
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             {kind === 'buy' ? 'Registrar aporte' : 'Registrar retirada'}
           </Button>
         </>
@@ -1025,12 +1033,12 @@ function ReserveContributeModal({
         />
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Valor (R$)</label>
-            <TextInput value={amount} onChange={setAmount} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={amountFieldId}>Valor (R$)</label>
+            <TextInput id={amountFieldId} value={amount} onChange={setAmount} placeholder="0,00" numeral />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Data</label>
-            <TextInput value={tradedOn} onChange={setTradedOn} type="date" />
+            <label className="field__label" htmlFor={tradedOnFieldId}>Data</label>
+            <TextInput id={tradedOnFieldId} value={tradedOn} onChange={setTradedOn} type="date" />
           </div>
         </div>
       </div>
@@ -1157,18 +1165,18 @@ function AssetGroupCard({
             <table className="table">
               <thead>
                 <tr>
-                  <th>Ativo</th>
-                  <th className="table__center" style={{ width: 70 }}>Nota</th>
-                  <th className="table__num">Qtd.</th>
-                  <th className="table__num">Preço médio</th>
-                  <th className="table__num">Cotação</th>
-                  <th className="table__num">Variação</th>
-                  <th className="table__num">Saldo</th>
-                  <th className="table__center">Reserva</th>
-                  <th className="table__num">% carteira</th>
-                  <th className="table__num">% ideal</th>
-                  <th className="table__center">Comprar?</th>
-                  <th style={{ width: 76 }} />
+                  <th scope="col">Ativo</th>
+                  <th scope="col" className="table__center" style={{ width: 70 }}>Nota</th>
+                  <th scope="col" className="table__num">Qtd.</th>
+                  <th scope="col" className="table__num">Preço médio</th>
+                  <th scope="col" className="table__num">Cotação</th>
+                  <th scope="col" className="table__num">Variação</th>
+                  <th scope="col" className="table__num">Saldo</th>
+                  <th scope="col" className="table__center">Reserva</th>
+                  <th scope="col" className="table__num">% carteira</th>
+                  <th scope="col" className="table__num">% ideal</th>
+                  <th scope="col" className="table__center">Comprar?</th>
+                  <th scope="col" style={{ width: 76 }} />
                 </tr>
               </thead>
               <tbody>
@@ -1302,6 +1310,7 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
   const [assetFilter, setAssetFilter] = useState<number | null>(null)
   const [kindFilter, setKindFilter] = useState<string | null>(null)
   const [editingTrade, setEditingTrade] = useState<TradeRow | null>(null)
+  const [confirmingTradeId, setConfirmingTradeId] = useState<number | null>(null)
 
   const trades = useQuery({
     queryKey: ['investment-trades'],
@@ -1313,6 +1322,7 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
     onSuccess: () => {
       toast('Lançamento removido')
       queryClient.invalidateQueries()
+      setConfirmingTradeId(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
@@ -1320,6 +1330,8 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
   const rows = (trades.data?.trades ?? [])
     .filter((t) => assetFilter === null || t.assetId === assetFilter)
     .filter((t) => kindFilter === null || t.kind === kindFilter)
+
+  const confirmingTrade = rows.find((t) => t.id === confirmingTradeId) ?? null
 
   return (
     <Bento>
@@ -1368,15 +1380,15 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
             <table className="table">
               <thead>
                 <tr>
-                  <th>Data</th>
-                  <th>Ativo</th>
-                  <th>Tipo</th>
-                  <th>Tipo de provento</th>
-                  <th>Data Com</th>
-                  <th className="table__num">Qtd.</th>
-                  <th className="table__num">Preço</th>
-                  <th className="table__num">Taxas</th>
-                  <th style={{ width: 40 }} />
+                  <th scope="col">Data</th>
+                  <th scope="col">Ativo</th>
+                  <th scope="col">Tipo</th>
+                  <th scope="col">Tipo de provento</th>
+                  <th scope="col">Data Com</th>
+                  <th scope="col" className="table__num">Qtd.</th>
+                  <th scope="col" className="table__num">Preço</th>
+                  <th scope="col" className="table__num">Taxas</th>
+                  <th scope="col" style={{ width: 40 }} />
                 </tr>
               </thead>
               <tbody>
@@ -1405,7 +1417,7 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
                           variant="quiet"
                           size="sm"
                           icon="trash"
-                          onClick={() => remove.mutate(t.id)}
+                          onClick={() => setConfirmingTradeId(t.id)}
                           disabled={remove.isPending}
                           title="Excluir lançamento"
                         />
@@ -1420,6 +1432,16 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
       </Card>
 
       {editingTrade && <EditTradeModal trade={editingTrade} onClose={() => setEditingTrade(null)} />}
+      {confirmingTrade && (
+        <ConfirmDeleteModal
+          title={`Excluir lançamento de ${confirmingTrade.assetName}?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel="Excluir lançamento"
+          pending={remove.isPending}
+          onCancel={() => setConfirmingTradeId(null)}
+          onConfirm={() => remove.mutate(confirmingTrade.id)}
+        />
+      )}
     </Bento>
   )
 }
@@ -1437,6 +1459,7 @@ function TradeHistoryModal({
   const toast = useToast()
   const queryClient = useQueryClient()
   const [editingTrade, setEditingTrade] = useState<TradeRow | null>(null)
+  const [confirmingTradeId, setConfirmingTradeId] = useState<number | null>(null)
 
   const trades = useQuery({
     queryKey: ['investment-trades'],
@@ -1448,11 +1471,13 @@ function TradeHistoryModal({
     onSuccess: () => {
       toast('Lançamento removido')
       queryClient.invalidateQueries()
+      setConfirmingTradeId(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
   const rows = (trades.data?.trades ?? []).filter((t) => assetIds.includes(t.assetId))
+  const confirmingTrade = rows.find((t) => t.id === confirmingTradeId) ?? null
 
   return (
     <Modal
@@ -1482,13 +1507,13 @@ function TradeHistoryModal({
           <table className="table">
             <thead>
               <tr>
-                <th>Data</th>
-                <th>Ativo</th>
-                <th>Tipo</th>
-                <th className="table__num">Qtd.</th>
-                <th className="table__num">Preço</th>
-                <th className="table__num">Taxas</th>
-                <th style={{ width: 40 }} />
+                <th scope="col">Data</th>
+                <th scope="col">Ativo</th>
+                <th scope="col">Tipo</th>
+                <th scope="col" className="table__num">Qtd.</th>
+                <th scope="col" className="table__num">Preço</th>
+                <th scope="col" className="table__num">Taxas</th>
+                <th scope="col" style={{ width: 40 }} />
               </tr>
             </thead>
             <tbody>
@@ -1513,7 +1538,7 @@ function TradeHistoryModal({
                         variant="quiet"
                         size="sm"
                         icon="trash"
-                        onClick={() => remove.mutate(t.id)}
+                        onClick={() => setConfirmingTradeId(t.id)}
                         disabled={remove.isPending}
                         title="Excluir lançamento"
                       />
@@ -1527,6 +1552,16 @@ function TradeHistoryModal({
       )}
 
       {editingTrade && <EditTradeModal trade={editingTrade} onClose={() => setEditingTrade(null)} />}
+      {confirmingTrade && (
+        <ConfirmDeleteModal
+          title={`Excluir lançamento de ${confirmingTrade.assetName}?`}
+          body="Isso não pode ser desfeito."
+          confirmLabel="Excluir lançamento"
+          pending={remove.isPending}
+          onCancel={() => setConfirmingTradeId(null)}
+          onConfirm={() => remove.mutate(confirmingTrade.id)}
+        />
+      )}
     </Modal>
   )
 }
@@ -1542,6 +1577,12 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
   const [fees, setFees] = useState(centsToInput(trade.feesCents))
   const [dividendType, setDividendType] = useState<string | null>(trade.dividendType)
   const [exDate, setExDate] = useState(trade.exDate ?? '')
+  const tradedOnFieldId = useId()
+  const quantityFieldId = useId()
+  const dividendTypeFieldId = useId()
+  const exDateFieldId = useId()
+  const priceFieldId = useId()
+  const feesFieldId = useId()
 
   const priceCents = parseMoneyInput(price)
   const feesCents = parseMoneyInput(fees)
@@ -1585,7 +1626,7 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </>
@@ -1596,20 +1637,21 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">{kind === 'dividend' ? 'Data de pagamento' : 'Data da transação'}</label>
-            <TextInput value={tradedOn} onChange={setTradedOn} type="date" />
+            <label className="field__label" htmlFor={tradedOnFieldId}>{kind === 'dividend' ? 'Data de pagamento' : 'Data da transação'}</label>
+            <TextInput id={tradedOnFieldId} value={tradedOn} onChange={setTradedOn} type="date" />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 130 }}>
-            <label className="field__label">Quantidade</label>
-            <TextInput value={quantity} onChange={setQuantity} numeral />
+            <label className="field__label" htmlFor={quantityFieldId}>Quantidade</label>
+            <TextInput id={quantityFieldId} value={quantity} onChange={setQuantity} numeral />
           </div>
         </div>
 
         {kind === 'dividend' && (
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Tipo de provento</label>
+              <label className="field__label" htmlFor={dividendTypeFieldId}>Tipo de provento</label>
               <Select
+                id={dividendTypeFieldId}
                 value={dividendType}
                 placeholder="Selecione"
                 options={[
@@ -1621,20 +1663,20 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
               <span className="field__hint">JSCP tem 15% retido na fonte; Dividendos são isentos</span>
             </div>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Data Com (opcional)</label>
-              <TextInput value={exDate} onChange={setExDate} type="date" />
+              <label className="field__label" htmlFor={exDateFieldId}>Data Com (opcional)</label>
+              <TextInput id={exDateFieldId} value={exDate} onChange={setExDate} type="date" />
             </div>
           </div>
         )}
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Preço (R$)</label>
-            <TextInput value={price} onChange={setPrice} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={priceFieldId}>Preço (R$)</label>
+            <TextInput id={priceFieldId} value={price} onChange={setPrice} placeholder="0,00" numeral />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Outros custos (Opcional)</label>
-            <TextInput value={fees} onChange={setFees} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={feesFieldId}>Outros custos (Opcional)</label>
+            <TextInput id={feesFieldId} value={fees} onChange={setFees} placeholder="0,00" numeral />
           </div>
         </div>
 
@@ -1821,12 +1863,12 @@ function ProfitabilityTab() {
           <table className="table">
             <thead>
               <tr>
-                <th>Ano</th>
+                <th scope="col">Ano</th>
                 {MONTH_LABELS.map((m) => (
-                  <th key={m} style={{ textAlign: 'right' }}>{m}</th>
+                  <th key={m} scope="col" style={{ textAlign: 'right' }}>{m}</th>
                 ))}
-                <th className="table__num">Retorno anual</th>
-                <th className="table__num">Acumulado</th>
+                <th scope="col" className="table__num">Retorno anual</th>
+                <th scope="col" className="table__num">Acumulado</th>
               </tr>
             </thead>
             <tbody>
@@ -2050,6 +2092,9 @@ function AssetModal({
   const [name, setName] = useState('')
   const [ticker, setTicker] = useState('')
   const [assetClass, setAssetClass] = useState('stocks')
+  const nameFieldId = useId()
+  const tickerFieldId = useId()
+  const assetClassFieldId = useId()
 
   const save = useMutation({
     mutationFn: () =>
@@ -2083,16 +2128,16 @@ function AssetModal({
     >
       <div className="stack">
         <div className="field">
-          <label className="field__label">Nome</label>
-          <TextInput value={name} onChange={setName} placeholder="ex. Tesouro IPCA+ 2035" />
+          <label className="field__label" htmlFor={nameFieldId}>Nome</label>
+          <TextInput id={nameFieldId} value={name} onChange={setName} placeholder="ex. Tesouro IPCA+ 2035" />
         </div>
         <div className="field">
-          <label className="field__label">Código</label>
-          <TextInput value={ticker} onChange={setTicker} placeholder="opcional, ex. PETR4" />
+          <label className="field__label" htmlFor={tickerFieldId}>Código</label>
+          <TextInput id={tickerFieldId} value={ticker} onChange={setTicker} placeholder="opcional, ex. PETR4" />
         </div>
         <div className="field">
-          <label className="field__label">Classe</label>
-          <Select value={assetClass} options={classes} onChange={(value) => setAssetClass(value ?? 'stocks')} />
+          <label className="field__label" htmlFor={assetClassFieldId}>Classe</label>
+          <Select id={assetClassFieldId} value={assetClass} options={classes} onChange={(value) => setAssetClass(value ?? 'stocks')} />
         </div>
       </div>
     </Modal>
@@ -2155,6 +2200,14 @@ export function TradeModal({
   const [fees, setFees] = useState('')
   const [dividendType, setDividendType] = useState<string | null>(null)
   const [exDate, setExDate] = useState('')
+  const assetClassFieldId = useId()
+  const assetIdFieldId = useId()
+  const tradedOnFieldId = useId()
+  const quantityFieldId = useId()
+  const dividendTypeFieldId = useId()
+  const exDateFieldId = useId()
+  const priceFieldId = useId()
+  const feesFieldId = useId()
 
   const availableAssets = assetClass === null ? [] : positions.filter((p) => p.assetClass === assetClass)
   const quantityCents = Number(quantity.replace(',', '.'))
@@ -2202,7 +2255,7 @@ export function TradeModal({
           <Button variant="quiet" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Adicionar lançamento
           </Button>
         </>
@@ -2213,8 +2266,9 @@ export function TradeModal({
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">Tipo de ativo</label>
+            <label className="field__label" htmlFor={assetClassFieldId}>Tipo de ativo</label>
             <Select
+              id={assetClassFieldId}
               value={assetClass}
               placeholder="Selecione"
               options={classes}
@@ -2225,13 +2279,14 @@ export function TradeModal({
             />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 170 }}>
-            <label className="field__label">Ativo</label>
+            <label className="field__label" htmlFor={assetIdFieldId}>Ativo</label>
             {assetClass === null ? (
-              <Select value={null} placeholder="Escolha o tipo primeiro" options={[]} onChange={() => {}} />
+              <Select id={assetIdFieldId} value={null} placeholder="Escolha o tipo primeiro" options={[]} onChange={() => {}} />
             ) : availableAssets.length === 0 ? (
-              <Select value={null} placeholder="Nenhum ativo cadastrado nesta classe" options={[]} onChange={() => {}} />
+              <Select id={assetIdFieldId} value={null} placeholder="Nenhum ativo cadastrado nesta classe" options={[]} onChange={() => {}} />
             ) : (
               <Select
+                id={assetIdFieldId}
                 value={assetId}
                 placeholder="Selecione"
                 options={availableAssets.map((p) => ({ value: p.assetId, label: p.name }))}
@@ -2243,20 +2298,21 @@ export function TradeModal({
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">{kind === 'dividend' ? 'Data de pagamento' : 'Data da transação'}</label>
-            <TextInput value={tradedOn} onChange={setTradedOn} type="date" />
+            <label className="field__label" htmlFor={tradedOnFieldId}>{kind === 'dividend' ? 'Data de pagamento' : 'Data da transação'}</label>
+            <TextInput id={tradedOnFieldId} value={tradedOn} onChange={setTradedOn} type="date" />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 130 }}>
-            <label className="field__label">Quantidade</label>
-            <TextInput value={quantity} onChange={setQuantity} numeral />
+            <label className="field__label" htmlFor={quantityFieldId}>Quantidade</label>
+            <TextInput id={quantityFieldId} value={quantity} onChange={setQuantity} numeral />
           </div>
         </div>
 
         {kind === 'dividend' && (
           <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Tipo de provento</label>
+              <label className="field__label" htmlFor={dividendTypeFieldId}>Tipo de provento</label>
               <Select
+                id={dividendTypeFieldId}
                 value={dividendType}
                 placeholder="Selecione"
                 options={[
@@ -2268,20 +2324,20 @@ export function TradeModal({
               <span className="field__hint">JSCP tem 15% retido na fonte; Dividendos são isentos</span>
             </div>
             <div className="field" style={{ flex: 1, minWidth: 150 }}>
-              <label className="field__label">Data Com (opcional)</label>
-              <TextInput value={exDate} onChange={setExDate} type="date" />
+              <label className="field__label" htmlFor={exDateFieldId}>Data Com (opcional)</label>
+              <TextInput id={exDateFieldId} value={exDate} onChange={setExDate} type="date" />
             </div>
           </div>
         )}
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Preço (R$)</label>
-            <TextInput value={price} onChange={setPrice} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={priceFieldId}>Preço (R$)</label>
+            <TextInput id={priceFieldId} value={price} onChange={setPrice} placeholder="0,00" numeral />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label">Outros custos (Opcional)</label>
-            <TextInput value={fees} onChange={setFees} placeholder="0,00" numeral />
+            <label className="field__label" htmlFor={feesFieldId}>Outros custos (Opcional)</label>
+            <TextInput id={feesFieldId} value={fees} onChange={setFees} placeholder="0,00" numeral />
           </div>
         </div>
 
@@ -2304,25 +2360,39 @@ export function TradeModal({
 function DeletePositionButton({ assetId, name }: { assetId: number; name: string }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
 
   const remove = useMutation({
     mutationFn: () => api.del<{ removed: number }>(`/investments/assets/${assetId}`),
     onSuccess: () => {
       toast(`${name} removido da carteira`)
       queryClient.invalidateQueries()
+      setConfirming(false)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
   })
 
   return (
-    <Button
-      variant="quiet"
-      size="sm"
-      icon="trash"
-      onClick={() => remove.mutate()}
-      disabled={remove.isPending}
-      title="Excluir posição"
-    />
+    <>
+      <Button
+        variant="quiet"
+        size="sm"
+        icon="trash"
+        onClick={() => setConfirming(true)}
+        disabled={remove.isPending}
+        title="Excluir posição"
+      />
+      {confirming && (
+        <ConfirmDeleteModal
+          title={`Excluir ${name}?`}
+          body="Isso remove o ativo e todo o histórico de compras, vendas e proventos dele. Não pode ser desfeito."
+          confirmLabel="Excluir posição"
+          pending={remove.isPending}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => remove.mutate()}
+        />
+      )}
+    </>
   )
 }
 
@@ -2419,6 +2489,11 @@ function EditAssetButton({
   const [editedClass, setEditedClass] = useState(assetClass)
   const [price, setPrice] = useState('')
   const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10))
+  const editedNameFieldId = useId()
+  const editedTickerFieldId = useId()
+  const editedClassFieldId = useId()
+  const priceFieldId = useId()
+  const asOfFieldId = useId()
 
   const save = useMutation({
     mutationFn: async () => {
@@ -2478,30 +2553,30 @@ function EditAssetButton({
         >
           <div className="stack">
             <div className="field">
-              <label className="field__label">Nome</label>
-              <TextInput value={editedName} onChange={setEditedName} placeholder="ex. Tesouro IPCA+ 2035" />
+              <label className="field__label" htmlFor={editedNameFieldId}>Nome</label>
+              <TextInput id={editedNameFieldId} value={editedName} onChange={setEditedName} placeholder="ex. Tesouro IPCA+ 2035" />
             </div>
             <div className="field">
-              <label className="field__label">Código</label>
-              <TextInput value={editedTicker} onChange={setEditedTicker} placeholder="opcional, ex. PETR4" />
+              <label className="field__label" htmlFor={editedTickerFieldId}>Código</label>
+              <TextInput id={editedTickerFieldId} value={editedTicker} onChange={setEditedTicker} placeholder="opcional, ex. PETR4" />
               <span className="field__hint">
                 Trocar o código muda qual ativo real esta posição representa: as cotações
                 atualizadas passam a se referir ao novo código.
               </span>
             </div>
             <div className="field">
-              <label className="field__label">Classe</label>
-              <Select value={editedClass} options={classes} onChange={(value) => setEditedClass(value ?? assetClass)} />
+              <label className="field__label" htmlFor={editedClassFieldId}>Classe</label>
+              <Select id={editedClassFieldId} value={editedClass} options={classes} onChange={(value) => setEditedClass(value ?? assetClass)} />
             </div>
             <hr className="divider" />
             <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
               <div className="field" style={{ flex: 1, minWidth: 140 }}>
-                <label className="field__label">Registrar cotação (opcional)</label>
-                <TextInput value={price} onChange={setPrice} placeholder="0,00" numeral />
+                <label className="field__label" htmlFor={priceFieldId}>Registrar cotação (opcional)</label>
+                <TextInput id={priceFieldId} value={price} onChange={setPrice} placeholder="0,00" numeral />
               </div>
               <div className="field" style={{ flex: 1, minWidth: 140 }}>
-                <label className="field__label">Data</label>
-                <TextInput value={asOf} onChange={setAsOf} type="date" />
+                <label className="field__label" htmlFor={asOfFieldId}>Data</label>
+                <TextInput id={asOfFieldId} value={asOf} onChange={setAsOf} type="date" />
               </div>
             </div>
           </div>
@@ -2522,6 +2597,7 @@ function AllocationModal({
 }) {
   const toast = useToast()
   const queryClient = useQueryClient()
+  const allocationFieldId = useId()
   const [values, setValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {}
     for (const slice of current) {
@@ -2557,7 +2633,7 @@ function AllocationModal({
             Soma: {bps(totalBps, 1)}
             {totalBps !== 10_000 && ' (o ideal é 100%)'}
           </span>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
             Salvar
           </Button>
         </>
@@ -2566,11 +2642,12 @@ function AllocationModal({
       <div className="stack">
         {classes.map((assetClass) => (
           <div key={assetClass.value} className="row row--between">
-            <label className="field__label" style={{ flex: 1 }}>
+            <label className="field__label" style={{ flex: 1 }} htmlFor={`${allocationFieldId}-${assetClass.value}`}>
               {assetClass.label}
             </label>
             <div style={{ width: 110 }}>
               <TextInput
+                id={`${allocationFieldId}-${assetClass.value}`}
                 value={values[assetClass.value] ?? ''}
                 onChange={(value) =>
                   setValues((current) => ({ ...current, [assetClass.value]: value }))
@@ -2781,6 +2858,8 @@ function ContributionPlanner({ goals }: { goals: Goal[] }) {
   const [amount, setAmount] = useState('')
   const [tradedOn, setTradedOn] = useState(() => new Date().toISOString().slice(0, 10))
   const [contributingReserve, setContributingReserve] = useState<number | null>(null)
+  const amountFieldId = useId()
+  const tradedOnFieldId = useId()
   const parsedCents = parseMoneyInput(amount)
 
   const plan = useQuery({
@@ -2816,12 +2895,12 @@ function ContributionPlanner({ goals }: { goals: Goal[] }) {
       <Card span={12} title="Quanto você quer aportar agora?" subtitle="O sistema nunca sugere vender, só direciona o dinheiro novo">
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-end' }}>
           <div className="field" style={{ width: 220 }}>
-            <label className="field__label">Valor do aporte (R$)</label>
-            <TextInput value={amount} onChange={setAmount} placeholder="1.000,00" numeral />
+            <label className="field__label" htmlFor={amountFieldId}>Valor do aporte (R$)</label>
+            <TextInput id={amountFieldId} value={amount} onChange={setAmount} placeholder="1.000,00" numeral />
           </div>
           <div className="field" style={{ width: 160 }}>
-            <label className="field__label">Data das compras</label>
-            <TextInput value={tradedOn} onChange={setTradedOn} type="date" />
+            <label className="field__label" htmlFor={tradedOnFieldId}>Data das compras</label>
+            <TextInput id={tradedOnFieldId} value={tradedOn} onChange={setTradedOn} type="date" />
           </div>
           {plan.data && (
             <span className="muted" style={{ fontSize: 'var(--text-xs)', paddingBottom: 10 }}>

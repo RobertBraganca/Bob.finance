@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useMeta } from '../lib/store'
@@ -174,13 +174,16 @@ export function PatrimonioPage() {
               <>
                 <div className="stack stack--tight">
                   {illiquid.data.items.map((item) => (
-                    <div key={item.assetId} className="asset-row">
-                      <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0 }}>
+                    <div key={item.assetId} className="asset-row" style={{ alignItems: 'flex-start' }}>
+                      <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0, alignItems: 'flex-start' }}>
                         <span className="icon-chip">
                           <Icon name="landmark" size={16} />
                         </span>
                         <span className="stack" style={{ gap: 0, minWidth: 0 }}>
-                          <span className="truncate" style={{ fontWeight: 600 }}>
+                          {/* Sem truncate (revisão de responsividade de 26/09/2026):
+                              nome do bem é texto livre do usuário, cortado virava
+                              "Celular de tr…" num telefone. */}
+                          <span style={{ fontWeight: 600 }}>
                             {item.name}
                           </span>
                           <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
@@ -241,12 +244,17 @@ function CompositionRow({
   negative?: boolean
 }) {
   return (
-    <div className="asset-row">
-      <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0 }}>
+    <div className="asset-row" style={{ alignItems: 'flex-start' }}>
+      <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0, alignItems: 'flex-start' }}>
         <span className="icon-chip icon-chip--sm">
           <Icon name={icon} size={14} />
         </span>
-        <span className="truncate">{label}</span>
+        {/* Sem truncate (revisão de responsividade de 26/09/2026): "Investimentos
+            negociáveis" cortava pra "Investimentos neg…" num telefone — quebrar
+            em duas linhas custa altura, que sobra, nunca legibilidade.
+            `minWidth: 0` sozinho (sem overflow:hidden do truncate) é o que
+            deixa o item de flex encolher e quebrar linha em vez de estourar. */}
+        <span style={{ minWidth: 0 }}>{label}</span>
       </span>
       <span
         className="tabular"
@@ -282,6 +290,8 @@ function AddAssetModal({ onClose }: { onClose: () => void }) {
   const meta = useMeta()
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
+  const nameFieldId = useId()
+  const valueFieldId = useId()
 
   const create = useMutation({
     mutationFn: async () => {
@@ -314,16 +324,18 @@ function AddAssetModal({ onClose }: { onClose: () => void }) {
         <DialogTitle>Adicionar bem ao patrimônio</DialogTitle>
         <div className="stack stack--loose">
           <div className="field">
-            <label className="field__label">Nome do bem</label>
+            <label className="field__label" htmlFor={nameFieldId}>Nome do bem</label>
             <Input
+              id={nameFieldId}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Apartamento, carro, aliança..."
             />
           </div>
           <div className="field">
-            <label className="field__label">Valor estimado</label>
+            <label className="field__label" htmlFor={valueFieldId}>Valor estimado</label>
             <Input
+              id={valueFieldId}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder="0,00"
@@ -352,6 +364,7 @@ function RevalueModal({ item, onClose }: { item: IlliquidItem; onClose: () => vo
   const queryClient = useQueryClient()
   const meta = useMeta()
   const [value, setValue] = useState(() => centsToInput(item.valueCents))
+  const valueFieldId = useId()
 
   const save = useMutation({
     mutationFn: () =>
@@ -373,8 +386,9 @@ function RevalueModal({ item, onClose }: { item: IlliquidItem; onClose: () => vo
         <DialogTitle>Atualizar valor de {item.name}</DialogTitle>
         <div className="stack stack--loose">
           <div className="field">
-            <label className="field__label">Valor atual</label>
+            <label className="field__label" htmlFor={valueFieldId}>Valor atual</label>
             <Input
+              id={valueFieldId}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder="0,00"
