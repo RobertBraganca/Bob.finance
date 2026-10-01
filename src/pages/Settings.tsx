@@ -413,7 +413,12 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
 
   const reportedCents = parseMoneyInput(reported)
   const diffCents = reportedCents === null ? 0 : reportedCents - derivedCents
-  const reajusteCategoryId = options.find((o) => o.path === 'Financeiro/Reajuste de saldo')?.id ?? null
+  // Por nome, não pelo texto do caminho: o servidor monta o caminho como
+  // "Financeiro / Reajuste de saldo" (com espaços), e a comparação exata com
+  // "Financeiro/Reajuste de saldo" nunca casava, então todo reajuste saía
+  // sem TAG e virava receita ou despesa pelo sinal (achado de 01/10/2026).
+  const reajusteCategoryId =
+    options.find((o) => o.name === 'Reajuste de saldo' && o.parentName === 'Financeiro' && o.kind === 'transfer')?.id ?? null
   const direction: 'in' | 'out' = diffCents >= 0 ? 'in' : 'out'
 
   const launch = useMutation({

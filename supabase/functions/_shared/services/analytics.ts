@@ -24,8 +24,15 @@ import { merchantSignature } from '../core/normalize.ts'
 // c.kind is the category_kind enum; cast to text so both CASE branches
 // resolve to the same type (Postgres, unlike SQLite, won't implicitly
 // coerce an enum column against a text literal in the other branch).
+// Reajuste de saldo (Conferir saldo, decisions/0018) corrige o saldo da
+// conta, mas não é receita nem despesa: conta como transferência qualquer
+// que seja a TAG, inclusive nenhuma. Sem isso, um reajuste sem TAG caía na
+// regra do sinal e aparecia como receita do mês (01/10/2026: R$ 1.854,37
+// de "receita" que eram dois reajustes). Saldo continua somando o reajuste:
+// ele é derivado de todos os lançamentos, não desta classificação.
 const FLOW_KIND = sql`
   case
+    when t.source = 'adjustment' then 'transfer'
     when c.kind is null then (case when t.amount_cents > 0 then 'income' else 'expense' end)
     else c.kind::text
   end`
