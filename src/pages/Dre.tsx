@@ -153,7 +153,7 @@ export function DrePage() {
       <PageHeader
         title="DRE PJ x PF"
         subtitle="Receita e despesa por TAG, separadas por conta"
-        actions={<RangeFilter hideAccountFilter />}
+        filters={<RangeFilter hideAccountFilter />}
       />
 
       <div className="page">
@@ -422,7 +422,8 @@ function ReconciliationSlab({
       </div>
 
       <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-xs)', marginTop: 'var(--sp-1)' }}>
-        Cada coluna abaixo já exclui transferências entre as próprias contas, senão a mesma
+        Cada coluna abaixo já exclui transferências entre as próprias contas (a da PJ mostra o
+        pró-labore numa linha à parte, como despesa administrativa), senão a mesma
         receita contaria duas vezes e isso faz cada conta parecer mais extrema do que realmente
         é. Esta linha soma de volta o que passou de uma conta para a outra, pareado por valor e
         data (não pela categoria, que nem sempre bate nos dois lados do mesmo repasse).
@@ -488,7 +489,6 @@ function BusinessSummary({
   serviceAverages: DreResponse['serviceAverages']
   proLaboreCents: number
 }) {
-  const expenseCents = totals.expenseCents + proLaboreCents
   const netResult = result - proLaboreCents
   const taxaEconomiaBps = totals.incomeCents > 0 ? Math.round((netResult / totals.incomeCents) * 10_000) : 0
 
@@ -497,13 +497,18 @@ function BusinessSummary({
       <span className="kv__k">(+) Receita Bruta (Entradas)</span>
       <span className="kv__v pos">{money(totals.incomeCents)}</span>
 
-      <span
-        className="kv__k"
-        title={proLaboreCents > 0 ? `Inclui ${money(proLaboreCents)} de pró-labore repassado à pessoa física` : undefined}
-      >
-        (−) Despesas Totais (Saídas+Custos)
-      </span>
-      <span className="kv__v neg">{money(expenseCents)}</span>
+      <span className="kv__k">(−) Despesas (Saídas+Custos)</span>
+      <span className="kv__v neg">{money(totals.expenseCents)}</span>
+
+      {/* Linha própria (revisão beta de 30/09/2026): somado às despesas, o
+          repasse contradizia o texto da tela de que as colunas excluem
+          transferências. A conta é a mesma, só ficou visível. */}
+      {proLaboreCents > 0 && (
+        <>
+          <span className="kv__k">(−) Pró-labore repassado à pessoa física</span>
+          <span className="kv__v neg">{money(proLaboreCents)}</span>
+        </>
+      )}
 
       <span className="kv__k" title="Média histórica da conta PJ, não afetada pelo período selecionado">
         Custo médio de serviço

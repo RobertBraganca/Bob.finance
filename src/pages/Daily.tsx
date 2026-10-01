@@ -82,10 +82,8 @@ export function DailyPage() {
     <>
       <PageHeader
         title="Diário"
-        subtitle={periodLong(period)}
-        actions={
-          <PeriodNav period={period} onChange={setPeriod} max={today.slice(0, 7)} />
-        }
+        subtitle="Lançamento rápido e o ritmo de gasto do mês"
+        filters={<PeriodNav period={period} onChange={setPeriod} max={today.slice(0, 7)} />}
       />
 
       <div className="page">

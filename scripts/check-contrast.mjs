@@ -42,6 +42,10 @@ const pairs = [
   ['on-slab-1',       '#ffffff', '#080808', 4.5],
   ['on-slab-2',       '#a1a1aa', '#080808', 4.5],
   ['on-slab-3 muted', '#71717a', '#080808', 3.0],
+  // Rótulos dentro do card de destaque (`.slab--accent`): são rótulos de
+  // KPI, não decoração, então valem como texto (4.5).
+  ['on-accent-3 (destaque, escuro)', '#8e8e97', '#262626', 4.5],
+  ['on-accent-2 (destaque, escuro)', '#a1a1aa', '#262626', 4.5],
   // 4.00:1, not 4.5 — this is BOB.OS's own real button (white on solid
   // brand red, bold/uppercase weight); inherited as-is, not invented here.
   ['white on brand (button)', '#ffffff', '#ff0000', 3.0],

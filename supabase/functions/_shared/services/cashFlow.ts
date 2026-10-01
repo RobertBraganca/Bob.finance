@@ -375,7 +375,24 @@ export async function deleteForecast(id: number) {
 }
 
 /** Re-materializes every active template — called opportunistically so the rolling horizon never runs dry. */
-export async function materializeAll(): Promise<{ created: number }> {
+/**
+ * Execução em andamento, compartilhada. O Painel pede pendentes de receita,
+ * pendentes de despesa e previsões ao mesmo tempo, e as três rotas chamavam
+ * isto em paralelo: três passadas idênticas por todas as previsões, disputando
+ * o mesmo pool de conexões (revisão beta de 30/09/2026). Só junta chamadas
+ * SIMULTÂNEAS; a próxima carga roda de novo, então o horizonte continua
+ * avançando com o tempo como antes.
+ */
+let materializeAllInFlight: Promise<{ created: number }> | null = null
+
+export function materializeAll(): Promise<{ created: number }> {
+  materializeAllInFlight ??= runMaterializeAll().finally(() => {
+    materializeAllInFlight = null
+  })
+  return materializeAllInFlight
+}
+
+async function runMaterializeAll(): Promise<{ created: number }> {
   let created = 0
   for (const f of await listForecasts()) created += (await materialize(f.id)).created
   return { created }
@@ -657,20 +674,41 @@ export async function reconciliationCandidates(): Promise<ReconciliationCandidat
   )
   const out: ReconciliationCandidate[] = []
 
-  for (const p of pendingRows) {
-    const windowStart = addDays(p.postedOn, -15)
-    const windowEnd = addDays(p.postedOn, 15)
-    const matches = await db.execute<{ id: number; postedOn: string; description: string; amountCents: number }>(sql`
-      select id, posted_on as "postedOn", description, amount_cents as "amountCents"
-      from transactions
-      where pending = false
-        and account_id = ${p.accountId}
-        and amount_cents = ${p.amountCents}
-        and posted_on between ${windowStart} and ${windowEnd}
-      order by posted_on
+  if (pendingRows.length === 0) return out
+
+  // Uma consulta só para todos os pendentes. Antes era uma por pendente
+  // (~130 idas ao banco, ~10s no Painel). Mesmos critérios: mesma conta,
+  // mesmo valor, até 15 dias antes ou depois, no máximo 3 por pendente.
+  const ids = sql.join(
+    pendingRows.map((p) => sql`${p.id}`),
+    sql`, `,
+  )
+  type MatchRow = { pendingId: number; id: number; postedOn: string; description: string; amountCents: number }
+  const matches = await db.execute<MatchRow>(sql`
+    select p.id as "pendingId", m.id, m.posted_on as "postedOn", m.description, m.amount_cents as "amountCents"
+    from transactions p
+    cross join lateral (
+      select t.id, t.posted_on, t.description, t.amount_cents
+      from transactions t
+      where t.pending = false
+        and t.account_id = p.account_id
+        and t.amount_cents = p.amount_cents
+        and t.posted_on between to_char(p.posted_on::date - 15, 'YYYY-MM-DD')
+                            and to_char(p.posted_on::date + 15, 'YYYY-MM-DD')
+      order by t.posted_on
       limit 3
-    `)
-    for (const match of matches) {
+    ) m
+    where p.id in (${ids})
+  `)
+  const byPending = new Map<number, MatchRow[]>()
+  for (const match of matches) {
+    const list = byPending.get(Number(match.pendingId)) ?? []
+    list.push(match)
+    byPending.set(Number(match.pendingId), list)
+  }
+
+  for (const p of pendingRows) {
+    for (const { pendingId: _pendingId, ...match } of byPending.get(p.id) ?? []) {
       if (dismissed.has(`${p.id}-${match.id}`)) continue
       out.push({ pending: p, match })
     }
@@ -731,12 +769,6 @@ export async function confirmReconciliation(pendingId: number, matchId?: number)
     }
   }
   return deletePending(pendingId)
-}
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
 }
 
 

@@ -7,6 +7,7 @@ import { telemetry } from './lib/telemetry'
 import { useAuth } from './lib/auth'
 import { useUserProfile } from './lib/store'
 import { LoginPage } from './pages/Login'
+import { NotFoundPage, RouteErrorBoundary, clearChunkReloadFlag } from './components/shell/RouteErrorBoundary'
 
 /**
  * Uma tela por rota, carregada só na primeira visita — antes disto, o
@@ -144,6 +145,12 @@ function usePageTitle() {
  * qualquer outra query autenticada) nunca dispara com um 401 previsível
  * enquanto ninguém logou ainda.
  */
+/** Só monta quando a rota terminou de carregar: aí a recarga automática de chunk pode valer de novo. */
+function ChunkLoaded() {
+  useEffect(() => clearChunkReloadFlag(), [])
+  return null
+}
+
 function AuthedApp() {
   // Revisão de UX de 26/09/2026: modo "Pessoal" trava telas pensadas só pra
   // quem fatura como PJ/freelancer. Enquanto o perfil ainda carrega, o
@@ -152,18 +159,24 @@ function AuthedApp() {
   // `personal`.
   const profile = useUserProfile()
   const isPersonalAccount = profile.data?.profile.accountType === 'personal'
+  const location = useLocation()
 
   return (
     <SidebarProvider>
       <Sidebar />
-      <SidebarInset>
+      {/* `min-w-0`: sem isso a área principal crescia até o conteúdo mais
+          largo (as 7 abas de Investimentos, 113px além da tela em 840px) em
+          vez de deixar a pílula de abas rolar por dentro. */}
+      <SidebarInset className="min-w-0">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
           <SidebarTrigger />
           <span className="text-sm font-semibold">Finanças</span>
         </div>
         <div className="main">
           <PortWarning />
+          <RouteErrorBoundary resetKey={location.pathname}>
           <Suspense fallback={<RouteFallback />}>
+            <ChunkLoaded />
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/diario" element={<DailyPage />} />
@@ -192,8 +205,10 @@ function AuthedApp() {
               <Route path="/parcelamentos" element={<Navigate to="/lancamentos" replace />} />
               <Route path="/aposentadoria" element={<Navigate to="/investimentos" replace />} />
               <Route path="/motor" element={<Navigate to="/saude" replace />} />
+              <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Suspense>
+          </RouteErrorBoundary>
         </div>
       </SidebarInset>
     </SidebarProvider>

@@ -186,6 +186,7 @@ export async function listTransactions(filter: TransactionFilter) {
     db
       .select({
         count: sql<number>`count(*)`,
+        pendingCount: sql<number>`coalesce(sum(case when pending = true then 1 else 0 end), 0)`,
         inflowCents: sql<number>`coalesce(sum(case when amount_cents > 0 and pending = false then amount_cents else 0 end), 0)`,
         outflowCents: sql<number>`coalesce(sum(case when amount_cents < 0 and pending = false then -amount_cents else 0 end), 0)`,
         pendingInflowCents: sql<number>`coalesce(sum(case when amount_cents > 0 and pending = true then amount_cents else 0 end), 0)`,
@@ -199,6 +200,7 @@ export async function listTransactions(filter: TransactionFilter) {
   return {
     rows,
     total: totals?.count ?? 0,
+    pendingCount: Number(totals?.pendingCount ?? 0),
     inflowCents: totals?.inflowCents ?? 0,
     outflowCents: totals?.outflowCents ?? 0,
     pendingInflowCents: totals?.pendingInflowCents ?? 0,

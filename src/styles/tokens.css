@@ -309,7 +309,10 @@
      mesmo de qualquer slab. */
   --on-accent-1: #ffffff;
   --on-accent-2: #a1a1aa;
-  --on-accent-3: #71717a;
+  /* #71717a dava 3,13:1 sobre #262626 e é o tom dos rótulos dos KPIs do
+     Painel (revisão beta de 30/09/2026). #8e8e97 dá 4,66:1 e continua um
+     passo abaixo do --on-accent-2. */
+  --on-accent-3: #8e8e97;
   --slab-accent-line: #333333;
   --slab-overlay-weak: rgba(255, 255, 255, 0.08);
   --slab-overlay-strong: rgba(255, 255, 255, 0.14);

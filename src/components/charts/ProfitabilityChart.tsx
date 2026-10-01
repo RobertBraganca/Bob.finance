@@ -186,7 +186,7 @@ export function ProfitabilityChart({
     title: fmtPeriod(label),
     rows: availableKeys
       .filter((key) => !hidden.has(key) && point[key] !== undefined)
-      .map((key) => ({ label: labelFor(key), value: `${point[key]!.toFixed(1)}`, color: seriesColor(theme, key) })),
+      .map((key) => ({ label: labelFor(key), value: point[key]!.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }), color: seriesColor(theme, key) })),
   }))
 
   return (
@@ -201,7 +201,7 @@ export function ProfitabilityChart({
           { header: 'Mês', value: (row) => fmtPeriod(row.period) },
           ...availableKeys.map((key) => ({
             header: labelFor(key),
-            value: (row: IndexPoint) => (row[key] !== undefined ? row[key]!.toFixed(1) : '-'),
+            value: (row: IndexPoint) => (row[key] !== undefined ? row[key]!.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '-'),
             align: 'right' as const,
           })),
         ],

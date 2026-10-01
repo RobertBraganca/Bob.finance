@@ -4,7 +4,7 @@ import { Segmented } from './index'
 import { DateRangeFields, usePopoverDismiss } from './DateRangePopover'
 import { MonthGrid } from './MonthGrid'
 import { date as fmtDate, periodLong as fmtPeriodLong } from '../../lib/format'
-import { singleMonthOf } from '../../lib/period'
+import { shiftPeriod, singleMonthOf } from '../../lib/period'
 import type { RangePreset } from '../../lib/store'
 
 const QUICK_PRESETS: Array<{ value: RangePreset; label: string }> = [
@@ -74,24 +74,49 @@ export function PeriodPickerPopover({
     setOpen(false)
   }
 
-  const selectMonth = (monthIndex0: number) => {
-    const y = viewYear
-    const m = monthIndex0 + 1
-    const period = `${y}-${String(m).padStart(2, '0')}`
-    const fromIso = `${period}-01`
+  const applyMonth = (period: string) => {
+    const [y, m] = period.split('-').map(Number) as [number, number]
     const isCurrentMonth = period === anchor.slice(0, 7)
     const toIso = isCurrentMonth ? anchor : `${period}-${String(daysInMonth(y, m)).padStart(2, '0')}`
-    onCustom(fromIso, toIso)
+    onCustom(`${period}-01`, toIso)
+  }
+
+  const selectMonth = (monthIndex0: number) => {
+    applyMonth(`${viewYear}-${String(monthIndex0 + 1).padStart(2, '0')}`)
     setOpen(false)
   }
 
   return (
-    <div className="popover-anchor" ref={anchorRef}>
+    <div className="popover-anchor period-stepper" ref={anchorRef}>
+      {/* Setas só com um mês em foco: "3m" ou um intervalo livre não têm um
+          "anterior" óbvio de um clique. */}
+      {selectedMonth && (
+        <button
+          type="button"
+          className="btn btn--ghost btn--icon btn--sm"
+          aria-label="Mês anterior"
+          title="Mês anterior"
+          onClick={() => applyMonth(shiftPeriod(selectedMonth, -1))}
+        >
+          <Icon name="arrowLeft" size={13} />
+        </button>
+      )}
       <button type="button" className="filter-select" onClick={() => setOpen((v) => !v)}>
         <Icon name="calendar" size={14} className="filter-select__icon" />
         <span className="filter-select__value">{triggerLabel}</span>
         <Icon name="chevronDown" size={13} className="filter-select__chevron" />
       </button>
+      {selectedMonth && (
+        <button
+          type="button"
+          className="btn btn--ghost btn--icon btn--sm"
+          aria-label="Próximo mês"
+          title="Próximo mês"
+          onClick={() => applyMonth(shiftPeriod(selectedMonth, 1))}
+        >
+          <Icon name="arrowRight" size={13} />
+        </button>
+      )}
       {open && (
         <div className="popover-panel period-picker" role="dialog" aria-label="Escolher período">
           <Segmented

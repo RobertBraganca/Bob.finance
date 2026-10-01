@@ -236,6 +236,49 @@
   font-size: clamp(var(--text-2xl), 6vw, var(--text-hero));
 }
 
+/* ---- Faixa de KPIs do Painel (30/09/2026) ----------------------------
+   Um por linha no telefone (valores como "R$ 1.504.355,61" não cabem em
+   meia largura de 375px sem quebrar), 2x2 a partir de 560px e os quatro
+   lado a lado só quando cada um ganha ~240px. */
+.kpi-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+@media (min-width: 560px) {
+  .kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .kpi-row--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1180px) {
+  .kpi-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .kpi-row--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.kpi__value {
+  font-size: clamp(var(--text-lg), 3vw, var(--text-xl));
+}
+/* Texto, não preenchimento: por isso os passos --delta-* (contraste de
+   texto), nunca os --status-* de medidor. */
+.kpi__value--up {
+  color: var(--delta-up);
+}
+.kpi__value--down {
+  color: var(--delta-down);
+}
+
 /* Altura fixa e baixa: a sparkline é contexto do número, não um gráfico
    por si — se crescer, compete com o valor logo acima. */
 .sparkline {
@@ -688,6 +731,12 @@
 .popover-panel--right {
   left: auto;
   right: 0;
+}
+
+/* ‹ [setembro de 2026] › — mês anterior/próximo sem abrir o seletor. */
+.period-stepper {
+  align-items: center;
+  gap: 2px;
 }
 
 /* ---- Sino de notificações ---------------------------------------------

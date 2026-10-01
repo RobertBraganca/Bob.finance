@@ -43,6 +43,7 @@ import {
 } from '../components/charts/DebtCharts'
 import { DebtHistoryChart } from '../components/charts/DebtHistoryChart'
 import { CategoryRing } from '../components/charts/CategoryRing'
+import { todayIso } from '../lib/period'
 
 const KIND_LABEL: Record<string, string> = {
   credit_card: 'Cartão de crédito',
@@ -660,7 +661,7 @@ function ReconciliationQueueCard({
                 {match.description} · recebido em {fmtDate(match.postedOn)}
               </div>
             </div>
-            <span className="row" style={{ gap: 'var(--sp-3)' }}>
+            <span className="row row--wrap" style={{ gap: 'var(--sp-2) var(--sp-3)' }}>
               <span className="stack" style={{ gap: 0 }}>
                 <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
                   cadastrado / CSV
@@ -701,7 +702,7 @@ function ReconciliationQueueCard({
                 {mismatch.paymentCount} pagamento(s) registrado(s) · {mismatch.confirmedTransactionCount} lançamento(s) confirmado(s) no extrato
               </div>
             </div>
-            <span className="row" style={{ gap: 'var(--sp-3)' }}>
+            <span className="row row--wrap" style={{ gap: 'var(--sp-2) var(--sp-3)' }}>
               <span className="stack" style={{ gap: 0 }}>
                 <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
                   cadastrado
@@ -1177,6 +1178,11 @@ function DebtPaymentModal({ debt, onClose }: { debt: DebtRow; onClose: () => voi
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
             <label className="field__label" htmlFor={paidOnFieldId}>Data</label>
             <TextInput id={paidOnFieldId} value={paidOn} onChange={setPaidOn} type="date" />
+            {paidOn > todayIso() && (
+              <p className="field__hint" role="status">
+                Data no futuro: o pagamento já abate o saldo da dívida e entra nos totais desse mês.
+              </p>
+            )}
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
             <label className="field__label" htmlFor={amountFieldId}>Valor (R$)</label>

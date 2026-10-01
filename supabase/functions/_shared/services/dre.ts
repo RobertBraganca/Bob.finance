@@ -118,6 +118,8 @@ export async function formalDre(range: Range): Promise<FormalDre> {
         t.amount_cents,
         c.dre_group,
         case
+          -- Reajuste de saldo nunca é receita nem despesa (ver FLOW_KIND em analytics.ts).
+          when t.source = 'adjustment' then 'transfer'
           when c.kind is null then (case when t.amount_cents > 0 then 'income' else 'expense' end)
           else c.kind::text
         end as flow
