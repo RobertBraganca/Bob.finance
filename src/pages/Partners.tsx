@@ -161,13 +161,11 @@ export function PartnersPage() {
         title="Receita de parceiros"
         subtitle="Comissões acumuladas nas plataformas e o que já virou dinheiro em conta"
         actions={
-          <div className="row">
-            <PeriodNav period={period} onChange={setPeriod} />
-            <Button variant="primary" icon="plus" onClick={() => setAddingPlatform(true)}>
-              Cadastrar plataforma
-            </Button>
-          </div>
+          <Button variant="primary" icon="plus" onClick={() => setAddingPlatform(true)}>
+            Cadastrar plataforma
+          </Button>
         }
+        filters={<PeriodNav period={period} onChange={setPeriod} />}
       />
 
       <div className="page">

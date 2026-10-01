@@ -210,7 +210,7 @@ export function Dashboard() {
   if (!dashboard.data) {
     return (
       <>
-        <PageHeader title={`${greetingWord(profile.data?.profile.displayName)}!`} actions={<RangeFilter hideAccountFilter />} />
+        <PageHeader title={`${greetingWord(profile.data?.profile.displayName)}!`} filters={<RangeFilter hideAccountFilter />} />
         <div className="page">
           <PageSkeleton cards={DASHBOARD_SKELETON_CARDS} />
         </div>
@@ -261,7 +261,7 @@ export function Dashboard() {
       <PageHeader
         title={`${greetingWord(profile.data?.profile.displayName)}!`}
         subtitle="O que está acontecendo no período"
-        actions={<RangeFilter hideAccountFilter />}
+        filters={<RangeFilter hideAccountFilter />}
       />
 
       {/* Enquanto o período novo carrega, os números ainda são do anterior:

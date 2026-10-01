@@ -384,16 +384,21 @@ svg {
   flex-direction: column;
 }
 
-/* Mobile: title stacks above its actions instead of squeezing onto one
-   row — that squeeze is exactly what was clipping the heading behind
-   the period pills at phone width. */
+/* Barra superior em grupos (PageHeader, Shell.tsx), em vez de um bloco
+   único que quebrava linha onde dava (01/10/2026):
+   [título ........ ações + sino] / [filtros]
+   Ações e sino são um bloco só: se não cabem ao lado do título, descem
+   juntos e ficam à direita. Os filtros nunca dividem a linha do título:
+   com período, conta, datas e exportar, não cabem ao lado de um título e
+   de um botão principal nem num desktop de 1440px, e uma linha que às
+   vezes quebra e às vezes não muda de forma a cada página. */
 .topbar {
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: var(--sp-3);
   padding: var(--sp-4);
   background: color-mix(in srgb, var(--paper) 88%, transparent);
@@ -411,23 +416,51 @@ svg {
 }
 
 .topbar__title {
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+.topbar__end {
+  flex: 0 1 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
 }
 
 .topbar__actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--sp-2);
   flex-wrap: wrap;
 }
 
-/* Pages group their header buttons in a `.row`, which does not wrap by
-   itself — so the group stayed one indivisible block and overflowed the
-   viewport on a phone however much the container was willing to wrap
-   (Investimentos: 468px of buttons in a 343px bar). Inside the topbar the
-   group is allowed to break; everywhere else `.row` keeps its single line. */
+.topbar__filters {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+}
+
+@media (min-width: 768px) {
+  .topbar {
+    align-items: center;
+  }
+}
+
 .topbar__actions .row {
   flex-wrap: wrap;
+}
+
+/* O RangeFilter é um `.row` próprio: dentro da faixa de filtros ele virava
+   uma caixa que tomava a linha toda, e o que vinha depois (Exportar CSV)
+   descia para outra linha mesmo cabendo ao lado. `contents` põe período,
+   conta e datas na mesma fila dos outros filtros. */
+.topbar__filters > .row {
+  display: contents;
 }
 
 .page {
@@ -598,13 +631,8 @@ svg {
   }
 
   .topbar {
-    flex-direction: row;
-    align-items: center;
     min-height: var(--topbar-h);
     padding: var(--sp-4) var(--sp-6);
-  }
-  .topbar__actions {
-    margin-left: auto;
   }
 
   .page {

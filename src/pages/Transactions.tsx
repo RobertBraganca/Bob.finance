@@ -410,36 +410,40 @@ export function TransactionsPage() {
         }
         actions={
           tab === 'ledger' ? (
-            <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+            <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
+              Novo lançamento
+            </Button>
+          ) : (
+            <Button variant="primary" icon="plus" onClick={() => setInstallmentModal('new')}>
+              Novo parcelamento
+            </Button>
+          )
+        }
+        filters={
+          tab === 'ledger' ? (
+            <>
               <RangeFilter />
               <Button
                 variant="quiet"
                 icon="download"
                 onClick={() => exportCsv.mutate()}
                 disabled={exportCsv.isPending || (query.data?.total ?? 0) === 0}
+                loading={exportCsv.isPending}
                 title="Exportar lançamentos do período e filtros atuais para CSV"
               >
                 Exportar CSV
               </Button>
-              <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
-                Novo lançamento
-              </Button>
-            </div>
+            </>
           ) : (
-            <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
-              <label className="row" style={{ gap: 'var(--sp-2)', fontSize: 'var(--text-sm)' }}>
-                <input
-                  type="checkbox"
-                  className="checkbox"
-                  checked={installmentIncludeInactive}
-                  onChange={(event) => setInstallmentIncludeInactive(event.target.checked)}
-                />
-                Mostrar ocultos
-              </label>
-              <Button variant="primary" icon="plus" onClick={() => setInstallmentModal('new')}>
-                Novo parcelamento
-              </Button>
-            </div>
+            <label className="row" style={{ gap: 'var(--sp-2)', fontSize: 'var(--text-sm)' }}>
+              <input
+                type="checkbox"
+                className="checkbox"
+                checked={installmentIncludeInactive}
+                onChange={(event) => setInstallmentIncludeInactive(event.target.checked)}
+              />
+              Mostrar ocultos
+            </label>
           )
         }
       />

@@ -153,7 +153,7 @@ export function DrePage() {
       <PageHeader
         title="DRE PJ x PF"
         subtitle="Receita e despesa por TAG, separadas por conta"
-        actions={<RangeFilter hideAccountFilter />}
+        filters={<RangeFilter hideAccountFilter />}
       />
 
       <div className="page">

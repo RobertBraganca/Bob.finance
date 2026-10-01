@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { currentPeriod } from '../lib/period'
 import { useMeta, useRange } from '../lib/store'
-import { bps, bpsToInput, money, parsePercentInput, periodLong, points } from '../lib/format'
+import { bps, bpsToInput, money, parsePercentInput, points } from '../lib/format'
 import {
   Assumptions,
   Bento,
@@ -237,9 +237,9 @@ export function FinancialHealthPage() {
       <PageHeader
         title="Saúde financeira"
         subtitle="Health Score, runway e radar de risco do mês"
+        filters={<PeriodNav period={resolvedPeriod ?? currentPeriod()} onChange={setPeriod} />}
         actions={
           <div className="row">
-            <PeriodNav period={resolvedPeriod ?? currentPeriod()} onChange={setPeriod} />
             {tab === 'geral' ? (
               <>
                 <Button size="sm" icon="sparkle" onClick={() => setSimulating(true)}>

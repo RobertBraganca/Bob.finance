@@ -164,7 +164,10 @@ function AuthedApp() {
   return (
     <SidebarProvider>
       <Sidebar />
-      <SidebarInset>
+      {/* `min-w-0`: sem isso a área principal crescia até o conteúdo mais
+          largo (as 7 abas de Investimentos, 113px além da tela em 840px) em
+          vez de deixar a pílula de abas rolar por dentro. */}
+      <SidebarInset className="min-w-0">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
           <SidebarTrigger />
           <span className="text-sm font-semibold">Finanças</span>

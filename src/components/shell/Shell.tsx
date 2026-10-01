@@ -26,6 +26,7 @@ import { useMeta, useRange, useUserProfile } from '../../lib/store'
 import { useTheme } from '../../lib/theme'
 import { useAuth } from '../../lib/auth'
 import { date as fmtDate } from '../../lib/format'
+import { periodBounds, singleMonthOf } from '../../lib/period'
 import logo from '../../assets/logo-red.svg'
 
 type NavItem = {
@@ -222,6 +223,11 @@ export function RangeFilter({ hideAccountFilter }: { hideAccountFilter?: boolean
   const range = useRange()
   const meta = useMeta()
   const accounts = meta.data?.accounts ?? []
+  // Com um mês inteiro escolhido, "01/09/2026 a 30/09/2026" só repete o
+  // rótulo do seletor. As datas continuam para 3m/6m/ano, intervalo livre e
+  // o mês corrente (que vai só até hoje).
+  const month = singleMonthOf(range)
+  const showDates = !month || range.to !== periodBounds(month).to
 
   return (
     <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
@@ -242,21 +248,35 @@ export function RangeFilter({ hideAccountFilter }: { hideAccountFilter?: boolean
           onChange={range.setAccountId}
         />
       )}
-      <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-        {fmtDate(range.from)} a {fmtDate(range.to)}
-      </span>
+      {showDates && (
+        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+          {fmtDate(range.from)} a {fmtDate(range.to)}
+        </span>
+      )}
     </div>
   )
 }
 
+/**
+ * Três grupos com papéis diferentes, que antes dividiam um bloco só e
+ * quebravam linha onde dava (o botão principal e o sino acabavam sozinhos,
+ * cada um numa linha; revisão de 01/10/2026):
+ * - `actions`: o que a página FAZ (botão principal, configurar). Fica junto
+ *   do título, num bloco só com o sino.
+ * - `filters`: o RECORTE dos dados (período, conta, opções da lista) e ações
+ *   sobre esse recorte (exportar). Sempre numa faixa própria, abaixo.
+ * O layout de cada largura vive em `.topbar` (base.css).
+ */
 export function PageHeader({
   title,
   subtitle,
   actions,
+  filters,
 }: {
   title: string
   subtitle?: ReactNode
   actions?: ReactNode
+  filters?: ReactNode
 }) {
   return (
     <header className="topbar">
@@ -268,10 +288,13 @@ export function PageHeader({
           </p>
         )}
       </div>
-      <div className="topbar__actions">
-        {actions}
+      {/* Ações e sino num bloco só: se não couberem ao lado do título, descem
+          juntos, em vez de o sino sobrar sozinho numa linha. */}
+      <div className="topbar__end">
+        {actions && <div className="topbar__actions">{actions}</div>}
         <NotificationsBell />
       </div>
+      {filters && <div className="topbar__filters">{filters}</div>}
     </header>
   )
 }
