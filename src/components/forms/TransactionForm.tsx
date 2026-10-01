@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { useAccounts } from '../../lib/store'
+import { todayIso } from '../../lib/period'
 import { CategorySelect, Segmented, Select, TextInput } from '../ui'
 
 /**
@@ -59,6 +60,13 @@ export function TransactionForm({
         <div className="field" style={{ flex: 1, minWidth: 150 }}>
           <label className="field__label" htmlFor={postedOnFieldId}>Data</label>
           <TextInput id={postedOnFieldId} value={value.postedOn} onChange={(postedOn) => onChange({ postedOn })} type="date" />
+          {/* Um confirmado com data futura entra nos totais de um mês que
+              ainda não aconteceu (achado da revisão beta de 30/09/2026). */}
+          {!value.pending && value.postedOn > todayIso() && (
+            <p className="field__hint" role="status">
+              Data no futuro: {showPending ? `marcado como já ${value.direction === 'in' ? 'recebido' : 'pago'}` : 'confirmado'}, o valor já entra nos totais de {value.postedOn.slice(5, 7)}/{value.postedOn.slice(0, 4)}.
+            </p>
+          )}
         </div>
         <div className="field" style={{ flex: 1, minWidth: 150 }}>
           <label className="field__label" htmlFor={accountFieldId}>Conta</label>

@@ -84,6 +84,8 @@ type InstallmentRow = {
 type ListResponse = {
   rows: Row[]
   total: number
+  /** Quantos dos `total` ainda são pendentes (previsão, não extrato). */
+  pendingCount?: number
   inflowCents: number
   outflowCents: number
   pendingInflowCents: number
@@ -401,7 +403,9 @@ export function TransactionsPage() {
         title="Lançamentos"
         subtitle={
           tab === 'ledger'
-            ? `${(query.data?.total ?? 0).toLocaleString('pt-BR')} no período e filtros atuais`
+            ? `${(query.data?.total ?? 0).toLocaleString('pt-BR')} no período e filtros atuais${
+                query.data?.pendingCount ? `, sendo ${query.data.pendingCount.toLocaleString('pt-BR')} pendentes` : ''
+              }`
             : 'Compras e recebíveis parcelados, do total à última parcela'
         }
         actions={

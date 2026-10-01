@@ -401,6 +401,15 @@ svg {
   border-bottom: 1px solid var(--line);
 }
 
+/* No telefone o cabeçalho empilha título, filtros e ações e chega a 276px
+   (Lançamentos), 34% de uma tela de 812. Fixo, isso ficava ocupando a tela
+   o tempo todo (revisão beta de 30/09/2026); aqui ele rola junto. */
+@media (max-width: 767px) {
+  .topbar {
+    position: static;
+  }
+}
+
 .topbar__title {
   min-width: 0;
 }

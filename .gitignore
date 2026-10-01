@@ -27,3 +27,7 @@ src/assets/negociacao-*.xlsx
 # Chaves/segredos de MCP locais (ex. PIERRE_API_KEY referenciada por
 # ${VAR} em .mcp.json, que esse é seguro de versionar) — nunca o valor real.
 .claude/settings.local.json
+
+# Relatórios da skill beta-user: citam saldos, receitas e dívidas reais do
+# usuário, mesmo critério de data/ acima. Ficam só na máquina.
+docs/beta-reviews/

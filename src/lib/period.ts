@@ -15,6 +15,12 @@ export function shiftPeriod(period: string, months: number): string {
   return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`
 }
 
+/** Hoje como `YYYY-MM-DD`, no fuso do navegador. */
+export function todayIso(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
 /** O mês corrente, no fuso do navegador. */
 export function currentPeriod(): string {
   const now = new Date()

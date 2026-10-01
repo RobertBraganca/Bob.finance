@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react'
 import { Icon, type IconName } from './Icon'
-import { money, signedBps, signedPoints } from '../../lib/format'
+import { bps, money, signedBps, signedPoints } from '../../lib/format'
 import { CategorySelect } from './CategorySelect'
 import { FilterSelect } from './FilterSelect'
 import { Assumptions, type AssumptionBag } from './Assumptions'
@@ -767,7 +767,7 @@ export function RankedList({
         <li key={item.key} className="ranked__item">
           <span className="swatch" style={{ background: item.color }} />
           <span className="truncate">{item.name}</span>
-          <span className="ranked__share">{(item.shareBps / 100).toFixed(1)}%</span>
+          <span className="ranked__share">{bps(item.shareBps)}</span>
           <span className="ranked__value">{money(item.amountCents)}</span>
         </li>
       ))}

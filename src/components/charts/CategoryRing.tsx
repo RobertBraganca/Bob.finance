@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
-import { money, moneyCompact } from '../../lib/format'
+import { money, moneyCompact, bps } from '../../lib/format'
 import { themeFor, type Surface } from '../../lib/chartTheme'
 import { useEffectiveSurface } from '../../lib/theme'
 import { ChartFrame, makeTooltip } from './frame'
@@ -35,7 +35,7 @@ const makeSliceTooltip = (countLabel: string) =>
     title: slice.name,
     rows: [
       { label: 'Valor', value: money(slice.amountCents), color: slice.color },
-      { label: 'Participação', value: `${(slice.shareBps / 100).toFixed(1)}%` },
+      { label: 'Participação', value: bps(slice.shareBps) },
       { label: countLabel, value: String(slice.transactionCount) },
     ],
   }))
@@ -148,7 +148,7 @@ export function CategoryRing({
         columns: [
           { header: 'TAG', value: (row) => row.name },
           { header: countLabel, value: (row) => row.transactionCount, align: 'right' },
-          { header: 'Participação', value: (row) => `${(row.shareBps / 100).toFixed(1)}%`, align: 'right' },
+          { header: 'Participação', value: (row) => bps(row.shareBps), align: 'right' },
           { header: 'Valor', value: (row) => money(row.amountCents), align: 'right' },
         ],
       }}
@@ -254,7 +254,7 @@ export function CategoryRing({
                 >
                   <span className="swatch" style={{ background: segment.color }} />
                   <span className="truncate">{segment.name}</span>
-                  <span className="ranked__share">{(segment.shareBps / 100).toFixed(1)}%</span>
+                  <span className="ranked__share">{bps(segment.shareBps)}</span>
                   <span className="ranked__value">{money(segment.amountCents)}</span>
                   {/* A vaga do chevron existe mesmo quando a linha não
                       expande: sem ela, uma linha com subcategorias e outra
@@ -278,7 +278,7 @@ export function CategoryRing({
                         <span className="truncate">
                           {child.categoryId === segment.categoryId ? `${child.name} (sem subTAG)` : child.name}
                         </span>
-                        <span className="ranked__share">{(child.shareBps / 100).toFixed(1)}%</span>
+                        <span className="ranked__share">{bps(child.shareBps)}</span>
                         <span className="ranked__value">{money(child.amountCents)}</span>
                       </li>
                     ))}

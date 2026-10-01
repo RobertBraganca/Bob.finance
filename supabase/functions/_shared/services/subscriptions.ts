@@ -1,8 +1,8 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, gte, sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
 import { subscriptionDismissals, transactions } from '../db/schema.ts'
 import { merchantSignature } from '../core/normalize.ts'
-import { addMonths } from '../core/dates.ts'
+import { addMonths, addMonthsToDate, todayIso } from '../core/dates.ts'
 import { createForecast } from './cashFlow.ts'
 
 /**
@@ -20,6 +20,12 @@ import { createForecast } from './cashFlow.ts'
 const AMOUNT_TOLERANCE = 0.05
 const MIN_GAP_DAYS = 25
 const MAX_GAP_DAYS = 35
+/** Só o último ano e pouco: basta para ver uma cobrança mensal ativa. Ler o
+ * histórico inteiro (7 mil linhas desde 2019) fazia esta rota levar ~4s e
+ * segurar conexões do pool enquanto o Painel carregava (revisão beta de
+ * 30/09/2026). Um comerciante sem cobrança há mais de um ano não é
+ * assinatura para sugerir. */
+const LOOKBACK_MONTHS = 13
 
 export type SubscriptionCandidate = {
   signature: string
@@ -51,7 +57,13 @@ export async function detectSubscriptionCandidates(): Promise<SubscriptionCandid
       categoryId: transactions.categoryId,
     })
     .from(transactions)
-    .where(and(eq(transactions.pending, false), sql`${transactions.amountCents} < 0`))
+    .where(
+      and(
+        eq(transactions.pending, false),
+        sql`${transactions.amountCents} < 0`,
+        gte(transactions.postedOn, addMonthsToDate(todayIso(), -LOOKBACK_MONTHS)),
+      ),
+    )
     .orderBy(transactions.postedOn)
 
   const groups = new Map<string, typeof rows>()

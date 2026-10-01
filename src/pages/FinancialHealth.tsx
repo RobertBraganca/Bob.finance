@@ -2,7 +2,7 @@ import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { currentPeriod } from '../lib/period'
-import { useMeta } from '../lib/store'
+import { useMeta, useRange } from '../lib/store'
 import { bps, bpsToInput, money, parsePercentInput, periodLong, points } from '../lib/format'
 import {
   Assumptions,
@@ -137,13 +137,18 @@ type HealthSettings = {
 }
 
 /** "4,2 meses" / "sem despesa para calcular" — never "infinito" and never 0. */
+// Meses negativos não têm leitura ("−9 meses" de runway): com recurso zero
+// ou negativo, o que existe para dizer é que não há o que cobrir o custo.
 const monthsLabel = (months: number | null) =>
   months === null
     ? 'sem base de cálculo'
-    : `${months.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${months === 1 ? 'mês' : 'meses'}`
+    : months <= 0
+      ? 'sem saldo positivo'
+      : `${months.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${months === 1 ? 'mês' : 'meses'}`
 
 export function FinancialHealthPage() {
   const meta = useMeta()
+  const range = useRange()
   const [period, setPeriod] = useState<string | null>(null)
   /**
    * Fusão de sessão de 10/09/2026: Motor financeiro virou a aba 'motor'
@@ -158,9 +163,15 @@ export function FinancialHealthPage() {
   const [tuningEngine, setTuningEngine] = useState(false)
   const [simulating, setSimulating] = useState(false)
 
-  // The ledger's most recent month, same fallback the API uses, so the page
-  // does not open empty for someone whose statements end in the past.
-  const resolvedPeriod = period ?? meta.data?.ledger.max?.slice(0, 7) ?? meta.data?.today?.slice(0, 7) ?? null
+  // Abre no mês escolhido no filtro do resto do app (revisão beta de
+  // 30/09/2026: trocar de tela mudava o mês sem o usuário pedir). Nunca
+  // além de hoje, mesmo que exista lançamento confirmado com data futura,
+  // nem além do último mês com extrato, para não abrir vazio para quem
+  // parou de importar.
+  const defaultPeriod = [range.to.slice(0, 7), meta.data?.today?.slice(0, 7), meta.data?.ledger.max?.slice(0, 7)]
+    .filter((p): p is string => !!p)
+    .sort()[0] ?? null
+  const resolvedPeriod = period ?? defaultPeriod
 
   const score = useQuery({
     queryKey: ['financial-health-score', resolvedPeriod],
@@ -225,7 +236,7 @@ export function FinancialHealthPage() {
     <>
       <PageHeader
         title="Saúde financeira"
-        subtitle={resolvedPeriod ? periodLong(resolvedPeriod) : undefined}
+        subtitle="Health Score, runway e radar de risco do mês"
         actions={
           <div className="row">
             <PeriodNav period={resolvedPeriod ?? currentPeriod()} onChange={setPeriod} />

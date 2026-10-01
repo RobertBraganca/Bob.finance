@@ -315,7 +315,17 @@ export async function materializeDebtInstallments(debtId: number): Promise<{ cre
   return { created }
 }
 
-export async function materializeAllDebts(): Promise<{ created: number }> {
+/** Mesmo motivo de `materializeAll` em cashFlow.ts: junta só chamadas simultâneas. */
+let materializeAllDebtsInFlight: Promise<{ created: number }> | null = null
+
+export function materializeAllDebts(): Promise<{ created: number }> {
+  materializeAllDebtsInFlight ??= runMaterializeAllDebts().finally(() => {
+    materializeAllDebtsInFlight = null
+  })
+  return materializeAllDebtsInFlight
+}
+
+async function runMaterializeAllDebts(): Promise<{ created: number }> {
   const rows = await db.select({ id: debts.id }).from(debts).where(eq(debts.active, true))
   let created = 0
   for (const row of rows) created += (await materializeDebtInstallments(row.id)).created

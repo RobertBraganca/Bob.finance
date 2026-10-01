@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -11,9 +11,8 @@ import {
   type Account,
   type RangeContextValue,
 } from '../lib/store'
-import { shiftPeriod, singleMonthOf } from '../lib/period'
+import { shiftPeriod, singleMonthOf, todayIso } from '../lib/period'
 import { AccountModal, BalanceCheckModal } from './Settings'
-import { SimulatorModal } from '../components/ui/SimulatorModal'
 import {
   bps,
   centsToInput,
@@ -26,6 +25,7 @@ import {
   signedBps,
 } from '../lib/format'
 import {
+  Assumptions,
   Bento,
   Button,
   Card,
@@ -45,6 +45,7 @@ import {
   StatTile,
   TextInput,
   useToast,
+  type AssumptionBag,
   type MeterState,
   type PendingDeleteScope,
 } from '../components/ui'
@@ -148,22 +149,25 @@ type CardRow = {
  * tela real (saudação, duas linhas de dois cards, lista de pendências),
  * não uma grade de retângulos iguais. */
 const DASHBOARD_SKELETON_CARDS: Array<{ span: 6 | 12; variant: 'lines' | 'stats' | 'block'; height?: number }> = [
-  { span: 12, variant: 'stats', height: 200 },
-  { span: 6, variant: 'block', height: 140 },
-  { span: 6, variant: 'block', height: 140 },
+  { span: 12, variant: 'stats', height: 120 },
+  { span: 6, variant: 'block', height: 320 },
+  { span: 6, variant: 'block', height: 320 },
   { span: 6, variant: 'block', height: 150 },
   { span: 6, variant: 'block', height: 150 },
   { span: 12, variant: 'lines', height: 180 },
 ]
 
 export function Dashboard() {
-  const range = useRange()
+  // O Painel é sempre a visão consolidada: a barra dele não tem filtro de
+  // conta (30/09/2026), então um filtro escolhido em outra tela não pode
+  // continuar valendo aqui sem nada na tela que o mostre.
+  const range = { ...useRange(), accountId: null }
   const navigate = useNavigate()
   const meta = useMeta()
+  const profile = useUserProfile()
   const accountsQuery = useAccounts()
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [balanceCheckAccount, setBalanceCheckAccount] = useState<Account | null>(null)
-  const [simulating, setSimulating] = useState(false)
   // Revisão de UX de 26/09/2026 (Direção A do estudo de densidade): o Bento
   // arrastável/redimensionável saiu desta tela -- layout fixo, e só este
   // acordeão único controla o que fica sempre visível vs. atrás de um clique.
@@ -206,7 +210,7 @@ export function Dashboard() {
   if (!dashboard.data) {
     return (
       <>
-        <PageHeader title="Visão geral" actions={<RangeFilter />} />
+        <PageHeader title={`${greetingWord(profile.data?.profile.displayName)}!`} actions={<RangeFilter hideAccountFilter />} />
         <div className="page">
           <PageSkeleton cards={DASHBOARD_SKELETON_CARDS} />
         </div>
@@ -243,78 +247,52 @@ export function Dashboard() {
   // saíram daqui: o primeiro número já está narrado na saudação, o segundo
   // é redundante com ela, e "A receber" já aparece na lista de pendências.
 
+  // Com uma conta filtrada, o saldo mostrado é o DELA — somar todas as
+  // contas ao lado de receitas/despesas de uma conta só misturaria escopos.
+  // Conta de investimento fica fora: o que ela guarda é carteira, não saldo
+  // disponível (revisão beta de 30/09/2026), e a carteira já tem tela própria.
+  const scopedAccounts = (meta.data?.accounts ?? []).filter(
+    (account) => account.kind !== 'investment' && (range.accountId == null || account.id === range.accountId),
+  )
+  const scopedBalance = scopedAccounts.reduce((sum, account) => sum + account.balanceCents, 0)
+
   return (
     <>
       <PageHeader
-        title="Visão geral"
-        subtitle={`${totals.transactionCount.toLocaleString('pt-BR')} lançamentos no período`}
-        actions={
-          <div className="row" style={{ gap: 'var(--sp-2)' }}>
-            <RangeFilter />
-            <Button variant="ghost" size="sm" icon="sparkle" onClick={() => setSimulating(true)}>
-              Simular
-            </Button>
-          </div>
-        }
+        title={`${greetingWord(profile.data?.profile.displayName)}!`}
+        subtitle="O que está acontecendo no período"
+        actions={<RangeFilter hideAccountFilter />}
       />
 
+      {/* Enquanto o período novo carrega, os números ainda são do anterior:
+          esmaecidos para quem vê e `aria-busy` para quem usa leitor de tela. */}
       <div
         className="page stack stack--loose"
+        aria-busy={dashboard.isFetching || undefined}
         style={{ opacity: dashboard.isFetching ? 0.72 : 1, transition: 'opacity 120ms' }}
       >
-        <GreetingHero range={range} netCents={totals.netCents} netDeltaBps={deltas.netBps} />
+        {/* Revisão de 30/09/2026: a saudação em prosa (receita, meta, gasto,
+            teto, resultado, destinos e radar num só parágrafo) virou quatro
+            números lado a lado. Os destinos foram para "Mostrar mais" e o
+            radar já vive no sino de notificações. */}
+        <PeriodKpis range={range} totals={totals} deltas={deltas} balanceCents={scopedBalance} accounts={scopedAccounts.length} />
 
         <PjTransferNote range={range} />
 
-        {totals.uncategorizedCount > 0 && (
-          <Card muted>
-            <div className="row row--between row--wrap">
-              <span className="row">
-                <Icon name="alert" size={16} />
-                <span>
-                  <strong className="tabular">{totals.uncategorizedCount}</strong> lançamentos sem TAG no
-                  período, e os gráficos os contam pelo sinal, o que pode distorcer a quebra por TAG.
-                </span>
-              </span>
-              <Link to="/lancamentos?uncategorized=1">
-                <Button variant="primary" size="sm" icon="tags">
-                  Categorizar agora
-                </Button>
-              </Link>
-            </div>
-          </Card>
-        )}
-
         <Bento>
-          <SpendingPaceCard span={6} range={range} />
           <SpendingHeatmapCard span={6} range={range} />
+          <TagsCard
+            span={6}
+            expense={{ slices: byCategory, leaf: byCategoryLeaf }}
+            income={{ slices: incomeByCategory, leaf: incomeByCategoryLeaf }}
+            uncategorizedCount={totals.uncategorizedCount}
+            onSliceClick={(categoryId) => navigate(`/lancamentos?parentCategoryId=${categoryId}`)}
+          />
         </Bento>
 
         <Bento>
-          <Card span={6} title="Entradas por TAG" subtitle="Agrupado por TAG-mãe">
-            <CategoryRing
-              slices={incomeByCategory}
-              childSlices={incomeByCategoryLeaf}
-              surface="paper"
-              totalLabel="Total de entradas"
-              height={200}
-              paddingAngle={5}
-              cornerRadius={6}
-              onSliceClick={(categoryId) => navigate(`/lancamentos?parentCategoryId=${categoryId}`)}
-            />
-          </Card>
-          <Card span={6} title="Gastos por TAG" subtitle="Agrupado por TAG-mãe">
-            <CategoryRing
-              slices={byCategory}
-              childSlices={byCategoryLeaf}
-              surface="paper"
-              totalLabel="Total de saídas"
-              height={200}
-              paddingAngle={5}
-              cornerRadius={6}
-              onSliceClick={(categoryId) => navigate(`/lancamentos?parentCategoryId=${categoryId}`)}
-            />
-          </Card>
+          <SpendingPaceCard span={6} range={range} />
+          <HistoryCard span={6} range={range} />
         </Bento>
 
         <Card title="Pendências e sugestões">
@@ -355,6 +333,8 @@ export function Dashboard() {
 
         {showMore && (
           <div className="stack stack--loose">
+            <DestinationsCard range={range} />
+
             <Bento>
               <Card
                 span={6}
@@ -440,10 +420,8 @@ export function Dashboard() {
             </Bento>
 
             <Card
-              title="Entradas e saídas"
-              subtitle={
-                useDailyBars ? 'Comparação dia a dia no período selecionado' : 'Comparação mês a mês no período selecionado'
-              }
+              title="Entradas e saídas no período"
+              subtitle={useDailyBars ? 'Dia a dia no período selecionado' : 'Mês a mês no período selecionado'}
             >
               <IncomeExpenseChart
                 data={flowSeries}
@@ -462,20 +440,18 @@ export function Dashboard() {
       {balanceCheckAccount && (
         <BalanceCheckModal account={balanceCheckAccount} onClose={() => setBalanceCheckAccount(null)} />
       )}
-      {simulating && <SimulatorModal onClose={() => setSimulating(false)} />}
     </>
   )
 }
 
 /* ================================================================== *
- * "Modo mês"
+ * Números do período
  *
- * Composição pura: nenhum endpoint novo, nenhuma tabela nova. As cinco
- * linhas vêm de respostas que já existem, e o veredito de status reusa os
- * MESMOS thresholds do Radar de risco em vez de inventar um segundo
- * conjunto de limites para a mesma decisão (`specs/dashboard`, "Modo mês").
+ * Composição pura: nenhum endpoint novo. Os quatro valores vêm do mesmo
+ * `/dashboard` que o resto da tela já usa; meta e teto (quando o período é
+ * um mês só) vêm de `/goals/{período}`, a mesma fonte de Metas do mês.
  * ================================================================== */
-/** Só o que o card lê de cada resposta, para não duplicar os tipos inteiros. */
+/** Só o que a tela lê de cada resposta, para não duplicar os tipos inteiros. */
 type PeriodProgressLite = {
   goal: { incomeTargetCents: number | null; spendCapCents: number | null }
   actual: { incomeCents: number; expenseCents: number }
@@ -488,12 +464,268 @@ type AvailableLite = {
   destinations: Array<{ key: string; targetCents: number | null; realizedCents: number; state: MeterState }>
 }
 
-type RadarLite = { rules: Array<{ key: string; label: string; outsideRange: boolean }> }
-
 function greetingWord(displayName: string | null | undefined): string {
   const hour = new Date().getHours()
   const word = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite'
   return displayName ? `${word}, ${displayName}` : word
+}
+
+function KpiTile({
+  label,
+  value,
+  tone,
+  accent,
+  delta,
+  deltaInvert,
+  foot,
+  assumptions,
+}: {
+  label: string
+  value: string
+  tone?: 'up' | 'down'
+  /** O único card de destaque da tela (regra de 01/09/2026: exatamente um por tela). */
+  accent?: boolean
+  delta?: number | null
+  deltaInvert?: boolean
+  foot?: ReactNode
+  assumptions: AssumptionBag
+}) {
+  const body = (
+    <>
+      <div className="card__title-row">
+        <span className="stat__label">{label}</span>
+        <Assumptions data={assumptions} compact />
+      </div>
+      <span className={`stat__value kpi__value${tone ? ` kpi__value--${tone}` : ''}`}>{value}</span>
+      {(delta !== undefined || foot) && (
+        <span className="stat__foot">
+          {delta !== undefined && <Delta bps={delta} label="vs. período anterior" invert={deltaInvert} />}
+          {foot}
+        </span>
+      )}
+    </>
+  )
+  return accent ? <Slab accent className="kpi">{body}</Slab> : <section className="card kpi">{body}</section>
+}
+
+function PeriodKpis({
+  range,
+  totals,
+  deltas,
+  balanceCents,
+  accounts,
+}: {
+  range: RangeSubset
+  totals: DashboardResponse['totals']
+  deltas: DashboardResponse['deltas']
+  balanceCents: number
+  accounts: number
+}) {
+  // Meta e teto só existem por mês — num intervalo de vários meses eles não
+  // têm um número único para comparar, então simplesmente não aparecem.
+  const month = singleMonthOf(range)
+  const goals = useQuery({
+    queryKey: ['month-mode-goals', month, range.accountId],
+    queryFn: () => api.get<PeriodProgressLite>(`/goals/${month}`, { accountId: range.accountId ?? undefined }),
+    enabled: month !== null,
+  })
+  const incomeTarget = month ? goals.data?.goal.incomeTargetCents ?? null : null
+  const spendCap = month ? goals.data?.goal.spendCapCents ?? null : null
+  const scope = range.accountId == null ? 'todas as contas' : 'a conta filtrada'
+
+  return (
+    <div className="kpi-row">
+      <KpiTile
+        accent
+        label="Resultado do período"
+        value={money(totals.netCents)}
+        delta={deltas.netBps}
+        foot={<span>{totals.transactionCount.toLocaleString('pt-BR')} lançamentos confirmados</span>}
+        assumptions={{
+          formula: 'Receitas menos despesas confirmadas no período. Investimentos e transferências entre contas não entram.',
+          receitaDoPeriodoCents: totals.incomeCents,
+          gastoCents: totals.expenseCents,
+          escopo: scope,
+        }}
+      />
+      <KpiTile
+        label="Receitas"
+        value={money(totals.incomeCents)}
+        tone="up"
+        delta={deltas.incomeBps}
+        foot={incomeTarget != null ? <span>meta {money(incomeTarget)}</span> : undefined}
+        assumptions={{
+          formula: 'Soma dos lançamentos confirmados com TAG de receita no período.',
+          ...(incomeTarget != null ? { metaCents: incomeTarget } : {}),
+          escopo: scope,
+        }}
+      />
+      <KpiTile
+        label="Despesas"
+        value={money(totals.expenseCents)}
+        tone="down"
+        delta={deltas.expenseBps}
+        deltaInvert
+        foot={
+          spendCap != null ? (
+            <span className={totals.expenseCents > spendCap ? 'neg' : undefined}>teto {money(spendCap)}</span>
+          ) : undefined
+        }
+        assumptions={{
+          formula: 'Soma dos lançamentos confirmados com TAG de despesa no período. Pagamento de fatura e transferências não contam em dobro.',
+          ...(spendCap != null ? { tetoCents: spendCap } : {}),
+          escopo: scope,
+        }}
+      />
+      <KpiTile
+        label="Saldo em conta"
+        value={money(balanceCents)}
+        foot={
+          <>
+            <span>hoje, {accounts === 1 ? '1 conta' : `${accounts} contas`}</span>
+            {/* Saldo negativo numa conta corrente quase sempre é saldo inicial
+                ou lançamento faltando, não dívida: o atalho leva a conferir. */}
+            {balanceCents < 0 && (
+              <Link to="/ajustes" className="neg">
+                negativo, conferir saldos
+              </Link>
+            )}
+          </>
+        }
+        assumptions={{
+          formula:
+            'Saldo atual derivado dos lançamentos de cada conta corrente, a partir do saldo inicial cadastrado. Contas de investimento ficam de fora. É um retrato de hoje, não do fim do período.',
+          saldoConsolidadoCents: balanceCents,
+          contasSomadas: accounts,
+        }}
+      />
+    </div>
+  )
+}
+
+/**
+ * Um card só para a quebra por TAG, com Despesas/Receitas num alternador —
+ * antes eram dois anéis lado a lado mais uma faixa solta avisando dos
+ * lançamentos sem TAG (revisão de 30/09/2026). O aviso virou o link do rodapé.
+ */
+function TagsCard({
+  span,
+  expense,
+  income,
+  uncategorizedCount,
+  onSliceClick,
+}: {
+  span?: 6 | 12
+  expense: { slices: Slice[]; leaf: Slice[] }
+  income: { slices: Slice[]; leaf: Slice[] }
+  uncategorizedCount: number
+  onSliceClick: (categoryId: number) => void
+}) {
+  const [flow, setFlow] = useState<'expense' | 'income'>('expense')
+  const data = flow === 'expense' ? expense : income
+
+  return (
+    <Card
+      span={span}
+      title="Por tag"
+      subtitle="Agrupado por TAG-mãe"
+      actions={
+        <Segmented
+          ariaLabel="Fluxo da quebra por TAG"
+          value={flow}
+          options={[
+            { value: 'expense', label: 'Despesas' },
+            { value: 'income', label: 'Receitas' },
+          ]}
+          onChange={setFlow}
+        />
+      }
+    >
+      <CategoryRing
+        key={flow}
+        slices={data.slices}
+        childSlices={data.leaf}
+        surface="paper"
+        totalLabel={flow === 'expense' ? 'Total de saídas' : 'Total de entradas'}
+        height={200}
+        paddingAngle={5}
+        cornerRadius={6}
+        onSliceClick={onSliceClick}
+      />
+      <div className="row row--wrap" style={{ gap: 'var(--sp-2) var(--sp-4)', marginTop: 'auto' }}>
+        <Link to="/categorias" className="btn btn--quiet btn--sm">
+          Ver todas as TAGs
+        </Link>
+        {uncategorizedCount > 0 && (
+          <Link to="/lancamentos?uncategorized=1" className="btn btn--quiet btn--sm">
+            <Icon name="tags" size={13} />
+            Dar TAG a {uncategorizedCount.toLocaleString('pt-BR')} sem TAG
+          </Link>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+type HistoryWindow = '3' | '6' | '12'
+
+/**
+ * Entradas contra saídas mês a mês, olhando para trás a partir do fim do
+ * período escolhido no filtro do topo. O alternador escolhe só o tamanho da
+ * janela; o ponto final e a conta continuam vindo do filtro único da página.
+ */
+function HistoryCard({ span, range }: { span?: 6 | 12; range: RangeSubset }) {
+  const [months, setMonths] = useState<HistoryWindow>('6')
+  const endPeriod = range.to.slice(0, 7)
+  const from = `${shiftPeriod(endPeriod, -(Number(months) - 1))}-01`
+
+  const history = useQuery({
+    queryKey: ['history-monthly', from, range.to, range.accountId],
+    queryFn: () =>
+      api.get<{ series: Array<{ period: string; incomeCents: number; expenseCents: number; netCents: number }> }>(
+        '/analytics/monthly',
+        { from, to: range.to, accountId: range.accountId ?? undefined },
+      ),
+    placeholderData: (previous) => previous,
+  })
+
+  return (
+    <Card
+      span={span}
+      title="Histórico financeiro"
+      subtitle={`Entradas e saídas mês a mês, até ${fmtPeriodLong(endPeriod)}`}
+      actions={
+        <Segmented
+          ariaLabel="Janela do histórico"
+          value={months}
+          options={[
+            { value: '3', label: '3M' },
+            { value: '6', label: '6M' },
+            { value: '12', label: '1A' },
+          ]}
+          onChange={setMonths}
+        />
+      }
+    >
+      {from > todayIso() ? (
+        <EmptyState
+          icon="calendar"
+          title="Este período ainda não começou"
+          body="O histórico mostra o que já aconteceu. Escolha um mês até hoje no seletor do topo."
+        />
+      ) : history.isError ? (
+        <EmptyState
+          icon="alert"
+          title="Falha ao carregar"
+          body="Não foi possível carregar o histórico agora. Tente novamente em instantes."
+        />
+      ) : !history.data ? (
+        <SkeletonBlock height={260} />
+      ) : (
+        <IncomeExpenseChart data={history.data.series} surface="paper" height={260} granularity="month" />
+      )}
+    </Card>
+  )
 }
 
 type Destination = { targetCents: number | null; realizedCents: number; state: MeterState }
@@ -505,147 +737,68 @@ const DESTINATION_LABEL: Record<'investment' | 'debt' | 'reserve', string> = {
 }
 
 /**
- * Substitui o antigo par "Modo mês"/"Modo ano": em vez de uma grade de
- * tiles separada da saudação, a receita/gasto/resultado do período viram
- * prosa dentro da própria saudação, e investimento/dívida/reserva encolhem
- * para uma linha compacta abaixo — revisão de UX de 26/09/2026 (o estudo de
- * densidade concluiu que o "Modo mês" duplicava, em outro formato, números
- * que a saudação já ia contar). Mesmos dados, mesmos vereditos do Radar de
- * risco: nada recalculado aqui, só reapresentado.
+ * Investimento, dívida e reserva: realizado contra o planejado no Motor
+ * financeiro. Saiu da saudação (30/09/2026) para cá, atrás de "Mostrar mais".
  */
-function GreetingHero({
-  range,
-  netCents,
-  netDeltaBps,
-}: {
-  range: RangeSubset
-  netCents: number
-  netDeltaBps: number | null
-}) {
+function DestinationsCard({ range }: { range: RangeSubset }) {
   const isYear = range.preset === 'max'
   const period = range.to.slice(0, 7)
   const year = range.anchor.slice(0, 4)
-  const currentPeriod = range.anchor.slice(0, 7)
-  const profile = useUserProfile()
 
-  const monthGoals = useQuery({
-    queryKey: ['month-mode-goals', period, range.accountId],
-    queryFn: () => api.get<PeriodProgressLite>(`/goals/${period}`, { accountId: range.accountId ?? undefined }),
-    enabled: !isYear,
-  })
   const monthAvailable = useQuery({
     queryKey: ['month-mode-available', period],
     queryFn: () => api.get<AvailableLite>('/financial-engine/available', { period }),
     enabled: !isYear,
-  })
-  const yearGoals = useQuery({
-    queryKey: ['year-mode-goals', year, range.accountId],
-    queryFn: () => api.get<YearProgressLite>(`/goals-year/${year}`, { accountId: range.accountId ?? undefined }),
-    enabled: isYear,
   })
   const yearAvailable = useQuery({
     queryKey: ['year-mode-available', year],
     queryFn: () => api.get<YearDestinationsLite>('/financial-engine/available-year', { year }),
     enabled: isYear,
   })
-  const radar = useQuery({
-    queryKey: ['financial-health-radar', isYear ? currentPeriod : period, range.accountId],
-    queryFn: () =>
-      api.get<RadarLite>('/financial-health/risk-radar', {
-        period: isYear ? currentPeriod : period,
-        accountId: range.accountId ?? undefined,
-      }),
-  })
 
-  const isError = isYear ? yearGoals.isError || yearAvailable.isError : monthGoals.isError || monthAvailable.isError
-  const goalsData = isYear ? yearGoals.data : monthGoals.data
-  const hasAvailable = isYear ? !!yearAvailable.data : !!monthAvailable.data
-  const isLoading = !goalsData || !hasAvailable
+  const isError = isYear ? yearAvailable.isError : monthAvailable.isError
+  const isLoading = isYear ? !yearAvailable.data : !monthAvailable.data
 
   const destino = (key: 'investment' | 'debt' | 'reserve'): Destination => {
     if (isYear) return yearAvailable.data?.[key] ?? NO_TARGET_DESTINATION
     return monthAvailable.data?.destinations.find((d) => d.key === key) ?? NO_TARGET_DESTINATION
   }
 
-  const foraDaFaixa = (radar.data?.rules ?? []).filter((r) => r.outsideRange)
-  const atencao = foraDaFaixa.length > 0
-  const semRadar = !radar.data
-
-  const incomeCents = goalsData?.actual.incomeCents ?? 0
-  const expenseCents = goalsData?.actual.expenseCents ?? 0
-  const incomeTargetCents = goalsData?.goal.incomeTargetCents ?? null
-  const spendCapCents = goalsData?.goal.spendCapCents ?? null
-  const periodLabel = isYear ? year : fmtPeriodLong(period)
-
   return (
-    <Slab
-      accent
-      title={`${greetingWord(profile.data?.profile.displayName)}.`}
+    <Card
+      title="Destino do dinheiro"
+      subtitle={`Realizado / planejado no Motor financeiro, ${isYear ? year : fmtPeriodLong(period)}`}
       actions={
-        semRadar ? undefined : (
-          <span className={`badge ${atencao ? 'badge--warning' : 'badge--good'}`}>
-            <Icon name={atencao ? 'alert' : 'check'} size={11} strokeWidth={2.4} />
-            {atencao ? 'Atenção' : 'No caminho'}
-          </span>
-        )
+        <Link to="/saude" className="btn btn--ghost btn--sm">
+          Ajustar
+        </Link>
       }
     >
-      {isLoading ? (
-        <EmptyState title="Compondo o período…" />
-      ) : isError ? (
+      {isError ? (
         <EmptyState
           icon="alert"
           title="Falha ao carregar"
-          body="Não foi possível carregar os dados do período agora. Tente novamente em instantes."
+          body="Não foi possível carregar os destinos agora. Tente novamente em instantes."
         />
+      ) : isLoading ? (
+        <SkeletonBlock height={56} />
       ) : (
-        <>
-          <p style={{ margin: 0, maxWidth: '62ch', lineHeight: 1.6 }}>
-            {isYear ? `Em ${periodLabel}, sua receita está em ` : `Neste período (${periodLabel}), sua receita está em `}
-            <strong>{money(incomeCents)}</strong>
-            {incomeTargetCents != null && (
-              <>, {incomeCents >= incomeTargetCents ? 'acima' : 'abaixo'} da meta de {money(incomeTargetCents)}</>
-            )}
-            . Os gastos somam{' '}
-            <strong style={spendCapCents != null && expenseCents > spendCapCents ? { color: 'var(--brand-yellow)' } : undefined}>
-              {money(expenseCents)}
-            </strong>
-            {spendCapCents != null && <>, de um teto de {money(spendCapCents)}</>}. Resultado do período:{' '}
-            <strong>{money(netCents)}</strong>
-            {netDeltaBps != null && <> ({signedBps(netDeltaBps)} vs. período anterior)</>}.
-          </p>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-              gap: 'var(--sp-4)',
-              marginTop: 'var(--sp-3)',
-            }}
-          >
-            {(['investment', 'debt', 'reserve'] as const).map((key) => {
-              const d = destino(key)
-              return (
-                <div key={key} className="stack stack--tight" style={{ minWidth: 0 }}>
-                  <span className="stat__label">{DESTINATION_LABEL[key]}</span>
-                  <span className="tabular" style={{ fontWeight: 600 }}>
-                    {money(d.realizedCents)}
-                    {d.targetCents != null && (
-                      <span className="muted" style={{ fontWeight: 400 }}> / {money(d.targetCents)}</span>
-                    )}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          {atencao && (
-            <p className="chart__note">
-              {foraDaFaixa.length === 1 ? 'Um indicador está' : `${foraDaFaixa.length} indicadores estão`} fora da
-              faixa configurada no Radar de risco: {foraDaFaixa.map((r) => r.label).join(', ')}.
-            </p>
-          )}
-        </>
+        <div className="kpi-row kpi-row--3">
+          {(['investment', 'debt', 'reserve'] as const).map((key) => {
+            const d = destino(key)
+            return (
+              <div key={key} className="stack stack--tight" style={{ minWidth: 0 }}>
+                <span className="stat__label">{DESTINATION_LABEL[key]}</span>
+                <span className="tabular" style={{ fontWeight: 600 }}>
+                  {money(d.realizedCents)}
+                  {d.targetCents != null && <span className="muted" style={{ fontWeight: 400 }}> / {money(d.targetCents)}</span>}
+                </span>
+              </div>
+            )
+          })}
+        </div>
       )}
-    </Slab>
+    </Card>
   )
 }
 
