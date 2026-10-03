@@ -41,8 +41,9 @@ Uma persona: profissional autônomo/PJ (BEEKOFF®) que:
 - Investe em ações, FIIs e outras classes, e quer que aporte novo respeite
   uma meta de alocação por classe e uma reserva de emergência antes de
   qualquer coisa.
-- Importa extrato de banco em CSV manualmente; não há open finance nem
-  integração bancária automática.
+- Importa extrato de banco em CSV ou sincroniza as contas correntes por
+  Open Finance (Meu Pluggy); nos dois casos, tudo passa pela mesma revisão
+  antes de entrar no ledger.
 
 ## 3. Problema
 
@@ -94,6 +95,7 @@ escopo:
 | Área | O que resolve |
 |---|---|
 | [Importação e categorização](specs/import-and-categorization/spec.md) | CSV de 6 bancos → ledger revisado, deduplicado, categorizado por regra + memória aprendida |
+| [Open Finance](specs/open-finance-sync/spec.md) | Contas correntes sincronizadas via Meu Pluggy para a mesma fila de revisão da importação, sem duplicar o que veio por CSV |
 | [Painel (dashboard)](specs/dashboard/spec.md) | KPI do período, cartões de crédito, pendências, fluxo entre contas, quebra por categoria |
 | [Diário](specs/daily-ledger/spec.md) | Lançamento rápido do dia a dia e ritmo de gasto contra o teto do mês |
 | [Metas do mês](specs/monthly-goals/spec.md) | Meta de receita, teto de gasto geral e por categoria, sequência de acertos |
@@ -158,9 +160,9 @@ porquê de cada escolha.
 
 ## 8. Fora de escopo (deliberadamente)
 
-- Open finance / integração bancária automática — importação é sempre CSV
-  manual, por decisão de superfície de risco e por não haver acesso de API
-  aos bancos usados.
+- Open Finance automático para cartões de crédito, e sincronização sem um
+  clique do usuário. Contas correntes já sincronizam via Meu Pluggy desde
+  03/10/2026 (`decisions/0038`), sempre pela fila de revisão da importação.
 - Multiusuário e autenticação — o schema já suporta múltiplas contas, mas o
   produto é de um usuário só.
 - Conselho financeiro personalizado ou execução de ordem de compra/venda —

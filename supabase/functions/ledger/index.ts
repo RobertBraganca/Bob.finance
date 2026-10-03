@@ -10,6 +10,7 @@ import { profileConfigSchema, validateProfileShape } from '../_shared/csv/profil
 import * as categoriesService from '../_shared/services/categories.ts'
 import * as categorization from '../_shared/services/categorization.ts'
 import * as importsService from '../_shared/services/imports.ts'
+import * as bankConnections from '../_shared/services/bankConnections.ts'
 import * as txnService from '../_shared/services/transactions.ts'
 import { friendlyErrorMessage } from '../_shared/core/errors.ts'
 
@@ -169,6 +170,57 @@ app.post('/imports/stage', async (c) => {
     )
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
+  }
+})
+
+/* ---------------------------------------------------------------- *
+ * Open Finance (Meu Pluggy) — decisions/0038. Mesmas rotas de
+ * server/src/routes/ledger.ts: só produzem lotes revisáveis.
+ * ---------------------------------------------------------------- */
+const asBadRequest = (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })
+
+app.get('/bank-connections', async (c) =>
+  c.json({
+    connections: await bankConnections.listConnections(),
+    pendingBatches: await bankConnections.pendingBatches(),
+  }),
+)
+
+app.get('/bank-connections/discover', async (c) => {
+  const { itemId } = z.object({ itemId: z.string().uuid() }).parse(c.req.query())
+  try {
+    return c.json({ accounts: await bankConnections.discover(itemId) })
+  } catch (error) {
+    return c.json(asBadRequest(error), 400)
+  }
+})
+
+app.post('/bank-connections', async (c) => {
+  const body = z
+    .object({
+      accountId: z.number().int().positive(),
+      providerItemId: z.string().uuid(),
+      providerAccountId: z.string().uuid(),
+    })
+    .parse(await c.req.json())
+  try {
+    return c.json(await bankConnections.createConnection(body))
+  } catch (error) {
+    return c.json(asBadRequest(error), 400)
+  }
+})
+
+app.delete('/bank-connections/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  return c.json(await bankConnections.deleteConnection(id))
+})
+
+app.post('/bank-connections/:id/sync', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  try {
+    return c.json(await bankConnections.syncConnection(id))
+  } catch (error) {
+    return c.json(asBadRequest(error), 400)
   }
 })
 

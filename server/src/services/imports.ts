@@ -87,15 +87,111 @@ export async function stageImport(input: StageInput) {
 
   const text = decodeBuffer(input.buffer, profile.encoding)
   const parsed = parseCsvWithProfile(text, profile, { accountId: input.accountId })
+
+  const { batchId, duplicateCount } = await stageRows({
+    accountId: input.accountId,
+    profileId: profile.id,
+    filename: input.filename,
+    rowCount: parsed.rowCount,
+    parsedCount: parsed.parsedCount,
+    errorCount: parsed.errorCount,
+    rows: parsed.rows,
+  })
+
+  return {
+    batchId,
+    profile: { id: profile.id, name: profile.name },
+    accountId: input.accountId,
+    filename: input.filename,
+    rowCount: parsed.rowCount,
+    parsedCount: parsed.parsedCount,
+    errorCount: parsed.errorCount,
+    ignoredCount: parsed.ignoredCount,
+    duplicateCount,
+    headers: parsed.headers,
+  }
+}
+
+/** Uma linha pronta para a fila de revisão, venha de CSV ou de Open Finance. */
+export type StageRow = {
+  rowIndex: number
+  postedOn: string | null
+  description: string
+  descriptionNorm: string
+  signature: string
+  amountCents: number | null
+  rawCategory: string | null
+  dedupeHash: string | null
+  parseError: string | null
+  rawLine: string | null
+  /** Id no provedor de Open Finance; nulo em CSV. */
+  externalId?: string | null
+  /** TAG já decidida pela origem (ex. caixinha do Open Finance), que vence o categorizador. */
+  presetCategory?: { categoryId: number; detail: string } | null
+}
+
+/**
+ * O caminho único para a fila de revisão: CSV e Open Finance passam pela
+ * mesma checagem de duplicado, de lançamento manual equivalente e pela
+ * mesma sugestão de TAG, e caem no mesmo lote revisável (decisions/0038).
+ */
+export async function stageRows(input: {
+  accountId: number
+  profileId: number | null
+  filename: string
+  rowCount: number
+  parsedCount: number
+  errorCount: number
+  rows: StageRow[]
+  /**
+   * Open Finance: também marca como provável duplicado uma linha com a
+   * mesma data e o mesmo valor de um lançamento já confirmado da conta. A
+   * descrição do provedor nunca bate com a do CSV do mesmo banco, então o
+   * hash sozinho não pega o dia que os dois cobrem.
+   */
+  matchByDateAndAmount?: boolean
+}): Promise<{ batchId: number; duplicateCount: number }> {
   const categorizer = await loadCategorizer()
 
-  // In-ledger duplicates: every hash this account already holds.
+  // In-ledger duplicates: every hash this account already holds. Uma linha
+  // de Open Finance só compara com o que veio sem id externo (CSV, manual):
+  // contra outra linha do provedor, o id já decide, e dois eventos reais
+  // iguais no mesmo dia (dois resgates de R$ 50) têm o mesmo hash.
   const existing = new Map<string, number>()
+  const existingWithoutExternalId = new Map<string, number>()
   for (const row of await db
-    .select({ id: transactions.id, dedupeHash: transactions.dedupeHash })
+    .select({ id: transactions.id, dedupeHash: transactions.dedupeHash, externalId: transactions.externalId })
     .from(transactions)
     .where(eq(transactions.accountId, input.accountId))) {
     if (!existing.has(row.dedupeHash)) existing.set(row.dedupeHash, row.id)
+    if (row.externalId === null && !existingWithoutExternalId.has(row.dedupeHash)) {
+      existingWithoutExternalId.set(row.dedupeHash, row.id)
+    }
+  }
+
+  // Data+valor -> ids ainda não usados como par. Cada lançamento do ledger
+  // casa com no máximo uma linha nova: dois cafés de R$ 5 no mesmo dia são
+  // dois eventos.
+  const byDateAmount = new Map<string, number[]>()
+  if (input.matchByDateAndAmount) {
+    const dates = input.rows.map((r) => r.postedOn).filter((d): d is string => d !== null)
+    if (dates.length > 0) {
+      const earliest = dates.reduce((a, b) => (a < b ? a : b))
+      for (const row of await db
+        .select({ id: transactions.id, postedOn: transactions.postedOn, amountCents: transactions.amountCents })
+        .from(transactions)
+        .where(
+          and(
+            eq(transactions.accountId, input.accountId),
+            eq(transactions.pending, false),
+            inArray(transactions.source, ['csv', 'open_finance']),
+            sql`${transactions.postedOn} >= ${earliest}`,
+          ),
+        )) {
+        const key = `${row.postedOn}|${row.amountCents}`
+        byDateAmount.set(key, [...(byDateAmount.get(key) ?? []), row.id])
+      }
+    }
   }
 
   const seenInBatch = new Set<string>()
@@ -127,31 +223,39 @@ export async function stageImport(input: StageInput) {
     await db
       .insert(importBatches)
       .values({
-        profileId: profile.id,
+        profileId: input.profileId,
         accountId: input.accountId,
         filename: input.filename,
-        rowCount: parsed.rowCount,
-        parsedCount: parsed.parsedCount,
-        errorCount: parsed.errorCount,
+        rowCount: input.rowCount,
+        parsedCount: input.parsedCount,
+        errorCount: input.errorCount,
         status: 'staged',
       })
       .returning()
   )[0]!
 
   await db.transaction(async (tx) => {
-    for (const row of parsed.rows) {
+    for (const row of input.rows) {
       let duplicateOf: 'none' | 'in_batch' | 'in_ledger' = 'none'
       let duplicateTxnId: number | null = null
 
       if (row.dedupeHash) {
-        const ledgerHit = existing.get(row.dedupeHash)
+        const ledgerHit = (row.externalId ? existingWithoutExternalId : existing).get(row.dedupeHash)
         if (ledgerHit !== undefined) {
           duplicateOf = 'in_ledger'
           duplicateTxnId = ledgerHit
-        } else if (seenInBatch.has(row.dedupeHash)) {
+        } else if (!row.externalId && seenInBatch.has(row.dedupeHash)) {
           duplicateOf = 'in_batch'
         }
         seenInBatch.add(row.dedupeHash)
+      }
+      if (duplicateOf === 'none' && input.matchByDateAndAmount && row.postedOn && row.amountCents !== null) {
+        const key = `${row.postedOn}|${row.amountCents}`
+        const candidates = byDateAmount.get(key)
+        if (candidates && candidates.length > 0) {
+          duplicateOf = 'in_ledger'
+          duplicateTxnId = candidates.shift()!
+        }
       }
       if (duplicateOf !== 'none') duplicateCount++
 
@@ -167,8 +271,9 @@ export async function stageImport(input: StageInput) {
         if (hit) possibleManualMatchId = hit.id
       }
 
-      const suggestion =
-        row.parseError === null && row.amountCents !== null
+      const suggestion = row.presetCategory
+        ? { categoryId: row.presetCategory.categoryId, source: 'raw_category' as const, detail: row.presetCategory.detail }
+        : row.parseError === null && row.amountCents !== null
           ? categorizer.suggest({
               descriptionNorm: row.descriptionNorm,
               signature: row.signature,
@@ -176,7 +281,7 @@ export async function stageImport(input: StageInput) {
               rawCategory: row.rawCategory,
               accountId: input.accountId,
             })
-          : { categoryId: null, source: 'none' as const, detail: null, ruleId: null }
+          : { categoryId: null, source: 'none' as const, detail: null }
 
       await tx.insert(stagedTransactions).values({
         batchId: batch.id,
@@ -199,24 +304,14 @@ export async function stageImport(input: StageInput) {
         include: duplicateOf === 'none' && row.parseError === null,
         parseError: row.parseError,
         rawLine: row.rawLine,
+        externalId: row.externalId ?? null,
       })
     }
 
     await tx.update(importBatches).set({ duplicateCount }).where(eq(importBatches.id, batch.id))
   })
 
-  return {
-    batchId: batch.id,
-    profile: { id: profile.id, name: profile.name },
-    accountId: input.accountId,
-    filename: input.filename,
-    rowCount: parsed.rowCount,
-    parsedCount: parsed.parsedCount,
-    errorCount: parsed.errorCount,
-    ignoredCount: parsed.ignoredCount,
-    duplicateCount,
-    headers: parsed.headers,
-  }
+  return { batchId: batch.id, duplicateCount }
 }
 
 /* ------------------------------------------------------------------ *
@@ -345,7 +440,8 @@ export async function commitImport(batchId: number) {
         direction: directionOf(row.amountCents!),
         categoryId,
         rawCategory: row.rawCategory,
-        source: 'csv',
+        source: row.externalId ? 'open_finance' : 'csv',
+        externalId: row.externalId,
         categorizedBy,
         ruleId,
         importBatchId: batch.id,

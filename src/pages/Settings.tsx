@@ -19,6 +19,7 @@ import {
   useToast,
 } from '../components/ui'
 import { PageHeader } from '../components/shell/Shell'
+import { OpenFinanceCard } from './OpenFinance'
 
 type ColumnMap = Record<string, string | number | undefined>
 
@@ -163,6 +164,8 @@ export function SettingsPage() {
               </table>
             </div>
           </Card>
+
+          <OpenFinanceCard />
 
           <Card
             span={12}
