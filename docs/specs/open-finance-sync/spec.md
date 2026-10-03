@@ -1,11 +1,10 @@
 # Spec: Sincronização via Open Finance
 
-Status: proposto — desenho para implementação futura, não iniciado. Custo
-recorrente de agregador terceiro (ver "Custo e viabilidade") é o único
-motivo do adiamento; nada aqui é bloqueado tecnicamente. Escrito em
-28/08/2026 durante uma revisão geral do projeto, para existir uma
-arquitetura-alvo pronta quando o orçamento permitir, em vez de começar do
-zero.
+Status: fase 1 implementada em 03/10/2026 (contas correntes, via Meu
+Pluggy). Provedor e regras decididos em `decisions/0038`. Cartões e
+sincronização automática ficam para as próximas fases. O desenho original
+abaixo foi mantido; o que mudou na implementação está em "Desvios da
+implementação".
 
 ## Objetivo
 Eliminar a necessidade de baixar extrato de cada banco manualmente e
@@ -141,4 +140,27 @@ spec existe sem código ainda:
   passo real, não escrever código.
 
 ## Desvios da implementação
-N/A — nada foi implementado ainda.
+Fase 1, 03/10/2026 (`decisions/0038`):
+
+- **Provedor:** Meu Pluggy (uso pessoal, gratuito, até 5 conexões do mesmo
+  titular, sem uso comercial). A "Custo e viabilidade" acima deixou de
+  bloquear para uso pessoal; volta a valer se o app virar produto pago.
+- **Sem `bankConnectionEvents`.** O estado da última sincronização
+  (`last_synced_at`, `last_sync_count`, `last_error`) fica na própria
+  `bank_connections`, e o histórico de cada sincronização já é o próprio
+  lote em `import_batches`.
+- **Sem coluna nova de origem em `staged_transactions`.** A origem é
+  `external_id` preenchido (id da transação na Pluggy); no commit, vira
+  `transactions.source = 'open_finance'` e `transactions.external_id`
+  (único). O nome do lote começa com "Open Finance ·".
+- **Sem fluxo de consentimento no app nem webhook.** O consentimento é dado
+  no próprio Meu Pluggy; o app recebe o ID da conexão (item) e lista as
+  contas dela (`GET /bank-connections/discover`). A sincronização é por
+  botão (`POST /bank-connections/:id/sync`), sem agendamento.
+- **Corte "daqui pra frente":** `sync_from` é o dia do último CSV da conta;
+  esse dia passa por checagem extra de mesma data e mesmo valor.
+- **Caixinhas** ("Aplicação RDB", "Resgate RDB", categoria Investments da
+  Pluggy) chegam com a TAG de investimento já escolhida.
+- **Rotas** ficam na função `ledger` (prefixo `/bank-connections` em
+  `src/lib/api.ts`).
+- **Só contas correntes**: ligar um cartão é recusado; `PENDING` não entra.

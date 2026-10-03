@@ -78,7 +78,7 @@ export const ruleOriginEnum = pgEnum('rule_origin', ['user', 'learned'])
 export const duplicateStatusEnum = pgEnum('duplicate_status', ['none', 'in_batch', 'in_ledger'])
 export const suggestionSourceEnum = pgEnum('suggestion_source', ['rule', 'memory', 'raw_category', 'none'])
 export const importStatusEnum = pgEnum('import_status', ['staged', 'committed', 'discarded'])
-export const txnSourceEnum = pgEnum('txn_source', ['csv', 'manual', 'daily', 'adjustment'])
+export const txnSourceEnum = pgEnum('txn_source', ['csv', 'manual', 'daily', 'adjustment', 'open_finance'])
 export const categorizedByEnum = pgEnum('categorized_by', ['rule', 'memory', 'manual', 'raw_category', 'none'])
 export const txnDirectionEnum = pgEnum('txn_direction', ['in', 'out'])
 export const debtKindEnum = pgEnum('debt_kind', [
@@ -332,6 +332,8 @@ export const stagedTransactions = pgTable(
     }),
     /** o usuário confirmou: ao commitar, este CSV substitui o lançamento manual acima (que é excluído). Nunca automático — começa sempre false. */
     replaceManualMatch: boolean('replace_manual_match').notNull().default(false),
+    /** Id da transação no provedor de Open Finance (Pluggy). Nulo em linha de CSV. Vai junto para `transactions.externalId` no commit. */
+    externalId: text('external_id'),
   },
   (t) => [
     index('staged_batch_idx').on(t.batchId),
@@ -431,6 +433,13 @@ export const transactions = pgTable(
      * edit (decisions/0017).
      */
     manuallyEdited: boolean('manually_edited').notNull().default(false),
+    /**
+     * Id da transação no provedor de Open Finance (Pluggy), quando veio de
+     * lá. É o que impede a mesma transação de entrar duas vezes: a descrição
+     * do provedor não é igual à do CSV do banco, então `dedupeHash` sozinho
+     * não pega a repetição.
+     */
+    externalId: text('external_id'),
     createdAt: text('created_at').notNull().default(now),
     updatedAt: text('updated_at').notNull().default(now),
   },
@@ -458,6 +467,7 @@ export const transactions = pgTable(
     uniqueIndex('txn_debt_occurrence_uq')
       .on(t.debtId, t.occurrencePeriod)
       .where(sql`${t.debtId} is not null`),
+    uniqueIndex('txn_external_id_uq').on(t.externalId).where(sql`${t.externalId} is not null`),
   ],
 )
 
@@ -1132,5 +1142,45 @@ export const partnerCommissions = pgTable(
   (t) => [
     index('partner_commissions_platform_idx').on(t.platformId, t.earnedOn),
     index('partner_commissions_earned_idx').on(t.earnedOn),
+  ],
+)
+
+/* ------------------------------------------------------------------ *
+ * Open Finance (docs/specs/open-finance-sync, decisions/0038)
+ *
+ * Uma linha por conta do provedor ligada a uma conta do app. A
+ * sincronização só produz um lote de importação (`importBatches` +
+ * `stagedTransactions`), igual a um CSV: nada entra no ledger sem revisão.
+ * ------------------------------------------------------------------ */
+export const bankConnections = pgTable(
+  'bank_connections',
+  {
+    id: id(),
+    accountId: int('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull().default('pluggy'),
+    /** Conexão no provedor (item da Pluggy): uma por banco. */
+    providerItemId: text('provider_item_id').notNull(),
+    /** Conta dentro da conexão. Cada conta do provedor liga a uma conta do app, no máximo. */
+    providerAccountId: text('provider_account_id').notNull(),
+    /** Como o provedor descreve a conta (banco, tipo, final), só para a tela. */
+    providerAccountLabel: text('provider_account_label').notNull().default(''),
+    /**
+     * Primeiro dia que a sincronização lê (YYYY-MM-DD). Na criação, é o dia
+     * do último extrato CSV desta conta: o histórico que já veio por CSV
+     * fica intacto, e o próprio dia de corte passa pela checagem de
+     * duplicado por data e valor.
+     */
+    syncFrom: text('sync_from').notNull(),
+    lastSyncedAt: text('last_synced_at'),
+    /** Quantas transações novas a última sincronização mandou para revisão. */
+    lastSyncCount: int('last_sync_count'),
+    lastError: text('last_error'),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex('bank_connections_provider_account_uq').on(t.provider, t.providerAccountId),
+    index('bank_connections_account_idx').on(t.accountId),
   ],
 )
