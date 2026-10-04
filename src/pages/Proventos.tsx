@@ -1,6 +1,7 @@
-import { useId, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { invalidateInvestmentData } from '../lib/invalidate'
 import { bps, centsToInput, money, parseMoneyInput, date as fmtDate, quantity as fmtQuantity } from '../lib/format'
 import {
   Bento,
@@ -8,10 +9,12 @@ import {
   Card,
   EmptyState,
   FilterSelect,
+  KpiTile,
   Meter,
+  Modal,
   Segmented,
+  SkeletonBlock,
   SkeletonLines,
-  StatTile,
   targetProgressState,
   TextInput,
   useToast,
@@ -58,6 +61,21 @@ type ProventoRow = {
 }
 
 const MONTH_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+
+/**
+ * Média mensal de um ano do histórico. O servidor divide sempre por 12, o
+ * que no ano corrente diluía a média pelos meses que ainda não chegaram
+ * (2026: R$ 32,93 ÷ 12 = R$ 2,74, com 9 meses passados). No ano corrente
+ * divide pelos meses já fechados, ou até o último mês com pagamento, o que
+ * for maior.
+ */
+function yearAverageCents(row: ProventoHistoricoRow): number {
+  const now = new Date()
+  if (Number(row.year) !== now.getFullYear()) return row.avgCents
+  const lastPaidMonth = row.months.reduce((last, cents, i) => (cents > 0 ? i + 1 : last), 0)
+  const months = Math.max(now.getMonth(), lastPaidMonth, 1)
+  return Math.round(row.totalCents / months)
+}
 
 export function ProventosTab({ positions, classes }: { positions: Position[]; classes: Array<{ value: string; label: string }> }) {
   const toast = useToast()
@@ -111,7 +129,7 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
       api.put('/investments/passive-income-settings', { monthlyTargetCents }),
     onSuccess: (_, monthlyTargetCents) => {
       toast(monthlyTargetCents === null ? 'Meta removida' : 'Meta atualizada')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       setEditingTarget(false)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
@@ -122,103 +140,116 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
 
   const data = resumo.data
 
+  /*
+   * A distribuição por ativo vem do resumo, que o servidor não filtra. O
+   * filtro da página vale para ela também (no cliente, pela classe de cada
+   * ativo), senão a rosca seria o único bloco abaixo do filtro a ignorá-lo.
+   */
+  const distribution = useMemo(() => {
+    const rows = (data?.distribution ?? []).filter((d) => {
+      if (assetIdFilter !== null) return d.assetId === assetIdFilter
+      if (assetClassFilter !== null) return positions.find((p) => p.assetId === d.assetId)?.assetClass === assetClassFilter
+      return true
+    })
+    const total = rows.reduce((sum, d) => sum + d.totalCents, 0)
+    return rows.map((d) => ({ ...d, shareBps: total > 0 ? Math.round((d.totalCents / total) * 10_000) : 0 }))
+  }, [data, assetClassFilter, assetIdFilter, positions])
+
   return (
-    <Bento>
-      <Card
-        span={5}
-        title="Resumo"
-        actions={
-          <Button variant="primary" size="sm" icon="plus" onClick={() => setRegistering(true)}>
-            Registrar provento
-          </Button>
-        }
-      >
-        {resumo.isError ? (
+    <div className="stack stack--loose">
+      {/* A linha de KPIs do Painel (04/10/2026): os números da carteira inteira
+          primeiro, antes de qualquer filtro. A meta mensal ganhou um tile
+          próprio, com a barra, no lugar da linha "Ajustar meta" solta. */}
+      {resumo.isError ? (
+        <Card>
           <EmptyState
             icon="alert"
             title="Falha ao carregar"
             body="Não foi possível carregar o resumo de proventos agora. Tente novamente em instantes."
           />
-        ) : !data ? (
-          <SkeletonLines lines={5} />
-        ) : (
-          <div className="stack">
-            <div className="row row--between row--wrap">
-              <StatTile label="Média mensal (últ. 12 meses)" value={money(data.avgMonthlyCents)} large />
-              <StatTile label="Total de 12 meses" value={money(data.total12mCents)} />
-              <StatTile label="Total da carteira" value={money(data.totalWalletCents)} />
+        </Card>
+      ) : !data ? (
+        <Card>
+          <SkeletonLines lines={3} />
+        </Card>
+      ) : (
+        <div className="kpi-row">
+          <KpiTile
+            accent
+            label="Média mensal"
+            value={money(data.avgMonthlyCents)}
+            foot={<span>últimos 12 meses</span>}
+            assumptions={{
+              formula: 'Proventos pagos nos últimos 12 meses divididos por 12. Os que ainda vão pagar não entram.',
+            }}
+          />
+          <KpiTile label="Total de 12 meses" value={money(data.total12mCents)} tone={data.total12mCents > 0 ? 'up' : undefined} />
+          <KpiTile label="Desde o início" value={money(data.totalWalletCents)} foot={<span>toda a carteira</span>} />
+          <section className="card kpi">
+            <div className="card__title-row">
+              <span className="stat__label">Meta de renda passiva</span>
             </div>
-
-            {!editingTarget ? (
-              <div className="row row--between" style={{ fontSize: 'var(--text-xs)' }}>
-                <span className="muted">
-                  {data.monthlyTargetCents !== null
-                    ? `Meta mensal: ${money(data.monthlyTargetCents)}`
-                    : 'Nenhuma meta mensal configurada'}
-                </span>
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  icon="pencil"
-                  onClick={() => {
-                    setTargetInput(data.monthlyTargetCents !== null ? centsToInput(data.monthlyTargetCents) : '')
-                    setEditingTarget(true)
-                  }}
-                >
-                  Ajustar meta
-                </Button>
-              </div>
-            ) : (
-              <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-end' }}>
-                <div className="field" style={{ width: 180 }}>
-                  <label className="field__label" htmlFor={targetInputFieldId}>Meta mensal de proventos (R$)</label>
-                  <TextInput id={targetInputFieldId} value={targetInput} onChange={setTargetInput} placeholder="0,00" numeral />
-                </div>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  icon="check"
-                  onClick={() => setTarget.mutate(Math.abs(parseMoneyInput(targetInput) ?? 0))}
-                  disabled={setTarget.isPending}
-                >
-                  Salvar
-                </Button>
-                {data.monthlyTargetCents !== null && (
-                  <Button variant="ghost" size="sm" onClick={() => setTarget.mutate(null)} disabled={setTarget.isPending}>
-                    Remover meta
-                  </Button>
-                )}
-                <Button variant="quiet" size="sm" onClick={() => setEditingTarget(false)}>
-                  Cancelar
-                </Button>
-              </div>
-            )}
-
+            <span className="stat__value kpi__value">
+              {data.monthlyTargetCents === null ? 'Sem meta' : `${money(data.monthlyTargetCents)}/mês`}
+            </span>
             {data.monthlyTargetCents !== null && (
-              <>
-                <Meter usedBps={data.progressBps ?? 0} state={targetProgressState(data.progressBps)} />
-                <p className="chart__note">
-                  {money(data.avgMonthlyCents)} de {money(data.monthlyTargetCents)} · {bps(data.progressBps ?? 0, 1)}
-                </p>
-              </>
+              <Meter usedBps={data.progressBps ?? 0} state={targetProgressState(data.progressBps)} />
             )}
+            <span className="stat__foot">
+              {data.monthlyTargetCents !== null && <span>{bps(data.progressBps ?? 0, 1)} alcançado</span>}
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => {
+                  setTargetInput(data.monthlyTargetCents !== null ? centsToInput(data.monthlyTargetCents) : '')
+                  setEditingTarget(true)
+                }}
+              >
+                {data.monthlyTargetCents === null ? 'Definir meta' : 'Ajustar'}
+              </button>
+            </span>
+          </section>
+        </div>
+      )}
 
-            <hr className="divider" />
+      {/* Um filtro para os gráficos e as listas, numa linha de controle: antes
+          os mesmos dois seletores se repetiam em três cards e mexiam todos
+          juntos, sem dizer isso. */}
+      <div className="row row--wrap row--between" style={{ gap: 'var(--sp-2)' }}>
+        <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+          <FilterSelect
+            icon="filter"
+            value={assetClassFilter}
+            placeholder="Todos os tipos"
+            options={classes}
+            onChange={setAssetClassFilter}
+          />
+          <FilterSelect
+            icon="filter"
+            value={assetIdFilter}
+            placeholder="Todos os ativos"
+            options={assetOptions}
+            onChange={setAssetIdFilter}
+          />
+          <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+            vale para os gráficos e as listas abaixo
+          </span>
+        </div>
+        <Button size="sm" icon="plus" onClick={() => setRegistering(true)}>
+          Registrar provento
+        </Button>
+      </div>
 
-            <div className="stack stack--tight">
-              <span className="stat__label">Distribuição de proventos em 12 meses</span>
-              <ProventosDistributionRing slices={data.distribution} />
-            </div>
-          </div>
-        )}
-      </Card>
+      <Bento>
+        <Card span={6} title="Por ativo" subtitle="Recebidos nos últimos 12 meses">
+          {!data ? <SkeletonBlock height={220} /> : <ProventosDistributionRing slices={distribution} />}
+        </Card>
 
-      <Card
-        span={6}
-        title="Evolução de Proventos"
-        subtitle="Recebidos x a receber, mês a mês"
-        actions={
-          <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+        <Card
+          span={6}
+          title="Evolução"
+          subtitle="Recebidos e a receber, período a período"
+          actions={
             <Segmented
               ariaLabel="Granularidade"
               value={granularity}
@@ -228,59 +259,27 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
                 { value: 'annual', label: 'Anual' },
               ]}
             />
-            <FilterSelect
-              icon="filter"
-              value={assetClassFilter}
-              placeholder="Todos os tipos"
-              options={classes}
-              onChange={setAssetClassFilter}
+          }
+        >
+          {evolucao.isError ? (
+            <EmptyState
+              icon="alert"
+              title="Falha ao carregar"
+              body="Não foi possível carregar a evolução de proventos agora. Tente novamente em instantes."
             />
-            <FilterSelect
-              icon="filter"
-              value={assetIdFilter}
-              placeholder="Todos os ativos"
-              options={assetOptions}
-              onChange={setAssetIdFilter}
-            />
-          </div>
-        }
-      >
-        {evolucao.isError ? (
-          <EmptyState
-            icon="alert"
-            title="Falha ao carregar"
-            body="Não foi possível carregar a evolução de proventos agora. Tente novamente em instantes."
-          />
-        ) : !evolucao.data ? (
-          <SkeletonLines lines={4} />
-        ) : (
-          <ProventosEvolutionChart data={evolucao.data.evolucao} granularity={granularity} />
-        )}
-      </Card>
+          ) : !evolucao.data ? (
+            <SkeletonBlock height={260} />
+          ) : (
+            <ProventosEvolutionChart data={evolucao.data.evolucao} granularity={granularity} />
+          )}
+        </Card>
+      </Bento>
 
       <Card
         span={12}
         flush
         title="Histórico mensal"
-        subtitle="Só o que já foi pago: o que ainda está a receber não entra nesta soma"
-        actions={
-          <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
-            <FilterSelect
-              icon="filter"
-              value={assetClassFilter}
-              placeholder="Todos os tipos"
-              options={classes}
-              onChange={setAssetClassFilter}
-            />
-            <FilterSelect
-              icon="filter"
-              value={assetIdFilter}
-              placeholder="Todos os ativos"
-              options={assetOptions}
-              onChange={setAssetIdFilter}
-            />
-          </div>
-        }
+        subtitle="Só o que já foi pago. No ano corrente, a média conta só os meses que já passaram"
       >
         {historico.isError ? (
           <EmptyState
@@ -299,7 +298,7 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
                 <tr>
                   <th scope="col">Ano</th>
                   {MONTH_LABELS.map((label) => (
-                    <th key={label} scope="col" className="table__num">
+                    <th key={label} scope="col" className="table__num table__col--secondary">
                       {label}
                     </th>
                   ))}
@@ -312,11 +311,11 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
                   <tr key={row.year}>
                     <td>{row.year}</td>
                     {row.months.map((cents, i) => (
-                      <td key={i} className="table__num">
+                      <td key={i} className="table__num table__col--secondary">
                         {cents === 0 ? <span className="muted">-</span> : money(cents)}
                       </td>
                     ))}
-                    <td className="table__num">{money(row.avgCents)}</td>
+                    <td className="table__num">{money(yearAverageCents(row))}</td>
                     <td className="table__num">
                       <strong>{money(row.totalCents)}</strong>
                     </td>
@@ -334,29 +333,13 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
         title="Meus proventos"
         subtitle="Todo lançamento de dividendo ou JSCP, pago ou a receber"
         actions={
-          <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
-            <FilterSelect
-              icon="filter"
-              value={yearFilter}
-              placeholder="Todos os anos"
-              options={historico.data?.historico.map((r) => ({ value: r.year, label: r.year })) ?? []}
-              onChange={setYearFilter}
-            />
-            <FilterSelect
-              icon="filter"
-              value={assetClassFilter}
-              placeholder="Todos os tipos"
-              options={classes}
-              onChange={setAssetClassFilter}
-            />
-            <FilterSelect
-              icon="filter"
-              value={assetIdFilter}
-              placeholder="Todos os ativos"
-              options={assetOptions}
-              onChange={setAssetIdFilter}
-            />
-          </div>
+          <FilterSelect
+            icon="calendar"
+            value={yearFilter}
+            placeholder="Todos os anos"
+            options={historico.data?.historico.map((r) => ({ value: r.year, label: r.year })) ?? []}
+            onChange={setYearFilter}
+          />
         }
       >
         {lista.isError ? (
@@ -371,55 +354,120 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
           <EmptyState
             icon="list"
             title="Nenhum provento lançado"
-            body="Registre um dividendo ou JSCP pelo botão desta tela, ou pela aba Lançamentos."
+            body="Registre um dividendo ou JSCP pelo botão desta tela, ou por Registrar operação, no topo da página."
           />
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">Ativo</th>
-                  <th scope="col">Tipo de ativo</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Tipo de pagamento</th>
-                  <th scope="col">Data Com</th>
-                  <th scope="col">Data Pagamento</th>
-                  <th scope="col" className="table__num">Quantidade</th>
-                  <th scope="col" className="table__num">Valor do div.</th>
-                  <th scope="col" className="table__num">Valor total</th>
-                  <th scope="col" className="table__num">Total líquido</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lista.data.proventos.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.ticker ?? p.assetName}</td>
-                    <td className="muted">{classLabel(p.assetClass)}</td>
-                    <td>
-                      <span className={`badge ${p.status === 'a_receber' ? '' : 'badge--good'}`}>
-                        {p.status === 'a_receber' ? 'A Receber' : 'Pago'}
-                      </span>
-                    </td>
-                    <td className="muted">{p.dividendType ? (DIVIDEND_TYPE_LABEL[p.dividendType] ?? p.dividendType) : 'Não informado'}</td>
-                    <td className="muted">{p.exDate ? fmtDate(p.exDate) : '-'}</td>
-                    <td>{fmtDate(p.tradedOn)}</td>
-                    <td className="table__num">{fmtQuantity(p.quantity)}</td>
-                    <td className="table__num">{money(p.unitPriceCents)}</td>
-                    <td className="table__num">{money(p.grossCents)}</td>
-                    <td className="table__num">
-                      <strong>{money(p.netCents)}</strong>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ProventosTable rows={lista.data.proventos} classLabel={classLabel} />
         )}
       </Card>
 
       {registering && (
         <TradeModal classes={classes} positions={positions} initialKind="dividend" onClose={() => setRegistering(false)} />
       )}
-    </Bento>
+      {editingTarget && data && (
+        <Modal
+          title="Meta de renda passiva"
+          onClose={() => setEditingTarget(false)}
+          footer={
+            <>
+              {data.monthlyTargetCents !== null ? (
+                <Button variant="quiet" onClick={() => setTarget.mutate(null)} disabled={setTarget.isPending}>
+                  Remover meta
+                </Button>
+              ) : (
+                <span />
+              )}
+              <span className="row" style={{ gap: 'var(--sp-2)' }}>
+                <Button variant="quiet" onClick={() => setEditingTarget(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  variant="primary"
+                  icon="check"
+                  onClick={() => setTarget.mutate(Math.abs(parseMoneyInput(targetInput) ?? 0))}
+                  loading={setTarget.isPending}
+                >
+                  Salvar
+                </Button>
+              </span>
+            </>
+          }
+        >
+          <div className="field">
+            <label className="field__label" htmlFor={targetInputFieldId}>
+              Quanto você quer receber de proventos por mês (R$)
+            </label>
+            <TextInput id={targetInputFieldId} value={targetInput} onChange={setTargetInput} placeholder="0,00" numeral />
+            <span className="field__hint">Comparada com a média mensal dos últimos 12 meses.</span>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Coluna que não diz nada em nenhuma linha some: "Tipo de pagamento" era
+ * "Não informado" e "Data Com" era "-" em todas, e com quantidade 1 o valor
+ * por cota, o total e o líquido eram três cópias do mesmo número (revisão
+ * de 03/10/2026). Quando um lançamento traz o dado, a coluna volta.
+ */
+function ProventosTable({ rows, classLabel }: { rows: ProventoRow[]; classLabel: (value: string) => string }) {
+  const showType = rows.some((p) => p.dividendType)
+  const showExDate = rows.some((p) => p.exDate)
+  const showPerUnit = rows.some((p) => p.quantity !== 1)
+  const showNet = rows.some((p) => p.netCents !== p.grossCents)
+
+  return (
+    <div className="table-wrap">
+      <table className="table table--stack-mobile table--stack-compact">
+        <thead>
+          <tr>
+            <th scope="col">Ativo</th>
+            <th scope="col">Tipo de ativo</th>
+            <th scope="col">Status</th>
+            {showType && <th scope="col">Tipo de pagamento</th>}
+            {showExDate && <th scope="col">Data Com</th>}
+            <th scope="col">Data de pagamento</th>
+            {showPerUnit && <th scope="col" className="table__num">Quantidade</th>}
+            {showPerUnit && <th scope="col" className="table__num">Por cota</th>}
+            <th scope="col" className="table__num">{showNet ? 'Bruto' : 'Valor'}</th>
+            {showNet && <th scope="col" className="table__num">Líquido</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => (
+            <tr key={p.id}>
+              <td data-label="__lead">
+                <strong style={{ fontWeight: 500 }}>{p.ticker ?? p.assetName}</strong>
+              </td>
+              <td className="muted" data-label="Tipo de ativo">{classLabel(p.assetClass)}</td>
+              <td data-label="__trail">
+                <span className={`badge ${p.status === 'a_receber' ? '' : 'badge--good'}`}>
+                  {p.status === 'a_receber' ? 'A receber' : 'Pago'}
+                </span>
+              </td>
+              {showType && (
+                <td className="muted" data-label="Tipo de pagamento">
+                  {p.dividendType ? (DIVIDEND_TYPE_LABEL[p.dividendType] ?? p.dividendType) : 'Não informado'}
+                </td>
+              )}
+              {showExDate && <td className="muted" data-label="Data Com">{p.exDate ? fmtDate(p.exDate) : '-'}</td>}
+              <td data-label="Pagamento">{fmtDate(p.tradedOn)}</td>
+              {showPerUnit && <td className="table__num" data-label="Quantidade">{fmtQuantity(p.quantity)}</td>}
+              {showPerUnit && <td className="table__num" data-label="Por cota">{money(p.unitPriceCents)}</td>}
+              <td className="table__num" data-label={showNet ? 'Bruto' : 'Valor'}>
+                {showNet ? money(p.grossCents) : <strong>{money(p.grossCents)}</strong>}
+              </td>
+              {showNet && (
+                <td className="table__num" data-label="Líquido">
+                  <strong>{money(p.netCents)}</strong>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }

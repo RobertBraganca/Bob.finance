@@ -41,6 +41,7 @@ export function ProventosDistributionRing({
       surface={surface}
       totalLabel="Recebido (12 meses)"
       countLabel="Pagamentos"
+      caption="Proventos recebidos em 12 meses, por ativo"
       height={height}
     />
   )
@@ -89,8 +90,9 @@ export function ProventosEvolutionChart({
       ]}
       isEmpty={!hasData}
       emptyTitle="Nenhum provento no período"
-      emptyBody="Registre um lançamento de provento na aba Lançamentos ou pelo botão desta tela."
+      emptyBody="Registre um provento pelo botão desta tela ou por Registrar operação, no topo da página."
       table={{
+        caption: 'Proventos recebidos e a receber por período',
         rows: data.filter((d) => d.paidCents > 0 || d.pendingCents > 0),
         columns: [
           { header: granularity === 'annual' ? 'Ano' : 'Mês', value: (row) => formatBucket(row.period, granularity) },

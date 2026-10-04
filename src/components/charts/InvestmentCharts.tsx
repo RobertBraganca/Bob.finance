@@ -330,7 +330,7 @@ export function PortfolioEvolutionChart({
       emptyTitle="Nenhuma posição registrada"
       emptyBody="Cadastre ativos e aportes para acompanhar a evolução do patrimônio."
       table={{
-        caption: 'Evolução do patrimônio',
+        caption: 'Evolução da carteira: valor aplicado e ganho de capital por mês',
         rows: data,
         columns: [
           { header: 'Mês', value: (row) => fmtPeriod(row.period) },
@@ -410,7 +410,8 @@ export function AssetClassRing({
     <CategoryRing
       slices={mapped}
       surface={surface}
-      totalLabel="Patrimônio"
+      totalLabel="Carteira"
+      caption="Composição da carteira por classe"
       height={height}
       paddingAngle={5}
       cornerRadius={6}
@@ -429,18 +430,35 @@ export type GoalProjectionPoint = {
   contributedCents: number
 }
 
+/** Meses mostrados depois do último marco (alcance ou data-alvo), para a linha não terminar colada nele. */
+const GOAL_TAIL_MONTHS = 6
+
 export function GoalProjectionChart({
-  data,
+  data: fullData,
   targetCents,
+  targetPeriod,
   surface = 'paper',
   height = 240,
 }: {
   data: GoalProjectionPoint[]
   targetCents: number
+  /** `YYYY-MM` da data-alvo, se houver: o eixo termina pouco depois dela ou do alcance. */
+  targetPeriod?: string | null
   surface?: Surface
   height?: number
 }) {
   const theme = themeFor(useEffectiveSurface(surface))
+  /*
+   * A série vem com o horizonte inteiro (até 10 anos). Uma meta de R$ 3.500
+   * alcançada em meses ficava achatada no rodapé de um eixo de R$ 60 mil
+   * (revisão de 03/10/2026). O eixo vai até o último marco que importa:
+   * o mês em que a projeção cruza o alvo ou a data-alvo, o que vier depois.
+   */
+  const reachIndex = targetCents > 0 ? fullData.findIndex((p) => p.projectedCents >= targetCents) : -1
+  const targetIndex = targetPeriod ? fullData.findIndex((p) => p.period >= targetPeriod) : -1
+  const lastMilestone = Math.max(reachIndex, targetIndex)
+  const data =
+    lastMilestone < 0 ? fullData : fullData.slice(0, Math.min(fullData.length, Math.max(lastMilestone + GOAL_TAIL_MONTHS, 12) + 1))
   const hasData = data.length > 1
 
   const Tip = makeTooltip<GoalProjectionPoint>((point) => ({
@@ -456,7 +474,7 @@ export function GoalProjectionChart({
     <ChartFrame
       legend={[
         { label: 'Com aportes planejados', color: theme.series[0]! },
-        { label: 'Sem novos aportes', color: theme.neutral },
+        { label: 'Sem novos aportes', color: theme.neutral, shape: 'dash' },
       ]}
       isEmpty={!hasData}
       emptyTitle="Configure a meta"
@@ -484,7 +502,8 @@ export function GoalProjectionChart({
               stroke={theme.status.good}
               strokeWidth={1.5}
               label={{
-                value: `meta ${axisMoney(targetCents)}`,
+                // Valor exato: o formato curto do eixo dizia "meta 4k" para R$ 3.500.
+                value: `meta ${money(targetCents)}`,
                 position: 'insideTopLeft',
                 fill: theme.axisText,
                 fontSize: 11,
@@ -496,6 +515,8 @@ export function GoalProjectionChart({
             dataKey="baselineCents"
             stroke={theme.neutral}
             strokeWidth={MARK.lineWidth}
+            /* Tracejada: as duas linhas se distinguem sem depender da cor. */
+            strokeDasharray="5 4"
             dot={false}
             activeDot={{ r: MARK.activeDotRadius, ...surfaceRing(theme) }}
             isAnimationActive={false}

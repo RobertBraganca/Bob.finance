@@ -34,6 +34,7 @@ import {
   Delta,
   EmptyState,
   Icon,
+  KpiTile,
   Modal,
   PendingEditScopeModal,
   PendingScopeModal,
@@ -297,6 +298,7 @@ export function Dashboard() {
 
         <Card title="Pendências e sugestões">
           <Bento>
+            <AutoEntriesSection />
             <div className="col-6">
               <ReconciliationSection />
             </div>
@@ -468,44 +470,6 @@ function greetingWord(displayName: string | null | undefined): string {
   const hour = new Date().getHours()
   const word = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite'
   return displayName ? `${word}, ${displayName}` : word
-}
-
-function KpiTile({
-  label,
-  value,
-  tone,
-  accent,
-  delta,
-  deltaInvert,
-  foot,
-  assumptions,
-}: {
-  label: string
-  value: string
-  tone?: 'up' | 'down'
-  /** O único card de destaque da tela (regra de 01/09/2026: exatamente um por tela). */
-  accent?: boolean
-  delta?: number | null
-  deltaInvert?: boolean
-  foot?: ReactNode
-  assumptions: AssumptionBag
-}) {
-  const body = (
-    <>
-      <div className="card__title-row">
-        <span className="stat__label">{label}</span>
-        <Assumptions data={assumptions} compact />
-      </div>
-      <span className={`stat__value kpi__value${tone ? ` kpi__value--${tone}` : ''}`}>{value}</span>
-      {(delta !== undefined || foot) && (
-        <span className="stat__foot">
-          {delta !== undefined && <Delta bps={delta} label="vs. período anterior" invert={deltaInvert} />}
-          {foot}
-        </span>
-      )}
-    </>
-  )
-  return accent ? <Slab accent className="kpi">{body}</Slab> : <section className="card kpi">{body}</section>
 }
 
 function PeriodKpis({
@@ -1951,6 +1915,97 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
  * never proof, so the user confirms each one by hand before the
  * pending placeholder is dropped in favour of the real posted row.
  */
+type AutoEntry = {
+  id: number
+  postedOn: string
+  description: string
+  amountCents: number
+  accountName: string
+  categoryName: string | null
+}
+
+const AUTO_ENTRIES_SHOWN = 5
+
+/**
+ * O que entrou sozinho pelo Open Finance e ainda não foi conferido
+ * (decisions/0039). Some quando não há nada. "Conferida" tira da lista;
+ * dar TAG ou editar o lançamento também tira (é conferir). Sem TAG é o caso
+ * mais comum, por isso o atalho para Lançamentos já filtrado.
+ */
+function AutoEntriesSection() {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+
+  const entries = useQuery({
+    queryKey: ['transactions', 'needs-review'],
+    queryFn: () =>
+      api.get<{ rows: AutoEntry[]; total: number }>('/transactions', {
+        needsReview: true,
+        includeHidden: true,
+        sort: 'date_desc',
+        limit: AUTO_ENTRIES_SHOWN,
+      }),
+  })
+
+  const markReviewed = useMutation({
+    mutationFn: (ids?: number[]) => api.post<{ updated: number }>('/transactions/mark-reviewed', ids ? { ids } : {}),
+    onSuccess: (result, ids) => {
+      if (!ids) toast(`${result.updated} ${result.updated === 1 ? 'entrada conferida' : 'entradas conferidas'}`)
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao marcar', 'error'),
+  })
+
+  const rows = entries.data?.rows ?? []
+  const total = entries.data?.total ?? 0
+  if (total === 0) return null
+
+  return (
+    <div className="col-12 stack stack--tight">
+      <div className="row row--between row--wrap" style={{ gap: 'var(--sp-2)' }}>
+        <div>
+          <span className="stat__label">Entradas automáticas ({total})</span>
+          <p className="chart__note" style={{ margin: 0 }}>
+            Vieram do Open Finance sem nenhuma dúvida e já contam nos totais. Confira a TAG de cada uma.
+          </p>
+        </div>
+        <span className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+          <Link to="/lancamentos?revisar=1" className="btn btn--ghost btn--sm">
+            Ver {total === 1 ? 'a entrada' : `as ${total}`}
+          </Link>
+          <Button size="sm" icon="check" onClick={() => markReviewed.mutate(undefined)} loading={markReviewed.isPending && !markReviewed.variables}>
+            Marcar todas como conferidas
+          </Button>
+        </span>
+      </div>
+      {rows.map((row) => (
+        <div key={row.id} className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="truncate">
+              <strong>{row.description}</strong>
+            </div>
+            <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+              {fmtDate(row.postedOn)} · {row.accountName} ·{' '}
+              {row.categoryName ?? <span style={{ color: 'var(--status-warning)' }}>sem TAG</span>}
+            </div>
+          </div>
+          <span className="row" style={{ gap: 'var(--sp-2)' }}>
+            <strong className={`tabular ${row.amountCents < 0 ? 'neg' : 'pos'}`}>{money(row.amountCents)}</strong>
+            <Button
+              variant="quiet"
+              size="sm"
+              icon="check"
+              title="Marcar como conferida"
+              onClick={() => markReviewed.mutate([row.id])}
+              disabled={markReviewed.isPending}
+            />
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ReconciliationSection() {
   const toast = useToast()
   const queryClient = useQueryClient()

@@ -27,7 +27,33 @@ type Discovered = {
   linkedAccountId: number | null
 }
 
-type SyncResult = { batchId: number | null; staged: number; alreadyKnown: number; pendingSkipped: number }
+type SyncResult = {
+  /** lote que ficou para revisão, se algo ficou */
+  batchId: number | null
+  /** quantos ficaram para revisão */
+  staged: number
+  /** quantos entraram direto (decisions/0039) */
+  autoImported: number
+  /** parcelas de dívida/previsão baixadas sozinhas */
+  linked: number
+  alreadyKnown: number
+  pendingSkipped: number
+}
+
+type SyncAllResult = {
+  results: Array<{ connectionId: number; ok: boolean; autoImported?: number; inReview?: number; linked?: number; error?: string }>
+}
+
+/** "12 entraram direto, 2 para revisar, 1 parcela baixada" — ou "Nada novo". */
+function syncSummary(autoImported: number, inReview: number, linked: number): string {
+  if (autoImported === 0 && inReview === 0) return 'Nada novo desde a última sincronização'
+  const parts = [
+    autoImported > 0 ? `${autoImported} ${autoImported === 1 ? 'entrou direto' : 'entraram direto'}` : null,
+    inReview > 0 ? `${inReview} para revisar` : null,
+    linked > 0 ? `${linked} ${linked === 1 ? 'parcela baixada' : 'parcelas baixadas'}` : null,
+  ].filter(Boolean)
+  return parts.join(', ')
+}
 
 const dateTime = (iso: string) =>
   new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -57,12 +83,25 @@ export function OpenFinanceCard() {
       queryClient.invalidateQueries({ queryKey: ['bank-connections'] })
       queryClient.invalidateQueries({ queryKey: ['imports'] })
     },
-    onSuccess: (result) =>
+    onSuccess: (result) => {
+      toast(syncSummary(result.autoImported, result.staged, result.linked))
+      // O que entrou direto já está no ledger: tudo que lê lançamentos muda.
+      if (result.autoImported > 0) queryClient.invalidateQueries()
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao sincronizar', 'error'),
+  })
+
+  const syncAll = useMutation({
+    mutationFn: () => api.post<SyncAllResult>('/bank-connections/sync-all'),
+    onSettled: () => queryClient.invalidateQueries(),
+    onSuccess: ({ results }) => {
+      const sum = (key: 'autoImported' | 'inReview' | 'linked') => results.reduce((total, r) => total + (r[key] ?? 0), 0)
+      const failed = results.filter((r) => !r.ok).length
       toast(
-        result.staged === 0
-          ? 'Nada novo desde a última sincronização'
-          : `${result.staged} ${result.staged === 1 ? 'lançamento foi' : 'lançamentos foram'} para a revisão`,
-      ),
+        `${syncSummary(sum('autoImported'), sum('inReview'), sum('linked'))}${failed > 0 ? ` · ${failed} ${failed === 1 ? 'conta falhou' : 'contas falharam'}` : ''}`,
+        failed > 0 ? 'error' : undefined,
+      )
+    },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao sincronizar', 'error'),
   })
 
@@ -84,11 +123,18 @@ export function OpenFinanceCard() {
       span={12}
       flush
       title="Open Finance"
-      subtitle="Meu Pluggy. A sincronização manda os lançamentos para a revisão em Importar; nada entra direto no ledger."
+      subtitle="Meu Pluggy, sincronizado todo dia. O que não tem dúvida entra direto e aparece em Entradas automáticas para você conferir; duplicados, parecidos com lançamentos manuais e quitações esperam a revisão em Importar."
       actions={
-        <Button icon="plus" onClick={() => setConnecting(true)}>
-          Conectar conta
-        </Button>
+        <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+          {connections.length > 1 && (
+            <Button icon="refresh" onClick={() => syncAll.mutate()} loading={syncAll.isPending} disabled={sync.isPending}>
+              Sincronizar todas
+            </Button>
+          )}
+          <Button icon="plus" onClick={() => setConnecting(true)}>
+            Conectar conta
+          </Button>
+        </div>
       }
     >
       {pending.length > 0 && (
@@ -167,7 +213,7 @@ export function OpenFinanceCard() {
                         size="sm"
                         icon="refresh"
                         onClick={() => sync.mutate(c.id)}
-                        disabled={sync.isPending}
+                        disabled={sync.isPending || syncAll.isPending}
                         loading={syncingId === c.id}
                       >
                         Sincronizar

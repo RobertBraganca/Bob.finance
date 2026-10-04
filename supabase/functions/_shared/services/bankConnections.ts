@@ -3,7 +3,7 @@ import { db } from '../db/client.ts'
 import { accounts, bankConnections, categories, importBatches, stagedTransactions, transactions } from '../db/schema.ts'
 import { dedupeHash, merchantSignature, normalizeDescription } from '../core/normalize.ts'
 import * as pluggy from './pluggy.ts'
-import { stageRows, type StageRow } from './imports.ts'
+import { autoCommitClearRows, stageRows, type StageRow } from './imports.ts'
 
 /**
  * Open Finance via Meu Pluggy (docs/specs/open-finance-sync, decisions/0038).
@@ -179,6 +179,9 @@ export async function syncConnection(id: number) {
     const fresh = posted.filter(({ t }) => !known.has(t.id)).sort((a, b) => a.postedOn.localeCompare(b.postedOn))
 
     let batchId: number | null = null
+    let autoImported = 0
+    let linked = 0
+    let inReview = 0
     if (fresh.length > 0) {
       const invest = await investmentCategories()
       const rows: StageRow[] = fresh.map(({ t, postedOn }, index) => {
@@ -214,7 +217,13 @@ export async function syncConnection(id: number) {
         rows,
         matchByDateAndAmount: true,
       })
-      batchId = staged.batchId
+      // Entrada direta (decisions/0039): o que não tem dúvida entra já, o
+      // resto continua no lote para revisão.
+      const split = await autoCommitClearRows(staged.batchId)
+      batchId = split.reviewBatchId
+      autoImported = split.committed
+      linked = split.linked
+      inReview = split.inReview
     }
 
     await db
@@ -222,7 +231,14 @@ export async function syncConnection(id: number) {
       .set({ lastSyncedAt: new Date().toISOString(), lastSyncCount: fresh.length, lastError: null })
       .where(eq(bankConnections.id, id))
 
-    return { batchId, staged: fresh.length, alreadyKnown: posted.length - fresh.length, pendingSkipped: fetched.length - posted.length }
+    return {
+      batchId,
+      staged: inReview,
+      autoImported,
+      linked,
+      alreadyKnown: posted.length - fresh.length,
+      pendingSkipped: fetched.length - posted.length,
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await db.update(bankConnections).set({ lastError: message }).where(eq(bankConnections.id, id))
@@ -237,4 +253,23 @@ export async function pendingBatches() {
     .from(importBatches)
     .where(and(eq(importBatches.status, 'staged'), sql`${importBatches.filename} like 'Open Finance%'`))
     .orderBy(desc(importBatches.id))
+}
+
+/**
+ * Sincroniza todas as contas ligadas, uma de cada vez. É o que a rotina
+ * diária chama (e o botão "Sincronizar todas"). Uma conta com erro não
+ * impede as outras: o erro fica gravado nela (`lastError`) e a lista
+ * devolve o resultado de cada uma.
+ */
+export async function syncAll() {
+  const results: Array<{ connectionId: number; ok: boolean; autoImported?: number; inReview?: number; linked?: number; error?: string }> = []
+  for (const conn of await db.select({ id: bankConnections.id }).from(bankConnections).orderBy(bankConnections.id)) {
+    try {
+      const result = await syncConnection(conn.id)
+      results.push({ connectionId: conn.id, ok: true, autoImported: result.autoImported, inReview: result.staged, linked: result.linked })
+    } catch (error) {
+      results.push({ connectionId: conn.id, ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return { results }
 }

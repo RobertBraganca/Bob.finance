@@ -7,6 +7,7 @@ import * as cashFlowService from '../services/cashFlow'
 import * as creditCardsService from '../services/creditCards'
 import * as criteriaService from '../services/criteria'
 import * as debtService from '../services/debt'
+import { ensureMaterialized } from '../services/materialization'
 import * as dreService from '../services/dre'
 import * as engineService from '../services/financialEngine'
 import * as healthService from '../services/financialHealth'
@@ -1108,7 +1109,7 @@ export async function insightsRoutes(app: FastifyInstance) {
    * the normal ledger rather than a side preview.
    * ---------------------------------------------------------------- */
   app.get('/cash-flow/forecasts', async () => {
-    await cashFlowService.materializeAll()
+    await ensureMaterialized()
     return { forecasts: await cashFlowService.listForecasts() }
   })
 
@@ -1230,7 +1231,8 @@ export async function insightsRoutes(app: FastifyInstance) {
     // "pendentes" widget re-checks it. Debt installments materialize the
     // same way (debt.ts's own MATERIALIZE_HORIZON_MONTHS) so "Despesas
     // pendentes" also reflects upcoming parcelas without a separate UI.
-    await Promise.all([cashFlowService.materializeAll(), debtService.materializeAllDebts()])
+    // Gera só quando algo mudou (ver `services/materialization`), não a cada leitura.
+    await ensureMaterialized()
     const range = query.from && query.to ? { from: query.from, to: query.to } : undefined
     return { pending: await cashFlowService.listPending(query.flow, range) }
   })

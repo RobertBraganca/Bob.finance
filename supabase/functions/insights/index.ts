@@ -11,6 +11,7 @@ import * as cashFlowService from '../_shared/services/cashFlow.ts'
 import * as creditCardsService from '../_shared/services/creditCards.ts'
 import * as criteriaService from '../_shared/services/criteria.ts'
 import * as debtService from '../_shared/services/debt.ts'
+import { ensureMaterialized } from '../_shared/services/materialization.ts'
 import * as dreService from '../_shared/services/dre.ts'
 import * as engineService from '../_shared/services/financialEngine.ts'
 import * as healthService from '../_shared/services/financialHealth.ts'
@@ -980,7 +981,7 @@ app.post('/investments/reserve/contribute', async (c) => {
  * Cash-flow forecasts
  * ---------------------------------------------------------------- */
 app.get('/cash-flow/forecasts', async (c) => {
-  await cashFlowService.materializeAll()
+  await ensureMaterialized()
   return c.json({ forecasts: await cashFlowService.listForecasts() })
 })
 
@@ -1088,7 +1089,8 @@ app.get('/cash-flow/pending', async (c) => {
       to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     })
     .parse(c.req.query())
-  await Promise.all([cashFlowService.materializeAll(), debtService.materializeAllDebts()])
+  // Gera só quando algo mudou (ver `services/materialization`), não a cada leitura.
+  await ensureMaterialized()
   const range = query.from && query.to ? { from: query.from, to: query.to } : undefined
   return c.json({ pending: await cashFlowService.listPending(query.flow, range) })
 })

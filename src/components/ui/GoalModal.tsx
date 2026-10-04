@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
+import { invalidateInvestmentData } from '../../lib/invalidate'
 import { bpsToInput, centsToInput, parseMoneyInput, parsePercentInput } from '../../lib/format'
 // Importa do barrel uma vez só. NÃO é reexportado por ele: o barrel
 // importando este arquivo, que importa o barrel de volta, fecharia um ciclo
@@ -89,7 +90,7 @@ export function GoalModal({
     },
     onSuccess: () => {
       toast(goal ? 'Meta atualizada' : 'Meta criada')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       onClose()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
@@ -99,7 +100,7 @@ export function GoalModal({
     mutationFn: () => api.del(`/investments/goals/${goal!.id}`),
     onSuccess: () => {
       toast('Meta removida')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       onClose()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
@@ -131,9 +132,15 @@ export function GoalModal({
           ) : (
             <span />
           )}
-          <Button variant="primary" icon="check" disabled={!name.trim()} onClick={() => save.mutate()}>
-            Salvar
-          </Button>
+          <span className="row" style={{ gap: 'var(--sp-2)' }}>
+            {/* Sem Cancelar, fechar sem salvar exigia Esc ou o X. */}
+            <Button variant="quiet" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button variant="primary" icon="check" disabled={!name.trim()} onClick={() => save.mutate()}>
+              Salvar
+            </Button>
+          </span>
         </>
       }
     >

@@ -66,11 +66,17 @@ desenvolvimento — ver `decisions/` para o registro de cada um. Resumo:
 - **Derivar, nunca guardar.** Saldo de conta, posição de investimento, saldo
   de dívida corrigido: tudo é calculado a partir do histórico de lançamentos
   a cada leitura, nunca armazenado como número solto que pode dessincronizar.
-- **Nada entra sem revisão.** Toda importação passa por staging → tela de
-  revisão → commit explícito.
-- **Sugestão nunca é aplicação automática.** Conciliação bancária, promoção
-  de regra aprendida, correspondência de duplicata: tudo aparece como
-  sugestão com um botão de confirmação. Nada se aplica sozinho.
+- **Nada duvidoso entra sem revisão.** Importação de CSV passa por staging →
+  tela de revisão → commit explícito. No Open Finance, o que não tem dúvida
+  nenhuma (não é duplicado, não parece lançamento manual, não disputa
+  parcela, não sugere quitação) entra direto e fica marcado para conferência
+  posterior em "Entradas automáticas"; todo o resto espera a revisão
+  (ADR 0039).
+- **Sugestão ambígua nunca é aplicação automática.** Promoção de regra
+  aprendida, correspondência de duplicata, quitação de dívida: aparecem como
+  sugestão com um botão de confirmação. A única ligação automática é a de um
+  pagamento com a ÚNICA parcela pendente de mesma conta, mesmo valor e data
+  próxima, e ela é desfeita junto com a importação (ADR 0039).
 - **Dinheiro é inteiro em centavos.** Nunca float, em nenhuma camada.
 - **pt-BR em todo texto voltado ao usuário**, sem travessão como separador de
   frase (ver ADR 0007) — vírgula, ponto, dois-pontos ou reestruturação da

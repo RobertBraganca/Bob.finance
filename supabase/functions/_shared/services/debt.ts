@@ -965,3 +965,82 @@ export async function debtTrend() {
     order by p.as_of
   `)
 }
+
+/**
+ * Marcas que um pagamento de dívida gravado por uma LIGAÇÃO com um
+ * lançamento real carrega em `notes`. É por elas que desfazer uma importação
+ * acha exatamente o pagamento a apagar (decisions/0039).
+ */
+export const linkedPaymentNote = (transactionId: number) => `lançamento #${transactionId}`
+export const payoffPaymentNote = (transactionId: number) => `quitação · lançamento #${transactionId}`
+
+/**
+ * Dívidas ativas pagas por esta conta, com o saldo devedor de hoje: a base
+ * da sugestão "este pagamento quita a dívida X?" na revisão da importação.
+ */
+export async function payoffCandidates(accountId: number): Promise<Array<{ id: number; name: string; balanceCents: number }>> {
+  const rows = await db.select().from(debts).where(and(eq(debts.active, true), eq(debts.accountId, accountId)))
+  const out: Array<{ id: number; name: string; balanceCents: number }> = []
+  for (const debt of rows) {
+    const balanceCents = await currentBalance(debt)
+    if (balanceCents > 0) out.push({ id: debt.id, name: debt.name, balanceCents })
+  }
+  return out
+}
+
+/** Até 3% de diferença: quitação antecipada costuma vir com desconto de juros. */
+export function looksLikePayoff(paymentCents: number, balanceCents: number): boolean {
+  const paid = Math.abs(paymentCents)
+  return balanceCents > 0 && Math.abs(paid - balanceCents) <= Math.max(100, Math.round(balanceCents * 0.03))
+}
+
+/**
+ * Quita a dívida com um lançamento real que o usuário confirmou na revisão
+ * (nunca automático, decisions/0039): liga o lançamento à dívida, registra o
+ * pagamento, mede o saldo e fecha a dívida na data do pagamento, levando
+ * junto as parcelas que ainda estavam pendentes.
+ */
+export async function payOffDebt(debtId: number, transactionId: number): Promise<void> {
+  const txn = (
+    await db
+      .select({ postedOn: transactions.postedOn, amountCents: transactions.amountCents })
+      .from(transactions)
+      .where(eq(transactions.id, transactionId))
+  )[0]
+  const debt = (await db.select().from(debts).where(eq(debts.id, debtId)))[0]
+  if (!txn || !debt) return
+
+  await db.update(transactions).set({ debtId }).where(eq(transactions.id, transactionId))
+  await db.insert(debtPayments).values({
+    debtId,
+    kind: 'payment',
+    paidOn: txn.postedOn,
+    amountCents: Math.abs(txn.amountCents),
+    notes: payoffPaymentNote(transactionId),
+  })
+  await recordSnapshot(debtId, txn.postedOn, 0)
+  await db.update(debts).set({ active: false, closedOn: txn.postedOn }).where(eq(debts.id, debtId))
+  await db.delete(transactions).where(and(eq(transactions.debtId, debtId), eq(transactions.pending, true)))
+}
+
+/**
+ * Desfaz o pagamento que uma ligação (parcela ou quitação) gravou para este
+ * lançamento. Uma quitação reabre a dívida e gera de novo as parcelas; uma
+ * parcela usa `deletePayment`, que já reabre a dívida se ela tinha fechado
+ * por causa desse pagamento.
+ */
+export async function undoLinkedDebtPayment(debtId: number, transactionId: number): Promise<void> {
+  const payments = await db
+    .select({ id: debtPayments.id, notes: debtPayments.notes })
+    .from(debtPayments)
+    .where(eq(debtPayments.debtId, debtId))
+  for (const payment of payments) {
+    if (payment.notes === payoffPaymentNote(transactionId)) {
+      await db.delete(debtPayments).where(eq(debtPayments.id, payment.id))
+      await db.update(debts).set({ active: true, closedOn: null }).where(eq(debts.id, debtId))
+      await materializeDebtInstallments(debtId)
+    } else if (payment.notes === linkedPaymentNote(transactionId)) {
+      await deletePayment(payment.id)
+    }
+  }
+}

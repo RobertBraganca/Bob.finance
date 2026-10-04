@@ -26,7 +26,13 @@ export function axisMoney(cents: number): string {
   const value = Math.abs(cents) / 100
   const sign = cents < 0 ? '-' : ''
   if (value >= 1_000_000) return `${sign}${decimal.format(value / 1_000_000)}mi`
-  if (value >= 1_000) return `${sign}${Math.round(value / 1_000)}k`
+  // Abaixo de 10 mil, uma casa: arredondar ao milhar fazia o eixo repetir
+  // rótulos ("0 750 2k 2k 3k" para 1.500 e 2.250, revisão de 03/10/2026).
+  if (value >= 10_000) return `${sign}${Math.round(value / 1_000)}k`
+  if (value >= 1_000) return `${sign}${decimal.format(Math.round(value / 100) / 10)}k`
+  // Abaixo de 100, uma casa: eixos de proventos (R$ 7,50 por divisão) liam
+  // "0 8 15 23 30" com o arredondamento ao inteiro.
+  if (value < 100) return `${sign}${decimal.format(Math.round(value * 10) / 10)}`
   return `${sign}${Math.round(value)}`
 }
 

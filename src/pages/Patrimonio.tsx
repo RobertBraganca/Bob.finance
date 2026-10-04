@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { invalidateInvestmentData } from '../lib/invalidate'
 import { useMeta } from '../lib/store'
 import type { IconName } from '../components/ui/Icon'
 import { bps, centsToInput, date as fmtDate, money, parseMoneyInput } from '../lib/format'
@@ -310,7 +311,7 @@ function AddAssetModal({ onClose }: { onClose: () => void }) {
     },
     onSuccess: () => {
       toast(`${name.trim()} adicionado ao patrimônio`)
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       onClose()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao adicionar', 'error'),
@@ -374,7 +375,7 @@ function RevalueModal({ item, onClose }: { item: IlliquidItem; onClose: () => vo
       }),
     onSuccess: () => {
       toast(`Valor de ${item.name} atualizado`)
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       onClose()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao atualizar', 'error'),

@@ -55,8 +55,11 @@ export function CategoryRing({
   height = 220,
   paddingAngle = 1.2,
   cornerRadius = 0,
+  caption = 'Gastos por TAG',
   onSliceClick,
 }: {
+  /** Nome do gráfico (tabela gêmea e leitor de tela). O padrão é o uso original, gastos. */
+  caption?: string
   slices: Slice[]
   /**
    * Leaf-level breakdown for the SAME range/flow, one row per real
@@ -143,7 +146,7 @@ export function CategoryRing({
       emptyTitle="Nada categorizado ainda"
       emptyBody="Depois da primeira importação, os gastos aparecem agrupados por TAG aqui."
       table={{
-        caption: 'Gastos por TAG',
+        caption,
         rows: segments,
         columns: [
           { header: 'TAG', value: (row) => row.name },

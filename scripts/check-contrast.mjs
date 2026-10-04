@@ -33,6 +33,9 @@ const pairs = [
   // texto no tile), 3:1. Era --ink-4, 2,56:1.
   ['ink-3 (sparkline, claro)', '#71717a', '#ffffff', 3.0],
   ['ink-3 (sparkline, escuro)', '#71717a', '#080808', 3.0],
+  // Cabeçalho de tabela: 11px em caixa alta sobre --surface-muted. Com
+  // --ink-3 dava 4,4:1 (revisão de Investimentos de 03/10/2026).
+  ['cabecalho de tabela (ink-2 sobre surface-muted)', '#52525b', '#f4f4f5', 4.5],
   // Texto do badge sobre o próprio fundo do badge, os 3 estados.
   ['badge positivo', '#14682a', '#e8f7ec', 4.5],
   ['badge atencao', '#7a5b00', '#fdf3e0', 4.5],

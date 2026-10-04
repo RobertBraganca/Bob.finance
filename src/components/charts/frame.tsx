@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '../ui/Icon'
 import { EmptyState } from '../ui'
 import type { ChartTheme } from '../../lib/chartTheme'
@@ -16,7 +16,7 @@ import type { ChartTheme } from '../../lib/chartTheme'
  *     rather than an axis with nothing on it.
  */
 
-export type LegendEntry = { label: string; color: string; shape?: 'line' | 'block' }
+export type LegendEntry = { label: string; color: string; shape?: 'line' | 'block' | 'dash' }
 
 export type TableColumn<T> = {
   header: string
@@ -32,6 +32,7 @@ export function ChartFrame<T>({
   emptyBody,
   emptyAction,
   table,
+  ariaLabel,
   children,
 }: {
   legend?: LegendEntry[]
@@ -41,9 +42,33 @@ export function ChartFrame<T>({
   emptyBody?: string
   emptyAction?: ReactNode
   table?: { rows: T[]; columns: Array<TableColumn<T>>; caption?: string }
+  /** Nome do gráfico para leitor de tela. Sem ele, vale a legenda da tabela gêmea. */
+  ariaLabel?: string
   children: ReactNode
 }) {
   const [showTable, setShowTable] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const label = ariaLabel ?? table?.caption
+
+  /*
+   * O Recharts desenha o <svg> com `role="application"` e sem nome, então o
+   * leitor de tela anunciava só "aplicativo" (revisão de Investimentos de
+   * 03/10/2026, 7 gráficos). O SVG nasce depois da medição do
+   * ResponsiveContainer, por isso o observer: rotula quando ele aparece.
+   */
+  useEffect(() => {
+    const body = bodyRef.current
+    if (!body || !label) return
+    const apply = () => {
+      body.querySelectorAll('svg.recharts-surface').forEach((svg) => {
+        if (svg.getAttribute('aria-label') !== label) svg.setAttribute('aria-label', label)
+      })
+    }
+    apply()
+    const observer = new MutationObserver(apply)
+    observer.observe(body, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [label, showTable])
 
   if (isEmpty) {
     return (
@@ -65,8 +90,8 @@ export function ChartFrame<T>({
               {legend.map((entry) => (
                 <span key={entry.label} className="chart__legend-item">
                   <span
-                    className={`chart__legend-key${entry.shape === 'block' ? ' chart__legend-key--block' : ''}`}
-                    style={{ background: entry.color }}
+                    className={`chart__legend-key${entry.shape === 'block' ? ' chart__legend-key--block' : entry.shape === 'dash' ? ' chart__legend-key--dash' : ''}`}
+                    style={entry.shape === 'dash' ? { color: entry.color } : { background: entry.color }}
                   />
                   {entry.label}
                 </span>
@@ -89,7 +114,7 @@ export function ChartFrame<T>({
         </div>
       ) : null}
 
-      <div className="chart__body">
+      <div className="chart__body" ref={bodyRef}>
         {showTable && table ? (
           <div className="scroll-x" style={{ maxHeight: 320, overflowY: 'auto' }}>
             <table className="table">

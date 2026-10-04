@@ -1,6 +1,9 @@
 import { useId, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { invalidateInvestmentData } from '../lib/invalidate'
+import { todayIso } from '../lib/period'
 import { telemetry } from '../lib/telemetry'
 import {
   bps,
@@ -26,8 +29,10 @@ import {
   FilterSelect,
   HeroFigure,
   Icon,
+  KpiTile,
   Meter,
   Modal,
+  PageSkeleton,
   Segmented,
   Select,
   Slab,
@@ -45,7 +50,6 @@ import {
 import { PageHeader } from '../components/shell/Shell'
 import {
   AllocationChart,
-  AllocationVsTargetChart,
   AssetClassRing,
   GoalProjectionChart,
   PortfolioEvolutionChart,
@@ -100,10 +104,46 @@ type PortfolioResponse = {
   goalPurposes: Array<{ value: string; label: string }>
 }
 
+type InvestmentsTab = 'portfolio' | 'contribute' | 'goals' | 'profitability' | 'ledger' | 'proventos' | 'retirement'
+
+/**
+ * A aba vive no endereço (`?aba=metas`): antes ela era só estado da tela,
+ * então recarregar voltava para Carteira e nenhuma aba podia ser guardada
+ * ou compartilhada como link (revisão de 03/10/2026).
+ */
+const TAB_SLUG: Record<InvestmentsTab, string> = {
+  portfolio: 'carteira',
+  contribute: 'aportar',
+  ledger: 'movimentacoes',
+  proventos: 'proventos',
+  goals: 'metas',
+  profitability: 'rentabilidade',
+  retirement: 'aposentadoria',
+}
+const SLUG_TAB = Object.fromEntries(Object.entries(TAB_SLUG).map(([tab, slug]) => [slug, tab])) as Record<
+  string,
+  InvestmentsTab
+>
+
+const INVESTMENTS_SKELETON_CARDS: Array<{ span: 6 | 12; variant: 'lines' | 'stats' | 'block'; height?: number }> = [
+  { span: 12, variant: 'stats', height: 120 },
+  { span: 6, variant: 'block', height: 300 },
+  { span: 6, variant: 'block', height: 300 },
+]
+
 export function InvestmentsPage() {
-  const [tab, setTab] = useState<
-    'portfolio' | 'contribute' | 'goals' | 'profitability' | 'ledger' | 'proventos' | 'retirement'
-  >('portfolio')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab: InvestmentsTab = SLUG_TAB[searchParams.get('aba') ?? ''] ?? 'portfolio'
+  const setTab = (next: InvestmentsTab) =>
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current)
+        if (next === 'portfolio') params.delete('aba')
+        else params.set('aba', TAB_SLUG[next])
+        return params
+      },
+      { replace: true },
+    )
   const [assetModal, setAssetModal] = useState(false)
   const [tradeModal, setTradeModal] = useState(false)
   const [tradePreset, setTradePreset] = useState<string | null>(null)
@@ -122,14 +162,40 @@ export function InvestmentsPage() {
 
   return (
     <>
+      {/* A navegação das seções mora no cabeçalho, no lugar onde o Painel põe o
+          filtro de período: fica presa no topo ao rolar e a página abre direto
+          nos números (revisão de design de 04/10/2026). */}
       <PageHeader
         title="Investimentos"
-        subtitle="Carteira, alocação e o ambiente de metas de aporte"
+        subtitle="Carteira, aportes, metas e proventos"
+        filters={
+          <Segmented
+            ariaLabel="Seção"
+            className="segmented--nav"
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: 'portfolio', label: 'Carteira' },
+              { value: 'contribute', label: 'Aportar' },
+              { value: 'ledger', label: 'Movimentações' },
+              { value: 'proventos', label: 'Proventos' },
+              // Sem número até carregar: "Metas (0)" aparecia antes de "Metas (3)".
+              { value: 'goals', label: data ? `Metas (${data.goals.length})` : 'Metas' },
+              { value: 'profitability', label: 'Rentabilidade' },
+              { value: 'retirement', label: 'Aposentadoria' },
+            ]}
+          />
+        }
         actions={
+          /* "Atualizar cotações" foi para o card "Meus ativos", onde as
+             cotações aparecem: no cabeçalho ele surgia atrasado (depende
+             da carteira carregada) e, com mais dois botões, ocupava 193px
+             do topo do telefone. */
           <div className="row">
-            <RefreshAllQuotesButton hasQuotable={(data?.positions ?? []).some((p) => p.ticker && QUOTABLE_CLASSES.has(p.assetClass))} />
-            <Button icon="plus" onClick={() => setAssetModal(true)}>
-              Novo ativo
+            <Button icon="plus" onClick={() => setAssetModal(true)} title="Novo ativo">
+              {/* No telefone estreito o rótulo some da tela (fica para o
+                  leitor de tela) e os dois botões cabem numa linha só. */}
+              <span className="btn__label--collapse">Novo ativo</span>
             </Button>
             <Button
               variant="primary"
@@ -137,32 +203,17 @@ export function InvestmentsPage() {
               onClick={() => setTradeModal(true)}
               disabled={(data?.assetCount ?? 0) === 0}
             >
-              Registrar aporte
+              Registrar operação
             </Button>
           </div>
         }
       />
 
-      <div className="page">
-        <Segmented
-          ariaLabel="Seção"
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: 'portfolio', label: 'Carteira' },
-            { value: 'contribute', label: 'Aportar' },
-            { value: 'ledger', label: 'Lançamentos' },
-            { value: 'proventos', label: 'Proventos' },
-            { value: 'goals', label: `Metas (${data?.goals.length ?? 0})` },
-            { value: 'profitability', label: 'Rentabilidade' },
-            { value: 'retirement', label: 'Aposentadoria' },
-          ]}
-        />
-
+      {/* `key={tab}`: cada troca de seção remonta o painel e a entrada
+          (`.tab-panel`) roda de novo, um único movimento curto. */}
+      <div className="page stack stack--loose tab-panel" key={tab}>
         {!data ? (
-          <Card>
-            <SkeletonLines lines={4} />
-          </Card>
+          <PageSkeleton cards={INVESTMENTS_SKELETON_CARDS} />
         ) : data.assetCount === 0 ? (
           <Bento>
             <Slab span={12} accent>
@@ -199,7 +250,7 @@ export function InvestmentsPage() {
         ) : tab === 'contribute' ? (
           <ContributionPlanner goals={data.goals} />
         ) : tab === 'ledger' ? (
-          <LedgerTab positions={data.positions} allocation={data.allocation} />
+          <LedgerTab positions={data.positions} />
         ) : tab === 'proventos' ? (
           <ProventosTab positions={data.positions} classes={data.assetClasses} />
         ) : tab === 'profitability' ? (
@@ -264,7 +315,7 @@ function RefreshAllQuotesButton({ hasQuotable }: { hasQuotable: boolean }) {
     onSuccess: ({ results }) => {
       const updated = results.filter((r) => r.status === 'updated').length
       const errors = results.filter((r) => r.status === 'error')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       const firstError = errors[0]
       if (!firstError) {
         toast(`${updated} cotação(ões) atualizada(s) via BRAPI`)
@@ -314,10 +365,11 @@ function NoteBadge({
   return (
     <button
       type="button"
-      className={`badge ${tone === 'good' ? 'badge--good' : tone === 'warning' ? 'badge--warning' : tone === 'critical' ? 'badge--critical' : ''}`}
-      style={{ cursor: 'pointer', minWidth: 34, justifyContent: 'center' }}
+      className={`badge badge--btn ${tone === 'good' ? 'badge--good' : tone === 'warning' ? 'badge--warning' : tone === 'critical' ? 'badge--critical' : ''}`}
+      style={{ minWidth: 34, justifyContent: 'center' }}
       onClick={onClick}
       title={title}
+      aria-label={`${title}. Abrir critérios`}
     >
       {label}
     </button>
@@ -397,11 +449,12 @@ function PortfolioTab({
 }) {
   const [rangePreset, setRangePreset] = useState<SummaryRangePreset>('12m')
   const [customFrom, setCustomFrom] = useState('')
-  const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [customTo, setCustomTo] = useState(todayIso)
   const [classFilter, setClassFilter] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [showTracked, setShowTracked] = useState(false)
 
-  const anchorIso = customTo || new Date().toISOString().slice(0, 10)
+  const anchorIso = customTo || todayIso()
   const toIso = rangePreset === 'custom' ? customTo || anchorIso : anchorIso
   const fromIso =
     rangePreset === 'since_start'
@@ -418,6 +471,10 @@ function PortfolioTab({
         to: toIso,
         assetClass: classFilter ?? undefined,
       }),
+    // Troca de período ou de tipo: os números anteriores ficam na tela,
+    // esmaecidos (ver o `opacity` do container), até os novos chegarem, em
+    // vez de virarem "-" por um instante. Mesmo comportamento do Painel.
+    placeholderData: (previous) => previous,
   })
 
   const performance = useQuery({
@@ -437,10 +494,43 @@ function PortfolioTab({
   }, [performance.data, fromIso, toIso])
 
   const rangeLabel = SUMMARY_RANGE_OPTIONS.find((option) => option.value === rangePreset)?.label ?? '12 meses'
+  const classFilterLabel = classFilter ? (data.assetClasses.find((c) => c.value === classFilter)?.label ?? classFilter) : null
+
+  /*
+   * Com um tipo escolhido, TODO número do topo passa a ser daquele tipo. Antes
+   * o card misturava "Patrimônio total" da carteira inteira com o "+41,1% no
+   * período" só de Ações, lado a lado (revisão de 03/10/2026). Sem filtro, os
+   * números continuam vindo de `/investments`, como sempre.
+   */
+  const scoped = classFilter ? summary.data : null
+  const headline = scoped
+    ? {
+        valueCents: scoped.valueCents,
+        contributedCents: scoped.contributedCents,
+        gainCents: scoped.totalGainCents,
+        capitalGainCents: scoped.capitalGainCents,
+        dividendsCents: scoped.dividendsCents,
+      }
+    : classFilter
+      ? null
+      : {
+          valueCents: data.marketValueCents,
+          contributedCents: data.contributedCents,
+          gainCents: data.gainCents,
+          capitalGainCents: data.gainCents - data.dividendsCents,
+          dividendsCents: data.dividendsCents,
+        }
+
+  const targetSumBps = data.allocation.reduce((sum, slice) => sum + (slice.targetBps ?? 0), 0)
+  const deviation = useQuery({
+    queryKey: ['allocation-deviation'],
+    queryFn: () => api.get<{ assumptions: AssumptionBag }>('/investments/allocation-deviation'),
+  })
 
   const groups = useMemo(() => {
     const byClass = new Map<string, Position[]>()
     for (const p of data.positions) {
+      if (classFilter && p.assetClass !== classFilter) continue
       // Imobilizado tem tela própria (`/patrimonio`) desde 01/09/2026 e sai
       // de `allocation()` no servidor pelo mesmo motivo: não se rebalanceia
       // um bem físico. Mostrá-lo aqui deixaria a lista de classes em
@@ -455,151 +545,182 @@ function PortfolioTab({
         assetClass,
         label: rows[0]!.assetClassLabel,
         rows,
+        heldCount: rows.filter((p) => p.quantity > 0).length,
         alloc: data.allocation.find((a) => a.assetClass === assetClass) ?? null,
       }))
       .sort(
         (a, b) =>
           b.rows.reduce((s, p) => s + p.marketValueCents, 0) - a.rows.reduce((s, p) => s + p.marketValueCents, 0),
       )
-  }, [data.positions, data.allocation])
+  }, [data.positions, data.allocation, classFilter])
+
+  // "Meus ativos (45)" contava 38 ativos sem nenhuma cota. Classe sem posição
+  // nenhuma vai para um bloco recolhido no fim; o título conta só posições.
+  const heldGroups = groups.filter((g) => g.heldCount > 0)
+  const trackedGroups = groups.filter((g) => g.heldCount === 0)
+  const heldTotal = heldGroups.reduce((sum, g) => sum + g.heldCount, 0)
+  const trackedTotal = groups.reduce((sum, g) => sum + g.rows.length - g.heldCount, 0)
+  const hasQuotable = data.positions.some((p) => p.ticker && QUOTABLE_CLASSES.has(p.assetClass))
+  const toggleGroup = (assetClass: string) =>
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(assetClass)) next.delete(assetClass)
+      else next.add(assetClass)
+      return next
+    })
+
+  const gainBps = summary.data?.gainBpsInRange ?? null
+  const allTimeBps = summary.data?.gainBpsAllTime ?? null
+  const rangeShort = rangePreset === 'since_start' ? 'desde o início' : rangePreset === 'custom' ? 'no período' : rangeLabel.toLowerCase()
+  const toneOf = (value: number | null | undefined) => (value == null || value === 0 ? undefined : value > 0 ? 'up' : 'down')
 
   return (
-    <Bento>
-      <Card span={12} muted>
-        <div className="row row--wrap row--between">
-          <div className="row row--wrap">
-            <FilterSelect
-              icon="calendar"
-              value={rangePreset}
-              options={SUMMARY_RANGE_OPTIONS}
-              onChange={(value) => setRangePreset(value ?? '12m')}
-            />
-            {rangePreset === 'custom' && (
-              <DateRangePopover
-                icon="calendar"
-                label={customFrom && customTo ? `${fmtDate(customFrom)} a ${fmtDate(customTo)}` : 'Escolher datas'}
-                from={customFrom || customTo}
-                to={customTo}
-                onApply={(from, to) => {
-                  setCustomFrom(from)
-                  setCustomTo(to)
-                }}
-              />
-            )}
-          </div>
+    // Mesmo esmaecimento do Painel enquanto um período novo carrega: os
+    // números da tela continuam os anteriores até a resposta chegar.
+    <div
+      className="stack stack--loose"
+      aria-busy={summary.isFetching || undefined}
+      style={{ opacity: summary.isFetching && summary.data ? 0.72 : 1, transition: 'opacity 120ms' }}
+    >
+      {/* Filtros soltos, sem card cinza em volta: no Painel o filtro é uma
+          linha de controle, não um bloco de conteúdo. */}
+      <div className="row row--wrap row--between" style={{ gap: 'var(--sp-2)' }}>
+        <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
           <FilterSelect
-            icon="tags"
-            value={classFilter}
-            placeholder="Todos os tipos"
-            options={data.assetClasses}
-            onChange={setClassFilter}
+            icon="calendar"
+            value={rangePreset}
+            options={SUMMARY_RANGE_OPTIONS}
+            onChange={(value) => setRangePreset(value ?? '12m')}
           />
+          {rangePreset === 'custom' && (
+            <DateRangePopover
+              icon="calendar"
+              label={customFrom && customTo ? `${fmtDate(customFrom)} a ${fmtDate(customTo)}` : 'Escolher datas'}
+              from={customFrom || customTo}
+              to={customTo}
+              onApply={(from, to) => {
+                setCustomFrom(from)
+                setCustomTo(to)
+              }}
+            />
+          )}
         </div>
-      </Card>
-
-      <Slab span={6} accent>
-        <HeroFigure
-          label="Patrimônio total"
-          value={money(data.marketValueCents)}
-          delta={summary.data?.valueGrowthBpsInRange ?? null}
-          deltaLabel={`no período (${rangeLabel})`}
-        >
-          <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
-            <span className="kv__k">Valor investido</span>
-            <span className="kv__v">{money(data.contributedCents)}</span>
-          </div>
-        </HeroFigure>
-      </Slab>
-
-      <Card span={6}>
-        <StatTile label="Lucro total" value={money(data.gainCents)} large />
-        <div className="kv">
-          <span className="kv__k">Ganho de capital</span>
-          <span className={`kv__v ${data.gainCents - data.dividendsCents < 0 ? 'neg' : 'pos'}`}>
-            {money(data.gainCents - data.dividendsCents)}
-          </span>
-          <span className="kv__k">Dividendos recebidos</span>
-          <span className="kv__v pos">{money(data.dividendsCents)}</span>
-        </div>
-      </Card>
+        <FilterSelect
+          icon="tags"
+          value={classFilter}
+          placeholder="Todos os tipos"
+          options={data.assetClasses}
+          onChange={setClassFilter}
+        />
+      </div>
 
       {/*
-        Um card para os tres, nao tres cards: em duas colunas eles davam
-        dois pareados e um orfao de meia largura (medido a 1440px em
-        02/09/2026). Mesmo padrao do card de KPI do Painel — `auto-fit`
-        empilha sozinho quando o card fica estreito.
+        A mesma linha de quatro números do Painel (04/10/2026), no lugar do
+        card preto grande, do card de lucro e do card de três rentabilidades.
+        A conta de cada número vai no ⓘ do rótulo: "Valor da carteira" não é
+        o Patrimônio do app (sem imobilizado nem conta), a variação dele
+        inclui os aportes, e a rentabilidade daqui é outra conta que a da aba
+        Rentabilidade (revisão de 03/10/2026).
       */}
-      <Card span={12}>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-            gap: 'var(--sp-5)',
+      <div className="kpi-row">
+        <KpiTile
+          accent
+          label={classFilterLabel ? `Valor em ${classFilterLabel}` : 'Valor da carteira'}
+          value={headline ? money(headline.valueCents) : '-'}
+          delta={summary.data ? summary.data.valueGrowthBpsInRange : undefined}
+          // "com aportes" mora no ⓘ: no rótulo da seta ele quebrava o card em três linhas.
+          deltaLabel={RANGE_MONTHS[rangePreset] ? `em ${rangeShort}` : rangeShort}
+          foot={headline ? <span>investido {money(headline.contributedCents)}</span> : undefined}
+          assumptions={{
+            formula:
+              'Valor de mercado das posições: a última cotação registrada ou, sem cotação, o custo médio. Imobilizado e saldo em conta ficam de fora. A variação compara com o valor no início do período e inclui os aportes feitos nele, então não é rentabilidade.',
+            ...(headline ? { valorCents: headline.valueCents, aportadoCents: headline.contributedCents } : {}),
           }}
+        />
+        <KpiTile
+          label="Lucro total"
+          value={headline ? money(headline.gainCents) : '-'}
+          tone={toneOf(headline?.gainCents)}
+          foot={
+            headline ? (
+              <span>
+                capital {money(headline.capitalGainCents)} · proventos {money(headline.dividendsCents)}
+              </span>
+            ) : undefined
+          }
+          assumptions={{
+            formula: 'Ganho de capital (valor de hoje menos o que foi aportado) mais todos os proventos recebidos.',
+            ...(headline
+              ? { ganhoDeCapitalCents: headline.capitalGainCents, proventosCents: headline.dividendsCents }
+              : {}),
+          }}
+        />
+        <KpiTile
+          label={`Rentabilidade, ${rangeShort}`}
+          value={gainBps === null ? '-' : signedBps(gainBps)}
+          tone={toneOf(gainBps)}
+          foot={allTimeBps === null ? undefined : <span>desde o início {signedBps(allTimeBps)}</span>}
+          assumptions={{
+            formula:
+              'Ganho do período (valorização mais proventos, sem os aportes) dividido pelo valor da carteira no início do período. "Desde o início" divide o ganho total pelo valor aportado. A aba Rentabilidade encadeia o retorno de cada mês, uma conta diferente, por isso os números não batem.',
+          }}
+        />
+        <KpiTile
+          label={`Proventos, ${rangeShort}`}
+          value={summary.data ? money(summary.data.dividendsInRangeCents) : '-'}
+          tone={summary.data && summary.data.dividendsInRangeCents > 0 ? 'up' : undefined}
+          foot={summary.data ? <span>{money(summary.data.dividendsCents)} desde o início</span> : undefined}
+          assumptions={{
+            formula: 'Dividendos e JSCP com data de pagamento dentro do período. Os que ainda vão pagar não entram.',
+          }}
+        />
+      </div>
+
+      <Bento>
+        <Card
+          span={6}
+          title={classFilterLabel ? `Evolução de ${classFilterLabel}` : 'Evolução da carteira'}
+          subtitle="Valor aplicado e ganho de capital, mês a mês"
         >
-          <StatTile
-            label={`Proventos recebidos (${rangeLabel})`}
-            value={summary.data ? money(summary.data.dividendsInRangeCents) : '-'}
-            foot={summary.data ? `Total ${money(summary.data.dividendsCents)}` : undefined}
-          />
-          <StatTile
-            label={`Rentabilidade (${rangeLabel})`}
-            value={
-              summary.data?.gainBpsInRange === null || summary.data?.gainBpsInRange === undefined
-                ? '-'
-                : signedBps(summary.data.gainBpsInRange)
-            }
-          />
-          <StatTile
-            label="Rentabilidade total"
-            value={
-              summary.data?.gainBpsAllTime === null || summary.data?.gainBpsAllTime === undefined
-                ? '-'
-                : signedBps(summary.data.gainBpsAllTime)
-            }
-          />
-        </div>
-      </Card>
+          {/* Esqueleto enquanto carrega: o estado vazio "Nenhuma posição
+              registrada" aparecia por um instante com o valor já no topo. */}
+          {!performance.data ? (
+            <SkeletonBlock height={260} />
+          ) : (
+            <PortfolioEvolutionChart data={evolutionData} surface="paper" height={260} />
+          )}
+        </Card>
+        <AllocationCard
+          allocation={data.allocation}
+          targetSumBps={targetSumBps}
+          assumptions={deviation.data?.assumptions ?? null}
+          onOpenAlloc={onOpenAlloc}
+        />
+      </Bento>
 
-      <Card span={12} title="Evolução do patrimônio">
-        <PortfolioEvolutionChart data={evolutionData} surface="paper" height={260} />
-      </Card>
-      <Card span={6} title="Ativos na carteira">
-        <AssetClassRing slices={data.allocation} surface="paper" height={220} />
-      </Card>
-
-      {/*
-        Vizinho da rosca de propósito: os dois de meia largura pareiam numa
-        linha, e antes a rosca ficava sozinha porque "Alocação por classe"
-        (largura inteira) estava entre eles (02/09/2026).
-      */}
-      <BelowTargetCard allocation={data.allocation} onOpenAlloc={onOpenAlloc} />
+      <Bento>
+        <ReserveCard positions={data.positions} />
+        <BelowTargetCard allocation={data.allocation} targetSumBps={targetSumBps} onOpenAlloc={onOpenAlloc} />
+      </Bento>
 
       <Card
         span={12}
-        title="Alocação por classe"
-        subtitle="Barra é o real, marca vertical é a meta"
+        flush
+        title={`Meus ativos (${heldTotal})`}
+        subtitle={
+          trackedTotal > 0
+            ? `${heldTotal} com posição${classFilterLabel ? ` em ${classFilterLabel}` : ''} e ${trackedTotal} acompanhado${trackedTotal === 1 ? '' : 's'} sem cota`
+            : undefined
+        }
         actions={
-          <Button size="sm" icon="target" onClick={onOpenAlloc}>
-            Definir metas
-          </Button>
+          <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+            <RefreshAllQuotesButton hasQuotable={hasQuotable} />
+            <Button size="sm" icon="target" onClick={onOpenAlloc}>
+              Configurar % ideal
+            </Button>
+          </div>
         }
       >
-        <AllocationChart slices={data.allocation} surface="paper" />
-      </Card>
-
-
-      <AllocationDeviationCard />
-
-      <ReserveCard />
-
-      <Card span={12} flush>
-        <div className="row row--between" style={{ padding: 'var(--sp-5) var(--sp-5) 0', flexWrap: 'wrap', gap: 'var(--sp-3)' }}>
-          <h2 className="card__title">Meus ativos ({data.positions.length})</h2>
-          <Button size="sm" icon="target" onClick={onOpenAlloc}>
-            Configurar % ideal da carteira
-          </Button>
-        </div>
         {data.unpricedCount > 0 && (
           <p className="field__hint" style={{ padding: 'var(--sp-3) var(--sp-5) 0' }}>
             <Icon name="info" size={12} /> {data.unpricedCount} ativo(s) sem cotação registrada; o valor
@@ -607,7 +728,14 @@ function PortfolioTab({
           </p>
         )}
         <div className="stack stack--tight" style={{ padding: 'var(--sp-5)' }}>
-          {groups.map((group) => (
+          {heldGroups.length === 0 && (
+            <EmptyState
+              icon="wallet"
+              title={classFilterLabel ? `Nenhuma posição em ${classFilterLabel}` : 'Nenhuma posição'}
+              body="Os ativos cadastrados ainda não têm cotas. Registre uma compra para eles aparecerem aqui."
+            />
+          )}
+          {[...heldGroups, ...(showTracked ? trackedGroups : [])].map((group) => (
             <AssetGroupCard
               key={group.assetClass}
               assetClass={group.assetClass}
@@ -618,22 +746,117 @@ function PortfolioTab({
               targetBps={group.alloc?.targetBps ?? null}
               portfolioValueCents={data.marketValueCents}
               expanded={expanded.has(group.assetClass)}
-              onToggle={() =>
-                setExpanded((current) => {
-                  const next = new Set(current)
-                  if (next.has(group.assetClass)) next.delete(group.assetClass)
-                  else next.add(group.assetClass)
-                  return next
-                })
-              }
+              onToggle={() => toggleGroup(group.assetClass)}
               onOpenCriteria={onOpenCriteria}
               onAddTrade={() => onAddTrade(group.assetClass)}
               onViewTrades={() => onViewTrades(group.label, group.rows.map((r) => r.assetId))}
             />
           ))}
+          {trackedGroups.length > 0 && (
+            <button
+              type="button"
+              className="btn btn--quiet btn--sm"
+              style={{ alignSelf: 'flex-start' }}
+              aria-expanded={showTracked}
+              onClick={() => setShowTracked((v) => !v)}
+            >
+              <Icon
+                name="chevronDown"
+                size={13}
+                className={`group-head__chevron${showTracked ? ' group-head__chevron--open' : ''}`}
+              />
+              {showTracked ? 'Ocultar classes sem posição' : `Mostrar classes sem posição (${trackedGroups.map((g) => g.label).join(', ')})`}
+            </button>
+          )}
         </div>
       </Card>
-    </Bento>
+    </div>
+  )
+}
+
+type AllocationView = 'composition' | 'target'
+
+/**
+ * Alocação num card só, com o alternador no canto, como "Por tag" no Painel
+ * (04/10/2026). Antes eram dois cards: a rosca "Ativos na carteira" e o
+ * gráfico "Alocação por classe" de largura inteira, que já absorvera a tabela
+ * de desvio (03/10/2026).
+ *
+ * Contra a meta: sua carteira hoje contra a política que você configurou,
+ * por classe, e nada além disso. Nada aqui sugere ativo, classe ou operação:
+ * `decisions/0010` e o raciocínio do Ofício-Circular CVM/SIN 2/2026
+ * registrado lá. Um relatório gerencial da composição contra a política do
+ * próprio cliente é outra coisa que consultoria, e a diferença mora em não
+ * recomendar. A memória de cálculo do endpoint de desvio fica no ⓘ.
+ */
+function AllocationCard({
+  allocation,
+  targetSumBps,
+  assumptions,
+  onOpenAlloc,
+}: {
+  allocation: AllocationSlice[]
+  targetSumBps: number
+  assumptions: AssumptionBag | null
+  onOpenAlloc: () => void
+}) {
+  const [view, setView] = useState<AllocationView>('composition')
+
+  return (
+    <Card
+      span={6}
+      title="Alocação"
+      subtitle={
+        view === 'composition' ? 'Por classe, hoje' : 'Barra: hoje · marca: meta · número: desvio em p.p.'
+      }
+      assumptions={view === 'target' ? assumptions : null}
+      actions={
+        <Segmented
+          ariaLabel="Visão da alocação"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: 'composition', label: 'Composição' },
+            { value: 'target', label: 'Contra a meta' },
+          ]}
+        />
+      }
+    >
+      {view === 'composition' ? (
+        <AssetClassRing slices={allocation} surface="paper" height={200} />
+      ) : (
+        <>
+          <AllocationChart slices={allocation} surface="paper" />
+          <TargetSumNote targetSumBps={targetSumBps} />
+        </>
+      )}
+      <div className="row row--wrap" style={{ marginTop: 'auto' }}>
+        <button type="button" className="btn btn--quiet btn--sm" onClick={onOpenAlloc}>
+          <Icon name="target" size={13} />
+          Definir metas por classe
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * As metas por classe que não somam 100% deixam uma fatia da carteira sem
+ * destino, e os cards que usam essas metas não diziam isso: o aviso só
+ * aparecia dentro de "Definir metas" (revisão de 03/10/2026).
+ */
+function TargetSumNote({ targetSumBps }: { targetSumBps: number }) {
+  if (targetSumBps === 0 || targetSumBps === 10_000) return null
+  return (
+    <p className="chart__note" style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+      <Icon name="info" size={12} />
+      <span>
+        As metas por classe somam {bps(targetSumBps, 0)}.{' '}
+        {targetSumBps < 10_000
+          ? `${bps(10_000 - targetSumBps, 0)} da carteira não têm classe de destino.`
+          : `Passam de 100% em ${bps(targetSumBps - 10_000, 0)}.`}
+      </span>
+    </p>
   )
 }
 
@@ -682,9 +905,11 @@ const RESERVE_MULTIPLE_OPTIONS = [
  */
 function BelowTargetCard({
   allocation,
+  targetSumBps,
   onOpenAlloc,
 }: {
   allocation: AllocationSlice[]
+  targetSumBps: number
   onOpenAlloc: () => void
 }) {
   const hasAnyTarget = allocation.some((slice) => slice.rebalanceCents !== null)
@@ -740,95 +965,14 @@ function BelowTargetCard({
             Considerando a alocação-alvo configurada, estes valores ainda seriam necessários em cada
             classe para alcançar a meta.
           </p>
+          <TargetSumNote targetSumBps={targetSumBps} />
         </div>
       )}
     </Card>
   )
 }
 
-type AllocationDeviation = {
-  assetClass: string
-  label: string
-  actualBps: number
-  targetBps: number
-  deviationBps: number
-}
-
-/**
- * Desvio de alocação: current share against the policy the user configured,
- * per class, and nothing else.
- *
- * This card deliberately does NOT suggest an asset, a class or an operation,
- * and the endpoint behind it has no field that could be rendered as one. See
- * `decisions/0010` and, for investments specifically, the Ofício-Circular
- * CVM/SIN 2/2026 reasoning recorded there: a managerial report on portfolio
- * composition against the client's own investment policy is a different
- * thing from consultoria de valores mobiliários, and the difference lives
- * exactly in not recommending. Rows keep the API's alphabetical order,
- * because sorting by "biggest gap first" would be a recommendation
- * expressed as a layout.
- */
-function AllocationDeviationCard() {
-  const deviation = useQuery({
-    queryKey: ['allocation-deviation'],
-    queryFn: () =>
-      api.get<{ classes: AllocationDeviation[]; assumptions: AssumptionBag }>(
-        '/investments/allocation-deviation',
-      ),
-  })
-
-  const classes = deviation.data?.classes ?? []
-
-  return (
-    <Card
-      span={12}
-      title="Desvio de alocação"
-      assumptions={deviation.data?.assumptions}
-      subtitle="Sua carteira hoje comparada com a política de alocação que você configurou"
-    >
-      {deviation.isError ? (
-        <EmptyState
-          icon="alert"
-          title="Falha ao carregar"
-          body="Não foi possível carregar o desvio de alocação agora. Tente novamente em instantes."
-        />
-      ) : classes.length === 0 ? (
-        <EmptyState
-          icon="scale"
-          title="Nenhuma classe com meta configurada"
-          body="Uma classe entra nesta tabela quando tem percentual-alvo definido na alocação."
-        />
-      ) : (
-        <>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">Classe</th>
-                  <th scope="col" className="table__num">Atual</th>
-                  <th scope="col" className="table__num">Meta</th>
-                  <th scope="col" className="table__num">Desvio</th>
-                </tr>
-              </thead>
-              <tbody>
-                {classes.map((row) => (
-                  <tr key={row.assetClass}>
-                    <td>{row.label}</td>
-                    <td className="table__num">{bps(row.actualBps)}</td>
-                    <td className="table__num">{bps(row.targetBps)}</td>
-                    <td className="table__num">{signedPoints(row.deviationBps)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </Card>
-  )
-}
-
-function ReserveCard() {
+function ReserveCard({ positions }: { positions: Position[] }) {
   const toast = useToast()
   const queryClient = useQueryClient()
   const [editingCost, setEditingCost] = useState(false)
@@ -846,7 +990,7 @@ function ReserveCard() {
     mutationFn: (multiple: number) => api.put('/investments/reserve', { multiple }),
     onSuccess: () => {
       toast('Meta de reserva atualizada')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
   })
@@ -855,7 +999,7 @@ function ReserveCard() {
     mutationFn: (manualLivingCostCents: number | null) => api.put('/investments/reserve', { manualLivingCostCents }),
     onSuccess: (_, manualLivingCostCents) => {
       toast(manualLivingCostCents === null ? 'Voltou a usar a média calculada' : 'Custo de vida atualizado')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       setEditingCost(false)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
@@ -863,45 +1007,40 @@ function ReserveCard() {
 
   const data = reserve.data
   const meterState = targetProgressState(data ? data.progressBps : null)
+  // De que é feita a reserva: "Guardado" somava Caixa e cripto sem dizer,
+  // e "minha reserva está onde?" não tinha resposta na tela.
+  const holdings = positions
+    .filter((p) => p.countsTowardReserve && p.marketValueCents > 0)
+    .sort((a, b) => b.marketValueCents - a.marketValueCents)
 
   return (
     <Card
-      span={12}
+      span={6}
       title="Reserva de emergência"
-      subtitle="Antes de investir: quanto do seu custo de vida médio já está guardado"
+      subtitle="Quanto do seu custo de vida já está guardado"
       actions={
-        <div className="row" style={{ gap: 'var(--sp-2)' }}>
-          <Segmented
-            ariaLabel="Meta de reserva"
-            value={data ? String(data.multiple) : '6'}
-            options={RESERVE_MULTIPLE_OPTIONS}
-            onChange={(value) => setMultiple.mutate(Number(value))}
-          />
-          {data?.assetId && (
-            <Button variant="ghost" size="sm" icon="list" onClick={() => setViewingHistory(true)}>
-              Lançamentos
-            </Button>
-          )}
-          <Button variant="primary" size="sm" icon="plus" onClick={() => setContributing(true)}>
-            Aportar na reserva
-          </Button>
-        </div>
+        <Segmented
+          ariaLabel="Meta de reserva"
+          value={data ? String(data.multiple) : '6'}
+          options={RESERVE_MULTIPLE_OPTIONS}
+          onChange={(value) => setMultiple.mutate(Number(value))}
+        />
       }
     >
       {!data ? (
         <SkeletonLines lines={4} />
       ) : (
         <div className="stack">
-          <div className="row row--between row--wrap">
-            <StatTile label="Guardado" value={money(data.currentCents)} large />
-            <StatTile
-              label={`Meta (${data.multiple}x o custo de vida)`}
-              value={money(data.targetCents)}
-            />
-            <StatTile
-              label="Falta"
-              value={data.gapCents === 0 ? 'Completa' : money(data.gapCents)}
-            />
+          {/* Um número grande só, o que já foi guardado. Meta e falta vão numa
+              lista menor: "Falta R$ 28.981,00" em letra de destaque soava
+              como cobrança ao lado de "Guardado R$ 1.065,08" (crítica de
+              03/10/2026). */}
+          <StatTile label="Guardado" value={money(data.currentCents)} large />
+          <div className="kv">
+            <span className="kv__k">Meta ({data.multiple}x o custo de vida)</span>
+            <span className="kv__v">{money(data.targetCents)}</span>
+            <span className="kv__k">Falta</span>
+            <span className="kv__v">{data.gapCents === 0 ? 'Completa' : money(data.gapCents)}</span>
           </div>
 
           {!editingCost ? (
@@ -951,18 +1090,46 @@ function ReserveCard() {
           )}
 
           <Meter usedBps={data.progressBps} state={meterState} />
+          {holdings.length > 0 && (
+            <p className="chart__note">
+              Composta por{' '}
+              {holdings.map((p, i) => (
+                <span key={p.assetId}>
+                  {i > 0 && (i === holdings.length - 1 ? ' e ' : ', ')}
+                  <strong className="tabular" style={{ fontWeight: 600 }}>
+                    {p.name}
+                  </strong>{' '}
+                  ({p.assetClassLabel}) {money(p.marketValueCents)}
+                </span>
+              ))}
+              .
+            </p>
+          )}
           <p className="chart__note">
             {data.gapCents > 0
-              ? 'Enquanto a reserva não está completa, cada aporte é direcionado pra ela antes de qualquer ativo: marque os ativos que contam como reserva na tabela abaixo.'
-              : 'Reserva completa: todo novo aporte vai direto para a carteira, seguindo o alvo por classe.'}
+              ? 'Enquanto a reserva não está completa, a simulação da aba Aportar destina o dinheiro novo a ela antes das classes. O que conta como reserva é marcado na coluna Reserva de Meus ativos.'
+              : 'Reserva completa: a simulação da aba Aportar passa a dividir o dinheiro novo entre as classes, pelo alvo de cada uma.'}
           </p>
         </div>
       )}
 
+      {/* Ações no rodapé, como os atalhos dos cards do Painel: no card de meia
+          largura, com o seletor 6x/12x/24x, o cabeçalho não comportava os três. */}
+      <div className="row row--wrap" style={{ gap: 'var(--sp-2)', marginTop: 'auto' }}>
+        <Button size="sm" icon="plus" onClick={() => setContributing(true)}>
+          Aportar na reserva
+        </Button>
+        {data?.assetId && (
+          <Button variant="quiet" size="sm" icon="list" onClick={() => setViewingHistory(true)}>
+            Movimentações
+          </Button>
+        )}
+      </div>
+
       {contributing && <ReserveContributeModal onClose={() => setContributing(false)} />}
       {viewingHistory && data?.assetId && (
         <TradeHistoryModal
-          label="Reserva de emergência"
+          label="reserva de emergência"
           assetIds={[data.assetId]}
           onClose={() => setViewingHistory(false)}
         />
@@ -988,7 +1155,7 @@ function ReserveContributeModal({
   const queryClient = useQueryClient()
   const [kind, setKind] = useState<'buy' | 'sell'>('buy')
   const [amount, setAmount] = useState(initialAmountCents ? centsToInput(initialAmountCents) : '')
-  const [tradedOn, setTradedOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const [tradedOn, setTradedOn] = useState(todayIso)
   const amountFieldId = useId()
   const tradedOnFieldId = useId()
 
@@ -1000,7 +1167,7 @@ function ReserveContributeModal({
     },
     onSuccess: () => {
       toast(kind === 'buy' ? 'Aporte registrado na reserva' : 'Retirada registrada na reserva')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       onClose()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
@@ -1128,6 +1295,10 @@ function AssetGroupCard({
   const rentabilidadeBps =
     classContributedCents > 0 ? Math.round((classGainCents / classContributedCents) * 10_000) : null
   const slices = withinClassSlices(rows, classValueCents, targetBps, portfolioValueCents)
+  const held = rows.filter((p) => p.quantity > 0)
+  const tracked = rows.filter((p) => p.quantity <= 0)
+  const [showTracked, setShowTracked] = useState(held.length === 0)
+  const visibleRows = showTracked ? [...held, ...tracked] : held
 
   return (
     <div className="card group-card">
@@ -1139,7 +1310,7 @@ function AssetGroupCard({
           <strong className="truncate">{label}</strong>
         </span>
         <span className="row row--wrap group-head__stats">
-          <MiniStat label="Ativos" value={String(rows.length)} />
+          <MiniStat label="Com posição" value={tracked.length > 0 ? `${held.length} de ${rows.length}` : String(rows.length)} />
           <MiniStat label="Valor total" value={money(classValueCents)} />
           <MiniStat label="Variação" value={variacaoBps === null ? '-' : signedBps(variacaoBps, 2)} tone={variacaoBps} />
           <MiniStat
@@ -1162,7 +1333,7 @@ function AssetGroupCard({
       {expanded && (
         <>
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table--stack-mobile table--stack-compact">
               <thead>
                 <tr>
                   <th scope="col">Ativo</th>
@@ -1175,15 +1346,22 @@ function AssetGroupCard({
                   <th scope="col" className="table__center">Reserva</th>
                   <th scope="col" className="table__num">% carteira</th>
                   <th scope="col" className="table__num">% ideal</th>
-                  <th scope="col" className="table__center">Comprar?</th>
-                  <th scope="col" style={{ width: 76 }} />
+                  {/* "Comprar? Sim" soava como recomendação (`decisions/0010`):
+                      a coluna mostra quanto falta até o % ideal, e só. */}
+                  <th scope="col" className="table__num">Falta p/ ideal</th>
+                  <th scope="col" style={{ width: 132 }}>
+                    <span className="sr-only">Ações</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((position) => {
+                {visibleRows.map((position) => {
                   const slice = slices.get(position.assetId)
+                  const hasPosition = position.quantity > 0
+                  // Sem cota, preço médio e variação são de uma posição que
+                  // já não existe (ex.: ALUP4 com 0 cotas e +27,35%).
                   const variacao =
-                    position.lastUnitPriceCents !== null && position.avgUnitPriceCents > 0
+                    hasPosition && position.lastUnitPriceCents !== null && position.avgUnitPriceCents > 0
                       ? Math.round(
                           ((position.lastUnitPriceCents - position.avgUnitPriceCents) /
                             position.avgUnitPriceCents) *
@@ -1191,17 +1369,25 @@ function AssetGroupCard({
                         )
                       : null
                   return (
-                    <tr key={position.assetId}>
-                      <td>
-                        <strong>{position.name}</strong>
-                        {position.ticker && (
-                          <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-                            {' '}
-                            · {position.ticker}
-                          </span>
-                        )}
+                    <tr key={position.assetId} className={hasPosition ? undefined : 'row--tracked'}>
+                      <td data-label="__lead">
+                        <span>
+                          <strong>{position.name}</strong>
+                          {position.ticker && (
+                            <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                              {' '}
+                              · {position.ticker}
+                            </span>
+                          )}
+                          {!hasPosition && (
+                            <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                              {' '}
+                              · sem posição
+                            </span>
+                          )}
+                        </span>
                       </td>
-                      <td className="table__center">
+                      <td className="table__center" data-label="Nota">
                         <NoteBadge
                           note={position.note}
                           answered={position.answeredCriteria}
@@ -1215,37 +1401,40 @@ function AssetGroupCard({
                           }
                         />
                       </td>
-                      <td className="table__num">{fmtQuantity(position.quantity)}</td>
-                      <td className="table__num">{money(position.avgUnitPriceCents)}</td>
-                      <td className="table__num">
+                      <td className="table__num" data-label="Qtd.">{fmtQuantity(position.quantity)}</td>
+                      <td className="table__num" data-label="Preço médio">
+                        {hasPosition ? money(position.avgUnitPriceCents) : <span className="muted">-</span>}
+                      </td>
+                      <td className="table__num" data-label="Cotação">
                         {position.lastUnitPriceCents === null ? (
                           <span className="muted">-</span>
                         ) : (
                           money(position.lastUnitPriceCents)
                         )}
                       </td>
-                      <td className={`table__num ${variacao === null ? '' : variacao < 0 ? 'neg' : 'pos'}`}>
+                      <td
+                        className={`table__num ${variacao === null ? '' : variacao < 0 ? 'neg' : 'pos'}`}
+                        data-label="Variação"
+                      >
                         {variacao === null ? '-' : signedBps(variacao, 2)}
                       </td>
-                      <td className="table__num">{money(position.marketValueCents)}</td>
-                      <td className="table__center">
+                      <td className="table__num" data-label="Saldo">{money(position.marketValueCents)}</td>
+                      <td className="table__center" data-label="Reserva">
                         <ReserveToggle assetId={position.assetId} checked={position.countsTowardReserve} />
                       </td>
-                      <td className="table__num">{slice ? bps(slice.actualBps, 0) : '-'}</td>
-                      <td className="table__num">
+                      <td className="table__num" data-label="% carteira">{slice ? bps(slice.actualBps, 0) : '-'}</td>
+                      <td className="table__num" data-label="% ideal">
                         {slice === undefined || slice.targetBps === null ? '-' : bps(slice.targetBps, 0)}
                       </td>
-                      <td className="table__center">
-                        {slice === undefined || slice.rebalanceCents === null ? (
+                      <td className="table__num" data-label="Falta p/ ideal">
+                        {slice === undefined || slice.rebalanceCents === null || slice.rebalanceCents <= 0 ? (
                           <span className="muted">-</span>
-                        ) : slice.rebalanceCents > 0 ? (
-                          <span className="badge badge--good">Sim</span>
                         ) : (
-                          <span className="badge">Não</span>
+                          money(slice.rebalanceCents)
                         )}
                       </td>
-                      <td>
-                        <div className="row" style={{ gap: 2 }}>
+                      <td data-label="__trail">
+                        <div className="row-actions">
                           {position.ticker && QUOTABLE_CLASSES.has(position.assetClass) && (
                             <RefreshQuoteButton assetId={position.assetId} name={position.name} />
                           )}
@@ -1265,12 +1454,19 @@ function AssetGroupCard({
               </tbody>
             </table>
           </div>
-          <div className="row row--between" style={{ padding: 'var(--sp-4) var(--sp-5)' }}>
-            <Button variant="ghost" size="sm" icon="list" onClick={onViewTrades}>
-              Lançamentos
-            </Button>
-            <Button variant="primary" size="sm" icon="plus" onClick={onAddTrade}>
-              Adicionar lançamento
+          <div className="row row--between row--wrap" style={{ padding: 'var(--sp-4) var(--sp-5)', gap: 'var(--sp-2)' }}>
+            <span className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+              <Button variant="ghost" size="sm" icon="list" onClick={onViewTrades}>
+                Movimentações
+              </Button>
+              {tracked.length > 0 && held.length > 0 && (
+                <Button variant="quiet" size="sm" onClick={() => setShowTracked((v) => !v)}>
+                  {showTracked ? 'Ocultar sem posição' : `Mostrar ${tracked.length} sem posição`}
+                </Button>
+              )}
+            </span>
+            <Button size="sm" icon="plus" onClick={onAddTrade}>
+              Registrar operação
             </Button>
           </div>
         </>
@@ -1304,11 +1500,15 @@ export const DIVIDEND_TYPE_LABEL: Record<string, string> = { dividendo: 'Dividen
  * Carteira. Ver `specs/investments`, "Aba Lançamentos e gráficos de carteira
  * objetivo".
  */
-function LedgerTab({ positions, allocation }: { positions: Position[]; allocation: AllocationSlice[] }) {
+/** Linhas por página: 303 lançamentos de uma vez eram 1.500 paradas de Tab. */
+const LEDGER_PAGE = 50
+
+function LedgerTab({ positions }: { positions: Position[] }) {
   const toast = useToast()
   const queryClient = useQueryClient()
   const [assetFilter, setAssetFilter] = useState<number | null>(null)
   const [kindFilter, setKindFilter] = useState<string | null>(null)
+  const [visible, setVisible] = useState(LEDGER_PAGE)
   const [editingTrade, setEditingTrade] = useState<TradeRow | null>(null)
   const [confirmingTradeId, setConfirmingTradeId] = useState<number | null>(null)
 
@@ -1320,8 +1520,8 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
   const remove = useMutation({
     mutationFn: (id: number) => api.del<{ removed: number }>(`/investments/trades/${id}`),
     onSuccess: () => {
-      toast('Lançamento removido')
-      queryClient.invalidateQueries()
+      toast('Operação removida')
+      invalidateInvestmentData(queryClient)
       setConfirmingTradeId(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
@@ -1330,20 +1530,27 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
   const rows = (trades.data?.trades ?? [])
     .filter((t) => assetFilter === null || t.assetId === assetFilter)
     .filter((t) => kindFilter === null || t.kind === kindFilter)
+  const shown = rows.slice(0, visible)
+  // Colunas de provento só quando há provento na lista filtrada: numa lista
+  // só de compras elas eram duas colunas de "-".
+  const hasDividends = shown.some((t) => t.kind === 'dividend')
 
   const confirmingTrade = rows.find((t) => t.id === confirmingTradeId) ?? null
 
   return (
     <Bento>
-      <Slab span={12}>
-        <AllocationVsTargetChart slices={allocation} />
-      </Slab>
-
+      {/* O gráfico "Carteira atual x objetivo" que abria esta aba saiu: era o
+          mesmo número de "Alocação por classe", e a própria nota dele dizia
+          que era "uma segunda leitura visual" (revisão de 03/10/2026). */}
       <Card
         span={12}
         flush
-        title="Lançamentos"
-        subtitle="Todo aporte, venda e provento, de qualquer ativo"
+        title="Movimentações"
+        subtitle={
+          trades.data
+            ? `${rows.length} ${rows.length === 1 ? 'operação' : 'operações'}: compras, vendas e proventos de todos os ativos`
+            : 'Compras, vendas e proventos de todos os ativos'
+        }
         actions={
           <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
             <FilterSelect
@@ -1351,14 +1558,20 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
               value={assetFilter}
               placeholder="Todos os ativos"
               options={positions.map((p) => ({ value: p.assetId, label: p.name }))}
-              onChange={setAssetFilter}
+              onChange={(value) => {
+                setAssetFilter(value)
+                setVisible(LEDGER_PAGE)
+              }}
             />
             <FilterSelect
               icon="filter"
               value={kindFilter}
               placeholder="Todos os tipos"
               options={Object.entries(TRADE_KIND_LABEL).map(([value, label]) => ({ value, label }))}
-              onChange={setKindFilter}
+              onChange={(value) => {
+                setKindFilter(value)
+                setVisible(LEDGER_PAGE)
+              }}
             />
           </div>
         }
@@ -1369,49 +1582,64 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
             title="Falha ao carregar"
             body="Não foi possível carregar os lançamentos agora. Tente novamente em instantes."
           />
+        ) : !trades.data ? (
+          <div style={{ padding: 'var(--sp-5)' }}>
+            <SkeletonLines lines={6} />
+          </div>
         ) : rows.length === 0 ? (
           <EmptyState
             icon="list"
-            title="Nenhum lançamento"
+            title="Nenhuma operação"
             body="Compras, vendas e proventos aparecem aqui assim que forem registrados."
           />
         ) : (
+          <>
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table--stack-mobile table--stack-compact">
               <thead>
                 <tr>
                   <th scope="col">Data</th>
                   <th scope="col">Ativo</th>
                   <th scope="col">Tipo</th>
-                  <th scope="col">Tipo de provento</th>
-                  <th scope="col">Data Com</th>
+                  {hasDividends && <th scope="col">Tipo de provento</th>}
+                  {hasDividends && <th scope="col">Data Com</th>}
                   <th scope="col" className="table__num">Qtd.</th>
                   <th scope="col" className="table__num">Preço</th>
                   <th scope="col" className="table__num">Taxas</th>
-                  <th scope="col" style={{ width: 40 }} />
+                  <th scope="col" style={{ width: 88 }}>
+                    <span className="sr-only">Ações</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((t) => (
+                {shown.map((t) => (
                   <tr key={t.id}>
-                    <td>{fmtDate(t.tradedOn)}</td>
-                    <td>{t.assetName}</td>
-                    <td className="muted">{TRADE_KIND_LABEL[t.kind] ?? t.kind}</td>
-                    <td className="muted">
-                      {t.kind !== 'dividend' ? '-' : (DIVIDEND_TYPE_LABEL[t.dividendType ?? ''] ?? 'Não informado')}
+                    <td data-label="__lead" className="tabular">{fmtDate(t.tradedOn)}</td>
+                    <td data-label="Ativo">
+                      <strong style={{ fontWeight: 500 }}>{t.assetName}</strong>
                     </td>
-                    <td className="muted">{t.kind === 'dividend' && t.exDate ? fmtDate(t.exDate) : '-'}</td>
-                    <td className="table__num">{fmtQuantity(t.quantity)}</td>
-                    <td className="table__num">{money(t.unitPriceCents)}</td>
-                    <td className="table__num">{money(t.feesCents)}</td>
-                    <td>
-                      <div className="row" style={{ gap: 2 }}>
+                    <td className="muted" data-label="Tipo">{TRADE_KIND_LABEL[t.kind] ?? t.kind}</td>
+                    {hasDividends && (
+                      <td className="muted" data-label="Tipo de provento" data-empty={t.kind !== 'dividend' || undefined}>
+                        {t.kind !== 'dividend' ? '-' : (DIVIDEND_TYPE_LABEL[t.dividendType ?? ''] ?? 'Não informado')}
+                      </td>
+                    )}
+                    {hasDividends && (
+                      <td className="muted" data-label="Data Com" data-empty={!(t.kind === 'dividend' && t.exDate) || undefined}>
+                        {t.kind === 'dividend' && t.exDate ? fmtDate(t.exDate) : '-'}
+                      </td>
+                    )}
+                    <td className="table__num" data-label="Qtd.">{fmtQuantity(t.quantity)}</td>
+                    <td className="table__num" data-label="Preço">{money(t.unitPriceCents)}</td>
+                    <td className="table__num" data-label="Taxas" data-empty={t.feesCents === 0 || undefined}>{money(t.feesCents)}</td>
+                    <td data-label="__trail">
+                      <div className="row-actions">
                         <Button
                           variant="quiet"
                           size="sm"
                           icon="pencil"
                           onClick={() => setEditingTrade(t)}
-                          title="Editar lançamento"
+                          title="Editar operação"
                         />
                         <Button
                           variant="quiet"
@@ -1419,7 +1647,7 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
                           icon="trash"
                           onClick={() => setConfirmingTradeId(t.id)}
                           disabled={remove.isPending}
-                          title="Excluir lançamento"
+                          title="Excluir operação"
                         />
                       </div>
                     </td>
@@ -1428,15 +1656,26 @@ function LedgerTab({ positions, allocation }: { positions: Position[]; allocatio
               </tbody>
             </table>
           </div>
+          {rows.length > shown.length && (
+            <div className="row row--between row--wrap" style={{ padding: 'var(--sp-4) var(--sp-5)', gap: 'var(--sp-2)' }}>
+              <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                Mostrando {shown.length} de {rows.length}
+              </span>
+              <Button size="sm" onClick={() => setVisible((v) => v + LEDGER_PAGE)}>
+                Mostrar mais {Math.min(LEDGER_PAGE, rows.length - shown.length)}
+              </Button>
+            </div>
+          )}
+          </>
         )}
       </Card>
 
       {editingTrade && <EditTradeModal trade={editingTrade} onClose={() => setEditingTrade(null)} />}
       {confirmingTrade && (
         <ConfirmDeleteModal
-          title={`Excluir lançamento de ${confirmingTrade.assetName}?`}
+          title={`Excluir operação de ${confirmingTrade.assetName}?`}
           body="Isso não pode ser desfeito."
-          confirmLabel="Excluir lançamento"
+          confirmLabel="Excluir operação"
           pending={remove.isPending}
           onCancel={() => setConfirmingTradeId(null)}
           onConfirm={() => remove.mutate(confirmingTrade.id)}
@@ -1469,8 +1708,8 @@ function TradeHistoryModal({
   const remove = useMutation({
     mutationFn: (id: number) => api.del<{ removed: number }>(`/investments/trades/${id}`),
     onSuccess: () => {
-      toast('Lançamento removido')
-      queryClient.invalidateQueries()
+      toast('Operação removida')
+      invalidateInvestmentData(queryClient)
       setConfirmingTradeId(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
@@ -1481,7 +1720,7 @@ function TradeHistoryModal({
 
   return (
     <Modal
-      title={`Lançamentos de ${label}`}
+      title={`Movimentações de ${label}`}
       onClose={onClose}
       wide
       footer={
@@ -1494,17 +1733,19 @@ function TradeHistoryModal({
         <EmptyState
           icon="alert"
           title="Falha ao carregar"
-          body="Não foi possível carregar os lançamentos desta classe agora. Tente novamente em instantes."
+          body="Não foi possível carregar as movimentações agora. Tente novamente em instantes."
         />
+      ) : !trades.data ? (
+        <SkeletonLines lines={4} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon="list"
-          title="Nenhum lançamento"
-          body="Compras, vendas e proventos desta classe aparecem aqui, com opção de excluir."
+          title="Nenhuma operação"
+          body="Compras, vendas e proventos aparecem aqui, com opção de editar e excluir."
         />
       ) : (
         <div className="table-wrap">
-          <table className="table">
+          <table className="table table--stack-mobile table--stack-compact">
             <thead>
               <tr>
                 <th scope="col">Data</th>
@@ -1513,26 +1754,28 @@ function TradeHistoryModal({
                 <th scope="col" className="table__num">Qtd.</th>
                 <th scope="col" className="table__num">Preço</th>
                 <th scope="col" className="table__num">Taxas</th>
-                <th scope="col" style={{ width: 40 }} />
+                <th scope="col" style={{ width: 88 }}>
+                  <span className="sr-only">Ações</span>
+                </th>
               </tr>
             </thead>
             <tbody>
               {rows.map((t) => (
                 <tr key={t.id}>
-                  <td>{fmtDate(t.tradedOn)}</td>
-                  <td>{t.assetName}</td>
-                  <td className="muted">{TRADE_KIND_LABEL[t.kind] ?? t.kind}</td>
-                  <td className="table__num">{fmtQuantity(t.quantity)}</td>
-                  <td className="table__num">{money(t.unitPriceCents)}</td>
-                  <td className="table__num">{money(t.feesCents)}</td>
-                  <td>
-                    <div className="row" style={{ gap: 2 }}>
+                  <td data-label="__lead" className="tabular">{fmtDate(t.tradedOn)}</td>
+                  <td data-label="Ativo">{t.assetName}</td>
+                  <td className="muted" data-label="Tipo">{TRADE_KIND_LABEL[t.kind] ?? t.kind}</td>
+                  <td className="table__num" data-label="Qtd.">{fmtQuantity(t.quantity)}</td>
+                  <td className="table__num" data-label="Preço">{money(t.unitPriceCents)}</td>
+                  <td className="table__num" data-label="Taxas" data-empty={t.feesCents === 0 || undefined}>{money(t.feesCents)}</td>
+                  <td data-label="__trail">
+                    <div className="row-actions">
                       <Button
                         variant="quiet"
                         size="sm"
                         icon="pencil"
                         onClick={() => setEditingTrade(t)}
-                        title="Editar lançamento"
+                        title="Editar operação"
                       />
                       <Button
                         variant="quiet"
@@ -1540,7 +1783,7 @@ function TradeHistoryModal({
                         icon="trash"
                         onClick={() => setConfirmingTradeId(t.id)}
                         disabled={remove.isPending}
-                        title="Excluir lançamento"
+                        title="Excluir operação"
                       />
                     </div>
                   </td>
@@ -1554,9 +1797,9 @@ function TradeHistoryModal({
       {editingTrade && <EditTradeModal trade={editingTrade} onClose={() => setEditingTrade(null)} />}
       {confirmingTrade && (
         <ConfirmDeleteModal
-          title={`Excluir lançamento de ${confirmingTrade.assetName}?`}
+          title={`Excluir operação de ${confirmingTrade.assetName}?`}
           body="Isso não pode ser desfeito."
-          confirmLabel="Excluir lançamento"
+          confirmLabel="Excluir operação"
           pending={remove.isPending}
           onCancel={() => setConfirmingTradeId(null)}
           onConfirm={() => remove.mutate(confirmingTrade.id)}
@@ -1610,8 +1853,8 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
       })
     },
     onSuccess: () => {
-      toast('Lançamento atualizado')
-      queryClient.invalidateQueries()
+      toast('Operação atualizada')
+      invalidateInvestmentData(queryClient)
       onClose()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
@@ -1619,7 +1862,7 @@ function EditTradeModal({ trade, onClose }: { trade: TradeRow; onClose: () => vo
 
   return (
     <Modal
-      title={`Editar lançamento de ${trade.assetName}`}
+      title={`Editar operação de ${trade.assetName}`}
       onClose={onClose}
       footer={
         <>
@@ -1712,55 +1955,6 @@ function compound(points: MonthlyReturnPoint[]): number | null {
 
 const MONTH_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
-function ProfitabilityKpiCard({
-  label,
-  totalBps,
-  benchmarkLabel,
-  benchmarkBps,
-  neutralOnFlat,
-}: {
-  label: string
-  totalBps: number | null
-  benchmarkLabel: string
-  benchmarkBps: number | null
-  /** "Último mês" treats ~0% as neutral (gray, horizontal arrow) rather than good/bad green/red. */
-  neutralOnFlat?: boolean
-}) {
-  const diffBps = totalBps !== null && benchmarkBps !== null ? totalBps - benchmarkBps : null
-  const flat = neutralOnFlat && totalBps !== null && Math.abs(totalBps) < 10
-  return (
-    /*
-      Sem `span`: este bloco deixou de ser um card e virou conteudo de um
-      card unico, porque tres deles davam dois pareados e um orfao de meia
-      largura no grid de duas colunas (medido a 1440px em 02/09/2026).
-    */
-    <div className="stack stack--tight">
-      <div className="stack stack--tight">
-        <span className="stat__label">{label}</span>
-        <span className="hero-figure" style={flat ? { color: 'var(--on-slab-2)' } : undefined}>
-          {totalBps === null ? '-' : signedBps(totalBps)}
-        </span>
-        {diffBps !== null && (
-          <span className="stat__foot">
-            <span
-              className="delta"
-              style={{ color: flat || diffBps === 0 ? 'var(--on-slab-2)' : diffBps > 0 ? 'var(--delta-up-slab)' : 'var(--delta-down-slab)' }}
-            >
-              <Icon
-                name={flat || diffBps === 0 ? 'arrowRight' : diffBps > 0 ? 'arrowUpRight' : 'arrowDownLeft'}
-                size={12}
-                strokeWidth={2.2}
-              />
-              {signedBps(diffBps)}
-              <span className="muted" style={{ fontWeight: 400 }}> vs. {benchmarkLabel}</span>
-            </span>
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
 const CHART_WINDOW_OPTIONS = [
   { value: '12', label: '12 meses' },
   { value: '24', label: '24 meses' },
@@ -1811,39 +2005,60 @@ function ProfitabilityTab() {
     Object.entries(data.benchmarks).map(([code, series]) => [code, series.filter((p) => p.period >= chartStartPeriod)]),
   )
 
+  const method = {
+    formula:
+      'Retorno de cada mês da carteira (valorização mais proventos, sem o efeito dos aportes), encadeado mês a mês. Na aba Carteira a rentabilidade é o ganho dividido pelo valor aportado, outra conta, por isso os números não batem. Um mês em que a cotação foi atualizada depois de muito tempo parada concentra a valorização de vários meses.',
+    comparadoCom: benchmarkLabel,
+  }
+  const toneOf = (value: number | null, flatBelow = 0) =>
+    value === null || Math.abs(value) <= flatBelow ? undefined : value > 0 ? 'up' : 'down'
+  const diff = (a: number | null, b: number | null) => (a !== null && b !== null ? a - b : null)
+
   return (
-    <Bento>
-      <Card span={12} muted>
-        <div className="row row--wrap row--between">
-          <span className="field__label" style={{ margin: 0 }}>Comparar com</span>
-          <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
-            <FilterSelect icon="scale" value={benchmarkCode} options={benchmarkOptions} onChange={(v) => setBenchmarkCode(v ?? 'CDI')} />
-            <Button icon="refresh" size="sm" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
-              Atualizar índices
-            </Button>
-          </div>
-        </div>
-      </Card>
+    <div className="stack stack--loose">
+      {/* O índice de comparação é o filtro desta aba: fica numa linha de
+          controle solta, como o filtro de período do Painel, e não num card. */}
+      <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+        <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>Comparar com</span>
+        <FilterSelect icon="scale" value={benchmarkCode} options={benchmarkOptions} onChange={(v) => setBenchmarkCode(v ?? 'CDI')} />
+        <Button variant="quiet" icon="refresh" size="sm" onClick={() => refresh.mutate()} loading={refresh.isPending}>
+          Atualizar índices
+        </Button>
+      </div>
 
-      {/*
-        Os tres num card so, em auto-fit: como cards separados eles davam
-        dois pareados e um orfao de meia largura (02/09/2026). Mesmo padrao
-        do card de KPI do Painel e da aba Carteira.
-      */}
-      <Card span={12}>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-            gap: 'var(--sp-5)',
-          }}
-        >
-          <ProfitabilityKpiCard label="Rentabilidade total" totalBps={totalBps} benchmarkLabel={benchmarkLabel} benchmarkBps={benchmarkTotal} />
-          <ProfitabilityKpiCard label="Últimos 12 meses" totalBps={last12} benchmarkLabel={benchmarkLabel} benchmarkBps={benchmarkLast12} />
-          <ProfitabilityKpiCard label="Último mês" totalBps={lastMonth} benchmarkLabel={benchmarkLabel} benchmarkBps={benchmarkLastMonth} neutralOnFlat />
-        </div>
-      </Card>
+      {/* Mesma linha de KPIs da Carteira e do Painel (04/10/2026). A diferença
+          para o índice vai em pontos percentuais, com seta e cor. */}
+      <div className="kpi-row kpi-row--3">
+        <KpiTile
+          accent
+          label="Rentabilidade total"
+          value={totalBps === null ? '-' : signedBps(totalBps)}
+          delta={diff(totalBps, benchmarkTotal)}
+          deltaUnit="points"
+          deltaLabel={`vs. ${benchmarkLabel}`}
+          assumptions={method}
+        />
+        <KpiTile
+          label="Últimos 12 meses"
+          value={last12 === null ? '-' : signedBps(last12)}
+          tone={toneOf(last12)}
+          delta={diff(last12, benchmarkLast12)}
+          deltaUnit="points"
+          deltaLabel={`vs. ${benchmarkLabel}`}
+          assumptions={method}
+        />
+        <KpiTile
+          label="Último mês"
+          value={lastMonth === null ? '-' : signedBps(lastMonth)}
+          tone={toneOf(lastMonth, 10)}
+          delta={diff(lastMonth, benchmarkLastMonth)}
+          deltaUnit="points"
+          deltaLabel={`vs. ${benchmarkLabel}`}
+          assumptions={method}
+        />
+      </div>
 
+      <Bento>
       <Card
         span={12}
         title="Rentabilidade comparada com índices"
@@ -1858,14 +2073,18 @@ function ProfitabilityTab() {
         />
       </Card>
 
-      <Card span={12} title="Rentabilidade por mês" subtitle="Retorno da carteira, ano a ano">
+      <Card
+        span={12}
+        title="Rentabilidade por mês"
+        subtitle="Retorno da carteira, ano a ano. No celular ficam só o retorno anual e o acumulado"
+      >
         <div className="scroll-x">
           <table className="table">
             <thead>
               <tr>
                 <th scope="col">Ano</th>
                 {MONTH_LABELS.map((m) => (
-                  <th key={m} scope="col" style={{ textAlign: 'right' }}>{m}</th>
+                  <th key={m} scope="col" className="table__col--secondary" style={{ textAlign: 'right' }}>{m}</th>
                 ))}
                 <th scope="col" className="table__num">Retorno anual</th>
                 <th scope="col" className="table__num">Acumulado</th>
@@ -1878,7 +2097,7 @@ function ProfitabilityTab() {
                   {row.months.map((value, i) => (
                     <td
                       key={i}
-                      className="table__num"
+                      className="table__num table__col--secondary"
                       style={value === null ? undefined : { color: value >= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}
                     >
                       {value === null ? '-' : bps(value)}
@@ -1894,7 +2113,8 @@ function ProfitabilityTab() {
           </table>
         </div>
       </Card>
-    </Bento>
+      </Bento>
+    </div>
   )
 }
 
@@ -1950,121 +2170,108 @@ function GoalsEnvironment({
   const goal = data?.goal
 
   return (
-    <>
-      <Bento>
-        <Card span={12} muted>
-          <div className="row row--between row--wrap">
-            <div className="row row--wrap">
-              {goals.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`btn ${item.id === activeId ? 'btn--primary' : 'btn--ghost'}`}
-                  onClick={() => setSelectedId(item.id)}
-                >
-                  {item.name}
-                </button>
-              ))}
-            </div>
-            <div className="row">
-              <Button icon="plus" onClick={() => setEditing('new')}>
-                Nova meta
-              </Button>
-              {goal && (
-                <Button icon="pencil" onClick={() => setEditing(goal)}>
-                  Editar
-                </Button>
-              )}
-            </div>
-          </div>
-        </Card>
+    <div className="stack stack--loose">
+      {/* Escolha da meta numa linha de controle solta (sem card cinza), como
+          os filtros do Painel. Seleção dita ao leitor de tela pelo
+          `aria-pressed`, não só pela cor (03/10/2026). */}
+      <div className="row row--between row--wrap" style={{ gap: 'var(--sp-2)' }}>
+        <div className="segmented" role="group" aria-label="Meta">
+          {goals.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="segmented__btn"
+              aria-pressed={item.id === activeId}
+              onClick={() => setSelectedId(item.id)}
+            >
+              {item.name}
+            </button>
+          ))}
+        </div>
+        <div className="row" style={{ gap: 'var(--sp-2)' }}>
+          {goal && (
+            <Button variant="quiet" size="sm" icon="pencil" onClick={() => setEditing(goal)}>
+              Editar
+            </Button>
+          )}
+          <Button size="sm" icon="plus" onClick={() => setEditing('new')}>
+            Nova meta
+          </Button>
+        </div>
+      </div>
 
-        {!data || !goal ? (
-          <Card span={12}>
-            <SkeletonBlock height={260} />
-          </Card>
-        ) : (
-          <>
-            <Slab span={6} accent>
-              <HeroFigure
-                label={
-                  goal.purpose
+      {!data || !goal ? (
+        <PageSkeleton
+          cards={[
+            { span: 12, variant: 'stats', height: 120 },
+            { span: 12, variant: 'block', height: 280 },
+          ]}
+        />
+      ) : (
+        <>
+          {/* A linha de KPIs do Painel (04/10/2026): o card de destaque é o
+              progresso da meta, com a barra; os outros três respondem
+              "quando" e "quanto por mês". */}
+          <div className="kpi-row">
+            <Slab accent className="kpi">
+              <div className="card__title-row">
+                <span className="stat__label truncate">
+                  {goal.purpose
                     ? `${goal.name} · ${goalPurposes.find((p) => p.value === goal.purpose)?.label ?? goal.purpose}`
-                    : goal.name
-                }
-                value={money(data.currentValueCents)}
-              >
-                <div className="stack stack--tight" style={{ marginTop: 'var(--sp-3)' }}>
-                  <div className="row row--between">
-                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--on-slab-2)' }}>
-                      meta {money(goal.targetValueCents)}
-                    </span>
-                    <StatusBadge state={data.state} />
-                  </div>
-                  <Meter usedBps={data.progressBps ?? 0} state={data.state} />
-                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--on-slab-2)' }}>
-                    {data.progressBps === null ? '' : `${bps(data.progressBps, 0)} do alvo`}
-                  </span>
-                </div>
-              </HeroFigure>
+                    : goal.name}
+                </span>
+              </div>
+              <span className="stat__value kpi__value">{money(data.currentValueCents)}</span>
+              <Meter usedBps={data.progressBps ?? 0} state={data.state} />
+              <span className="stat__foot" style={{ justifyContent: 'space-between' }}>
+                <span>
+                  {data.progressBps === null ? '' : `${bps(data.progressBps, 0)} de `}
+                  {money(goal.targetValueCents)}
+                </span>
+                <StatusBadge state={data.state} />
+              </span>
             </Slab>
+            <KpiTile
+              label="Alcança a meta em"
+              value={data.reachedPeriod ? fmtPeriod(data.reachedPeriod) : 'além do horizonte'}
+              foot={
+                <span>{data.reachedMonth === null ? 'aumente o aporte para chegar' : `daqui a ${monthsLabel(data.reachedMonth)}`}</span>
+              }
+            />
+            <KpiTile
+              label="Aporte mensal planejado"
+              value={money(goal.monthlyContributionCents)}
+              foot={<span>retorno esperado {bps(goal.expectedReturnBps)} a.a.</span>}
+            />
+            <KpiTile
+              label="Aporte necessário"
+              value={data.requiredMonthlyCents === null ? '-' : money(data.requiredMonthlyCents)}
+              foot={<span>{goal.targetDate ? `por mês, para chegar em ${fmtDate(goal.targetDate)}` : 'defina uma data-alvo'}</span>}
+            />
+          </div>
 
-            <Card span={6} title="Trajetória projetada">
-              <GoalProjectionChart
-                data={data.series}
-                targetCents={goal.targetValueCents}
-                surface="paper"
-                height={250}
-              />
-            </Card>
-
-            <Card span={6}>
-              <StatTile
-                label="Aporte mensal planejado"
-                value={money(goal.monthlyContributionCents)}
-                foot={`retorno esperado ${bps(goal.expectedReturnBps)} a.a.`}
-              />
-            </Card>
-            <Card span={6}>
-              <StatTile
-                label="Alcança a meta em"
-                value={data.reachedMonth === null ? 'além do horizonte' : monthsLabel(data.reachedMonth)}
-                foot={data.reachedPeriod ? fmtPeriod(data.reachedPeriod) : 'aumente o aporte'}
-              />
-            </Card>
-            <Card span={6}>
-              <StatTile
-                label="Aporte necessário na data"
-                value={
-                  data.requiredMonthlyCents === null ? '-' : money(data.requiredMonthlyCents)
-                }
-                foot={
-                  goal.targetDate
-                    ? `para chegar em ${fmtDate(goal.targetDate)}`
-                    : 'defina uma data-alvo'
-                }
-              />
-            </Card>
-            <Card span={6}>
-              <StatTile
-                label="Projetado na data-alvo"
-                value={
-                  data.projectedAtTargetCents === null
-                    ? '-'
-                    : money(data.projectedAtTargetCents)
-                }
-                foot={
-                  data.projectedAtTargetCents !== null
-                    ? data.projectedAtTargetCents >= goal.targetValueCents
+          <Card
+            title="Trajetória projetada"
+            subtitle={
+              data.projectedAtTargetCents === null
+                ? 'Com e sem os aportes planejados'
+                : `Na data-alvo, ${money(data.projectedAtTargetCents)}: ${
+                    data.projectedAtTargetCents >= goal.targetValueCents
                       ? 'acima do alvo'
-                      : `${money(goal.targetValueCents - data.projectedAtTargetCents)} de diferença`
-                    : ''
-                }
-              />
-            </Card>
-          </>
-        )}
-      </Bento>
+                      : `${money(goal.targetValueCents - data.projectedAtTargetCents)} abaixo do alvo`
+                  }`
+            }
+          >
+            <GoalProjectionChart
+              data={data.series}
+              targetCents={goal.targetValueCents}
+              targetPeriod={goal.targetDate?.slice(0, 7) ?? null}
+              surface="paper"
+              height={280}
+            />
+          </Card>
+        </>
+      )}
 
       {editing !== null && (
         <GoalModal
@@ -2073,7 +2280,7 @@ function GoalsEnvironment({
           onClose={() => setEditing(null)}
         />
       )}
-    </>
+    </div>
   )
 }
 
@@ -2105,7 +2312,7 @@ function AssetModal({
       }),
     onSuccess: () => {
       toast('Ativo cadastrado')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       onClose()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
@@ -2194,7 +2401,9 @@ export function TradeModal({
   const [kind, setKind] = useState(initialKind ?? 'buy')
   const [assetClass, setAssetClass] = useState<string | null>(initialAssetClass ?? null)
   const [assetId, setAssetId] = useState<number | null>(null)
-  const [tradedOn, setTradedOn] = useState(() => new Date().toISOString().slice(0, 10))
+  // Dia de HOJE no fuso do navegador: `toISOString()` é UTC, e depois das
+  // 21h no Brasil já devolvia amanhã (revisão de 03/10/2026).
+  const [tradedOn, setTradedOn] = useState(todayIso)
   const [quantity, setQuantity] = useState('1')
   const [price, setPrice] = useState('')
   const [fees, setFees] = useState('')
@@ -2239,8 +2448,8 @@ export function TradeModal({
     },
     onSuccess: () => {
       telemetry.action('investments', 'trade_recorded')
-      toast('Lançamento adicionado')
-      queryClient.invalidateQueries()
+      toast(`${TRADE_KIND_LABEL[kind] ?? 'Operação'} registrada`)
+      invalidateInvestmentData(queryClient)
       onClose()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
@@ -2248,7 +2457,7 @@ export function TradeModal({
 
   return (
     <Modal
-      title="Adicionar lançamento"
+      title="Registrar operação"
       onClose={onClose}
       footer={
         <>
@@ -2256,7 +2465,7 @@ export function TradeModal({
             Cancelar
           </Button>
           <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
-            Adicionar lançamento
+            {kind === 'sell' ? 'Registrar venda' : kind === 'dividend' ? 'Registrar provento' : 'Registrar compra'}
           </Button>
         </>
       }
@@ -2366,7 +2575,7 @@ function DeletePositionButton({ assetId, name }: { assetId: number; name: string
     mutationFn: () => api.del<{ removed: number }>(`/investments/assets/${assetId}`),
     onSuccess: () => {
       toast(`${name} removido da carteira`)
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       setConfirming(false)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
@@ -2405,7 +2614,7 @@ function ReserveToggle({ assetId, checked }: { assetId: number; checked: boolean
     mutationFn: () => api.patch(`/investments/assets/${assetId}`, { countsTowardReserve: !checked }),
     onSuccess: () => {
       toast(checked ? 'Removido da reserva' : 'Marcado como reserva')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
   })
@@ -2413,10 +2622,11 @@ function ReserveToggle({ assetId, checked }: { assetId: number; checked: boolean
   return (
     <button
       type="button"
-      className={`badge ${checked ? 'badge--good' : ''}`}
-      style={{ cursor: 'pointer' }}
+      className={`badge badge--btn ${checked ? 'badge--good' : ''}`}
       onClick={() => toggle.mutate()}
       disabled={toggle.isPending}
+      aria-pressed={checked}
+      aria-label="Conta como reserva de emergência"
       title={checked ? 'Conta como reserva de emergência (clique para remover)' : 'Marcar como reserva de emergência'}
     >
       {checked ? 'Sim' : 'Não'}
@@ -2442,7 +2652,7 @@ function RefreshQuoteButton({ assetId, name }: { assetId: number; name: string }
     onSuccess: (result) => {
       if (result.status === 'updated') {
         toast(`${name}: cotação atualizada via BRAPI`)
-        queryClient.invalidateQueries()
+        invalidateInvestmentData(queryClient)
       } else {
         toast(result.error ?? 'não foi possível atualizar', 'error')
       }
@@ -2488,7 +2698,7 @@ function EditAssetButton({
   const [editedTicker, setEditedTicker] = useState(ticker ?? '')
   const [editedClass, setEditedClass] = useState(assetClass)
   const [price, setPrice] = useState('')
-  const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10))
+  const [asOf, setAsOf] = useState(todayIso)
   const editedNameFieldId = useId()
   const editedTickerFieldId = useId()
   const editedClassFieldId = useId()
@@ -2510,7 +2720,7 @@ function EditAssetButton({
     },
     onSuccess: () => {
       toast('Ativo atualizado')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       setOpen(false)
       setPrice('')
     },
@@ -2617,7 +2827,7 @@ function AllocationModal({
       }),
     onSuccess: () => {
       toast('Alocação-alvo salva')
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
       onClose()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
@@ -2633,9 +2843,14 @@ function AllocationModal({
             Soma: {bps(totalBps, 1)}
             {totalBps !== 10_000 && ' (o ideal é 100%)'}
           </span>
-          <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
-            Salvar
-          </Button>
+          <span className="row" style={{ gap: 'var(--sp-2)' }}>
+            <Button variant="quiet" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button variant="primary" icon="check" onClick={() => save.mutate()} disabled={save.isPending} loading={save.isPending}>
+              Salvar
+            </Button>
+          </span>
         </>
       }
     >
@@ -2824,9 +3039,11 @@ function CriteriaModal({
 }
 
 /* ------------------------------------------------------------------ *
- * Contribution waterfall — "não vende, direciona o aporte". Points at
- * the single most underweight class, then the single most underweight
- * SCORED asset within it, filling each in turn.
+ * Contribution waterfall — "não vende, direciona o aporte". Reserva de
+ * emergência primeiro, até a meta; o resto é dividido entre TODAS as
+ * classes abaixo do alvo, em proporção ao atraso de cada uma, e dentro da
+ * classe entre os ativos com nota, alternando setores (specs/investments,
+ * decisions 0013/0019/0022).
  * ------------------------------------------------------------------ */
 type ContributionPlanResponse = {
   amountCents: number
@@ -2856,7 +3073,7 @@ function ContributionPlanner({ goals }: { goals: Goal[] }) {
   const toast = useToast()
   const queryClient = useQueryClient()
   const [amount, setAmount] = useState('')
-  const [tradedOn, setTradedOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const [tradedOn, setTradedOn] = useState(todayIso)
   const [contributingReserve, setContributingReserve] = useState<number | null>(null)
   const amountFieldId = useId()
   const tradedOnFieldId = useId()
@@ -2885,7 +3102,7 @@ function ContributionPlanner({ goals }: { goals: Goal[] }) {
       }),
     onSuccess: (_, a) => {
       toast(`Compra de ${a.name} registrada`)
-      queryClient.invalidateQueries()
+      invalidateInvestmentData(queryClient)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao registrar', 'error'),
   })
@@ -2910,12 +3127,17 @@ function ContributionPlanner({ goals }: { goals: Goal[] }) {
         </div>
       </Card>
 
+      {/* Um card só com as metas lado a lado (04/10/2026), como "Destino do
+          dinheiro" no Painel. Antes era um bloco escuro de largura inteira por
+          meta, três seguidos. */}
       {!!parsedCents && parsedCents > 0 && goals.length > 0 && (
-        <>
-          {goals.map((goal) => (
-            <GoalContributionImpact key={goal.id} goal={goal} extraContributionCents={parsedCents} />
-          ))}
-        </>
+        <Card span={12} title="Efeito nas metas" subtitle="Quando cada meta seria alcançada com este aporte somado à carteira">
+          <div className={`kpi-row${goals.length === 3 ? ' kpi-row--3' : ''}`}>
+            {goals.map((goal) => (
+              <GoalContributionImpact key={goal.id} goal={goal} extraContributionCents={parsedCents} />
+            ))}
+          </div>
+        </Card>
       )}
 
       {!parsedCents || parsedCents <= 0 ? (
@@ -2923,7 +3145,7 @@ function ContributionPlanner({ goals }: { goals: Goal[] }) {
           <EmptyState
             icon="target"
             title="Informe um valor para ver a sugestão"
-            body="O aporte é distribuído em cascata: primeiro para a classe mais atrasada em relação à meta, depois para o ativo com a maior nota dentro dela que ainda não atingiu seu alvo."
+            body="A simulação segue uma ordem: primeiro a reserva de emergência, até ela completar a meta. O que sobra é dividido entre as classes abaixo da alocação-alvo, em proporção ao quanto cada uma está atrasada, e dentro de cada classe entre os ativos com nota de resistência, alternando setores."
           />
         </Card>
       ) : plan.isError ? (
@@ -2944,7 +3166,7 @@ function ContributionPlanner({ goals }: { goals: Goal[] }) {
             <Slab span={12} accent>
               <div className="row row--between row--wrap">
                 <div className="stack stack--tight">
-                  <span className="stat__label">Reserva de emergência: prioridade zero</span>
+                  <span className="stat__label">Reserva de emergência, antes das classes</span>
                   <span className="hero-figure" style={{ fontSize: 'var(--text-xl)' }}>
                     {money(plan.data.reserve.allocatedCents)}
                   </span>
@@ -3057,11 +3279,7 @@ function GoalContributionImpact({ goal, extraContributionCents }: { goal: Goal; 
 
   if (baseline.isError || withContribution.isError) return null
   if (!baseline.data || !withContribution.data) {
-    return (
-      <Card span={12}>
-        <SkeletonLines lines={2} />
-      </Card>
-    )
+    return <SkeletonLines lines={3} />
   }
 
   const before = baseline.data
@@ -3069,25 +3287,26 @@ function GoalContributionImpact({ goal, extraContributionCents }: { goal: Goal; 
   const changesEta = before.reachedPeriod !== after.reachedPeriod
 
   return (
-    <Slab span={12}>
-      <div className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
-        <div className="stack stack--tight">
-          <span className="stat__label">{goal.name}, com este aporte</span>
-          <span style={{ fontSize: 'var(--text-base)' }}>
-            {after.reachedPeriod === null
-              ? 'a meta continua além do horizonte projetado, mesmo com este aporte'
-              : changesEta && before.reachedPeriod
-                ? `alcança a meta em ${fmtPeriod(after.reachedPeriod)}, em vez de ${fmtPeriod(before.reachedPeriod)}`
-                : `alcança a meta em ${fmtPeriod(after.reachedPeriod)}, este aporte não muda a data prevista`}
+    <div className="stack stack--tight" style={{ minWidth: 0 }}>
+      <span className="stat__label truncate">{goal.name}</span>
+      <span className="stat__value kpi__value">
+        {after.reachedPeriod === null ? 'além do horizonte' : fmtPeriod(after.reachedPeriod)}
+      </span>
+      <span className="stat__foot">
+        {after.reachedPeriod === null ? (
+          <span>mesmo com este aporte</span>
+        ) : changesEta && before.reachedPeriod ? (
+          <span className="delta" style={{ color: 'var(--delta-up)' }}>
+            <Icon name="arrowUpRight" size={12} strokeWidth={2.2} />
+            antes {fmtPeriod(before.reachedPeriod)}
           </span>
-        </div>
-        {after.contributionShareOfGapBps !== null && (
-          <StatTile
-            label="Cobre do que falta hoje"
-            value={bps(Math.min(after.contributionShareOfGapBps, 10_000), 0)}
-          />
+        ) : (
+          <span>a data prevista não muda</span>
         )}
-      </div>
-    </Slab>
+        {after.contributionShareOfGapBps !== null && (
+          <span>cobre {bps(Math.min(after.contributionShareOfGapBps, 10_000), 0)} do que falta</span>
+        )}
+      </span>
+    </div>
   )
 }

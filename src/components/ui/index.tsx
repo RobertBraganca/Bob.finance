@@ -244,6 +244,60 @@ function Sparkline({ points }: { points: number[] }) {
   )
 }
 
+/**
+ * KPI da linha de números de uma tela (`.kpi-row`): rótulo com o ⓘ da conta,
+ * valor, variação e rodapé. Nasceu no Painel (revisão de 30/09/2026) e veio
+ * para cá quando Investimentos passou a usar a mesma linha (04/10/2026):
+ * as duas telas abrem com o mesmo bloco, lido do mesmo jeito.
+ */
+export function KpiTile({
+  label,
+  value,
+  tone,
+  accent,
+  delta,
+  deltaLabel = 'vs. período anterior',
+  deltaUnit,
+  deltaInvert,
+  foot,
+  assumptions,
+}: {
+  label: string
+  value: string
+  tone?: 'up' | 'down'
+  /** O único card de destaque da tela (regra de 01/09/2026: exatamente um por tela). */
+  accent?: boolean
+  delta?: number | null
+  deltaLabel?: string
+  deltaUnit?: 'percent' | 'points'
+  deltaInvert?: boolean
+  foot?: ReactNode
+  assumptions?: AssumptionBag | null
+}) {
+  const body = (
+    <>
+      <div className="card__title-row">
+        <span className="stat__label">{label}</span>
+        {assumptions && <Assumptions data={assumptions} compact />}
+      </div>
+      <span className={cx('stat__value kpi__value', tone && `kpi__value--${tone}`)}>{value}</span>
+      {(delta !== undefined || foot) && (
+        <span className="stat__foot">
+          {delta !== undefined && <Delta bps={delta} label={deltaLabel} unit={deltaUnit} invert={deltaInvert} />}
+          {foot}
+        </span>
+      )}
+    </>
+  )
+  return accent ? (
+    <Slab accent className="kpi">
+      {body}
+    </Slab>
+  ) : (
+    <section className="card kpi">{body}</section>
+  )
+}
+
 /** The one number a view leads with. Exactly one per page. */
 export function HeroFigure({
   label,
@@ -367,7 +421,11 @@ export function Meter({
   return (
     <div className="meter">
       <div className="meter__track">
-        <div className="meter__fill" style={{ width: `${width}%`, background: METER_FILL[state] }} />
+        {/* Recorte, não largura: animar `width` refaz o layout a cada quadro. */}
+        <div
+          className="meter__fill"
+          style={{ clipPath: `inset(0 ${100 - width}% 0 0 round 9999px)`, background: METER_FILL[state] }}
+        />
         {paceBps !== null && paceBps !== undefined && paceBps > 0 && paceBps < 10_000 && (
           <span
             className="meter__pace"
@@ -447,6 +505,9 @@ export function Button({
       onClick={onClick}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
+      /* Só ícone: `title` sozinho não aparece no toque e é lido de forma
+         irregular pelos leitores de tela, então ele também vira o nome. */
+      aria-label={children === undefined ? title : undefined}
       title={title}
     >
       {loading ? (
@@ -464,14 +525,17 @@ export function Segmented<T extends string>({
   options,
   onChange,
   ariaLabel,
+  className,
 }: {
   value: T
   options: Array<{ value: T; label: string }>
   onChange: (value: T) => void
   ariaLabel: string
+  /** Ex.: `segmented--nav`, a navegação de seções que quebra linha no telefone. */
+  className?: string
 }) {
   return (
-    <div className="segmented" role="group" aria-label={ariaLabel}>
+    <div className={cx('segmented', className)} role="group" aria-label={ariaLabel}>
       {options.map((option) => (
         <button
           key={option.value}
@@ -535,6 +599,8 @@ export function TextInput({
       className={cx('input', numeral && 'input--numeral')}
       value={value}
       type={type}
+      /* Valor numérico abre o teclado de números no celular, e não o de letras. */
+      inputMode={numeral && type === 'text' ? 'decimal' : undefined}
       min={min}
       max={max}
       placeholder={placeholder}
@@ -643,8 +709,14 @@ export function Modal({
   // posição na página toda vez que fecha um modal.
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null
-    const first = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
-    ;(first ?? dialogRef.current)?.focus()
+    // O primeiro focável do CORPO, não o "Fechar" do cabeçalho: abrir um
+    // formulário com o foco no X fazia o primeiro Tab/Enter fechar o modal.
+    const dialog = dialogRef.current
+    const first =
+      Array.from(dialog?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? []).find(
+        (el) => !el.closest('.modal__head'),
+      ) ?? dialog?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
+    ;(first ?? dialog)?.focus()
     return () => previouslyFocused?.focus()
   }, [])
 
@@ -688,7 +760,7 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
       >
-        <header className="row row--between">
+        <header className="row row--between modal__head">
           <h2 className="h2">{title}</h2>
           <Button variant="quiet" icon="x" onClick={onClose} title="Fechar" />
         </header>
