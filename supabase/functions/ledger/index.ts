@@ -26,7 +26,25 @@ const idParam = z.object({ id: z.coerce.number().int().positive() })
 
 const app = new Hono().basePath('/ledger')
 app.use('*', cors({ origin: '*' }))
-app.use('*', requireAdmin)
+/**
+ * A rotina diária de Open Finance (pg_cron, decisions/0039) não tem sessão de
+ * usuário: entra só nesta rota e só com o segredo `BANK_SYNC_CRON_SECRET`.
+ * Qualquer outra rota, ou esta sem o segredo certo, continua exigindo o
+ * usuário admin.
+ */
+const CRON_PATH = '/ledger/cron/bank-sync'
+function sameSecret(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+app.use('*', async (c, next) => {
+  const secret = Deno.env.get('BANK_SYNC_CRON_SECRET')
+  const given = c.req.header('x-cron-secret')
+  if (c.req.path === CRON_PATH && secret && given && sameSecret(given, secret)) return next()
+  return requireAdmin(c, next)
+})
 
 app.onError((error, c) => {
   if (error instanceof ZodError) return c.json({ error: 'dados inválidos', issues: error.issues }, 400)
@@ -224,6 +242,10 @@ app.post('/bank-connections/:id/sync', async (c) => {
   }
 })
 
+app.post('/bank-connections/sync-all', async (c) => c.json(await bankConnections.syncAll()))
+
+app.post('/cron/bank-sync', async (c) => c.json(await bankConnections.syncAll()))
+
 app.get('/imports', async (c) => c.json({ batches: await importsService.listBatches() }))
 
 app.get('/imports/:id', async (c) => {
@@ -243,6 +265,7 @@ app.patch('/imports/:id/rows', async (c) => {
           categoryId: z.number().int().positive().nullable().optional(),
           include: z.boolean().optional(),
           replaceManualMatch: z.boolean().optional(),
+          settlePayoff: z.boolean().optional(),
         }),
       ),
     })
@@ -401,6 +424,7 @@ app.get('/transactions', async (c) => {
       direction: z.enum(['in', 'out']).optional(),
       categoryKind: z.enum(['income', 'expense', 'transfer', 'investment']).optional(),
       uncategorized: z.coerce.boolean().optional(),
+      needsReview: z.coerce.boolean().optional(),
       search: z.string().optional(),
       source: z.string().optional(),
       includeHidden: z.coerce.boolean().optional(),
@@ -410,6 +434,12 @@ app.get('/transactions', async (c) => {
     })
     .parse(c.req.query())
   return c.json(await txnService.listTransactions(query))
+})
+
+// "Entradas automáticas": marca como conferidas as dadas, ou todas.
+app.post('/transactions/mark-reviewed', async (c) => {
+  const body = z.object({ ids: z.array(z.number().int().positive()).optional() }).parse(await c.req.json().catch(() => ({})))
+  return c.json(await txnService.markReviewed(body.ids))
 })
 
 app.post('/transactions', async (c) => {

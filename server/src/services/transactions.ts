@@ -16,6 +16,8 @@ export type TransactionFilter = {
   /** filters by the category's own kind (income/expense/transfer/investment) — independent of direction, since a transfer moves either way */
   categoryKind?: string
   uncategorized?: boolean
+  /** Só o que entrou sozinho pelo Open Finance e ainda não foi conferido (decisions/0039). */
+  needsReview?: boolean
   search?: string
   source?: string
   /** Item 4 do backlog de 07/09/2026: por padrão, oculto some da lista. `true` traz todos, ocultos inclusive. */
@@ -102,6 +104,7 @@ export async function buildWhere(filter: TransactionFilter): Promise<SQL | undef
     )
   }
   if (filter.uncategorized) parts.push(isNull(transactions.categoryId))
+  if (filter.needsReview) parts.push(eq(transactions.needsReview, true))
   if (!filter.includeHidden) parts.push(eq(transactions.hidden, false))
   if (filter.categoryId) parts.push(eq(transactions.categoryId, filter.categoryId))
   if (filter.parentCategoryId) {
@@ -167,6 +170,7 @@ export async function listTransactions(filter: TransactionFilter) {
         duplicateAccepted: transactions.duplicateAccepted,
         hidden: transactions.hidden,
         ignored: transactions.ignored,
+        needsReview: transactions.needsReview,
         pending: transactions.pending,
         forecastId: transactions.forecastId,
         debtId: transactions.debtId,
@@ -234,6 +238,8 @@ export async function setCategory(
       categoryId,
       categorizedBy: categoryId === null ? 'none' : 'manual',
       ruleId: null,
+      // Dar TAG à mão é conferir: sai da lista "Entradas automáticas".
+      needsReview: false,
       updatedAt: sql`now_iso()`,
     })
     .where(inArray(transactions.id, ids))
@@ -428,6 +434,8 @@ export async function updateTransaction(
         ignored: patch.ignored ?? current.ignored,
         dedupeHash: dedupeHash({ accountId, postedOn, amountCents, descriptionNorm }),
         manuallyEdited,
+        // Abrir e salvar o lançamento é conferir (decisions/0039).
+        needsReview: false,
         updatedAt: sql`now_iso()`,
       })
       .where(eq(transactions.id, id))
@@ -550,4 +558,17 @@ export async function ledgerBounds() {
       .where(eq(transactions.pending, false))
   )[0]
   return { min: row?.min ?? null, max: row?.max ?? null, count: row?.count ?? 0 }
+}
+
+/**
+ * Marca como conferido o que entrou sozinho pelo Open Finance: os ids dados,
+ * ou todos quando nenhum id vem (o "Marcar todas como conferidas").
+ */
+export async function markReviewed(ids?: number[]) {
+  if (ids !== undefined && ids.length === 0) return { updated: 0 }
+  const result = await db
+    .update(transactions)
+    .set({ needsReview: false, updatedAt: sql`now_iso()` })
+    .where(ids === undefined ? eq(transactions.needsReview, true) : and(eq(transactions.needsReview, true), inArray(transactions.id, ids)))
+  return { updated: result.count }
 }

@@ -58,6 +58,14 @@ type StagedRow = {
   include: boolean
   parseError: string | null
   rawLine: string | null
+  /** parcela pendente que esta linha paga (só quando há exatamente uma candidata) */
+  pendingMatchId: number | null
+  pendingMatchCount: number
+  pendingMatchLabel: string | null
+  /** sugestão de quitação: só quita se o usuário marcar `settlePayoff` */
+  possiblePayoffDebtId: number | null
+  possiblePayoffDebtName: string | null
+  settlePayoff: boolean
 }
 
 type BatchView = {
@@ -520,17 +528,28 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
 
   const patch = useMutation({
     mutationFn: (
-      patches: Array<{ id: number; categoryId?: number | null; include?: boolean; replaceManualMatch?: boolean }>,
+      patches: Array<{
+        id: number
+        categoryId?: number | null
+        include?: boolean
+        replaceManualMatch?: boolean
+        settlePayoff?: boolean
+      }>,
     ) => api.patch<BatchView>(`/imports/${batchId}/rows`, { patches }),
     onSuccess: (data) => queryClient.setQueryData(['imports', batchId], data),
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
   })
 
   const commit = useMutation({
-    mutationFn: () => api.post<{ committed: number; skipped: number }>(`/imports/${batchId}/commit`),
+    mutationFn: () =>
+      api.post<{ committed: number; skipped: number; linked?: number; paidOff?: number }>(`/imports/${batchId}/commit`),
     onSuccess: (result) => {
       telemetry.action('import', 'csv_committed', { committed: result.committed, skipped: result.skipped })
-      toast(`${result.committed} lançamentos gravados, ${result.skipped} ignorados`)
+      const extras = [
+        result.linked ? `${result.linked} ${result.linked === 1 ? 'parcela baixada' : 'parcelas baixadas'}` : null,
+        result.paidOff ? `${result.paidOff} ${result.paidOff === 1 ? 'dívida quitada' : 'dívidas quitadas'}` : null,
+      ].filter(Boolean)
+      toast(`${result.committed} lançamentos gravados, ${result.skipped} ignorados${extras.length ? ` · ${extras.join(' · ')}` : ''}`)
       queryClient.invalidateQueries()
       onClose()
     },
@@ -696,6 +715,36 @@ function ReviewModal({ batchId, onClose }: { batchId: number; onClose: () => voi
                               possível mesmo evento de "{row.manualMatchDescription}"
                               {row.manualMatchPostedOn ? `, ${fmtDate(row.manualMatchPostedOn)}` : ''}; marcar
                               pra substituir o lançamento manual
+                            </span>
+                          </label>
+                        </div>
+                      )}
+                      {/* Parcela e quitação (decisions/0039): com uma parcela
+                          candidata só, a ligação é automática ao gravar; com
+                          mais de uma, ou numa quitação, quem decide é você. */}
+                      {row.pendingMatchCount === 1 && row.pendingMatchLabel && (
+                        <div className="field__hint" style={{ color: 'var(--delta-up)' }}>
+                          ao gravar, baixa a parcela "{row.pendingMatchLabel}"
+                        </div>
+                      )}
+                      {row.pendingMatchCount > 1 && (
+                        <div className="field__hint" style={{ color: 'var(--status-warning)' }}>
+                          pode pagar {row.pendingMatchCount} parcelas pendentes de mesmo valor; depois de gravar,
+                          escolha qual em Pendências e sugestões, no Painel
+                        </div>
+                      )}
+                      {row.possiblePayoffDebtId !== null && (
+                        <div className="field__hint" style={{ color: 'var(--status-warning)' }}>
+                          <label className="row" style={{ gap: 'var(--sp-1)', alignItems: 'center' }}>
+                            <input
+                              type="checkbox"
+                              className="checkbox"
+                              checked={row.settlePayoff}
+                              onChange={(event) => patch.mutate([{ id: row.id, settlePayoff: event.target.checked }])}
+                            />
+                            <span>
+                              o valor é o saldo devedor de "{row.possiblePayoffDebtName}"; marcar para registrar
+                              como quitação
                             </span>
                           </label>
                         </div>

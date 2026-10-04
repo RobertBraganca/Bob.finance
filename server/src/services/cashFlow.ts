@@ -1,9 +1,9 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { accounts, cashFlowForecasts, categories, debtPayments, debts, reconciliationDismissals, skippedOccurrences, transactions } from '../db/schema'
-import { addMonths, daysInMonth, monthsBetween, todayIso } from '../core/dates'
+import { addDays, addMonths, daysInMonth, monthsBetween, todayIso } from '../core/dates'
 import { dedupeHash, directionOf, normalizeDescription } from '../core/normalize'
-import { closeDebtIfFullyPaid, recordPaymentSnapshot } from './debt'
+import { closeDebtIfFullyPaid, linkedPaymentNote, materializeDebtInstallments, recordPaymentSnapshot, undoLinkedDebtPayment } from './debt'
 
 /**
  * A recurring retainer or an already-agreed installment deal, unified
@@ -734,41 +734,119 @@ export async function dismissReconciliation(pendingId: number, matchId: number) 
  */
 export async function confirmReconciliation(pendingId: number, matchId?: number) {
   if (matchId) {
-    const pendingRow = (
-      await db
-        .select({ forecastId: transactions.forecastId, debtId: transactions.debtId })
-        .from(transactions)
-        .where(and(eq(transactions.id, pendingId), eq(transactions.pending, true)))
-    )[0]
-    if (pendingRow && (pendingRow.forecastId || pendingRow.debtId)) {
-      await db
-        .update(transactions)
-        .set({ forecastId: pendingRow.forecastId, debtId: pendingRow.debtId })
-        .where(eq(transactions.id, matchId))
-
-      // Same debt-payments sync as settlePending: a bank-confirmed parcela
-      // is the same "parcela paga" event Endividamento tracks, whichever
-      // path confirmed it.
-      if (pendingRow.debtId) {
-        const match = (
-          await db
-            .select({ postedOn: transactions.postedOn, amountCents: transactions.amountCents })
-            .from(transactions)
-            .where(eq(transactions.id, matchId))
-        )[0]
-        if (match) {
-          await db
-            .insert(debtPayments)
-            .values({ debtId: pendingRow.debtId, kind: 'payment', paidOn: match.postedOn, amountCents: Math.abs(match.amountCents) })
-          // Mesmo saldo medido de settlePending/createPayment.
-          await recordPaymentSnapshot(pendingRow.debtId, match.amountCents, 'payment')
-          // Mesma regra de fechamento de settlePending/createPayment.
-          await closeDebtIfFullyPaid(pendingRow.debtId)
-        }
-      }
-    }
+    const linked = await linkToSchedule(pendingId, matchId)
+    if (linked) return { removed: 1 }
   }
   return deletePending(pendingId)
+}
+
+/**
+ * Liga um lançamento real à parcela pendente (de previsão ou de dívida) que
+ * ele paga: a pendência sai, o mês dela fica marcado como já atendido, e o
+ * lançamento real passa a carregar a previsão/dívida e o MESMO mês
+ * (`occurrencePeriod`). Numa dívida, também registra o pagamento, mede o
+ * saldo e fecha a dívida se esta era a última parcela.
+ *
+ * Usado pela confirmação do Painel e pela importação, que liga sozinha
+ * quando há uma candidata só (decisions/0039). Guardar o mês no lançamento
+ * real é o que permite desfazer depois (`unlinkFromSchedule`): sem isso,
+ * apagar o lançamento deixava a parcela sumida para sempre.
+ *
+ * Devolve `false` se a pendência já não existe (outra ação chegou antes).
+ */
+export async function linkToSchedule(pendingId: number, transactionId: number): Promise<boolean> {
+  const pendingRow = (
+    await db
+      .select({
+        forecastId: transactions.forecastId,
+        debtId: transactions.debtId,
+        occurrencePeriod: transactions.occurrencePeriod,
+        postedOn: transactions.postedOn,
+      })
+      .from(transactions)
+      .where(and(eq(transactions.id, pendingId), eq(transactions.pending, true)))
+  )[0]
+  if (!pendingRow || (!pendingRow.forecastId && !pendingRow.debtId)) return false
+
+  const period = pendingRow.occurrencePeriod ?? pendingRow.postedOn.slice(0, 7)
+  // Primeiro a pendência sai (e o mês vira "pulado", para não ser gerado de
+  // novo); só depois o lançamento real assume o mês, senão os índices únicos
+  // (previsão|dívida, mês) colidiriam com a própria pendência.
+  await deletePending(pendingId, 'only')
+
+  const taken = (
+    await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(
+        and(
+          pendingRow.forecastId ? eq(transactions.forecastId, pendingRow.forecastId) : eq(transactions.debtId, pendingRow.debtId!),
+          eq(transactions.occurrencePeriod, period),
+        ),
+      )
+  )[0]
+  await db
+    .update(transactions)
+    .set({ forecastId: pendingRow.forecastId, debtId: pendingRow.debtId, occurrencePeriod: taken ? null : period })
+    .where(eq(transactions.id, transactionId))
+
+  // Same debt-payments sync as settlePending: a bank-confirmed parcela
+  // is the same "parcela paga" event Endividamento tracks, whichever
+  // path confirmed it.
+  if (pendingRow.debtId) {
+    const match = (
+      await db
+        .select({ postedOn: transactions.postedOn, amountCents: transactions.amountCents })
+        .from(transactions)
+        .where(eq(transactions.id, transactionId))
+    )[0]
+    if (match) {
+      await db.insert(debtPayments).values({
+        debtId: pendingRow.debtId,
+        kind: 'payment',
+        paidOn: match.postedOn,
+        amountCents: Math.abs(match.amountCents),
+        notes: linkedPaymentNote(transactionId),
+      })
+      // Mesmo saldo medido de settlePending/createPayment.
+      await recordPaymentSnapshot(pendingRow.debtId, match.amountCents, 'payment')
+      // Mesma regra de fechamento de settlePending/createPayment.
+      await closeDebtIfFullyPaid(pendingRow.debtId)
+    }
+  }
+  return true
+}
+
+/**
+ * O caminho inverso de `linkToSchedule`, para quando o lançamento real vai
+ * ser apagado (desfazer uma importação): o mês volta a ficar em aberto, o
+ * pagamento de dívida que a ligação gravou sai (reabrindo a dívida se ela
+ * tinha fechado por causa dele) e a parcela é gerada de novo.
+ */
+export async function unlinkFromSchedule(transactionId: number): Promise<void> {
+  const row = (
+    await db
+      .select({ forecastId: transactions.forecastId, debtId: transactions.debtId, occurrencePeriod: transactions.occurrencePeriod })
+      .from(transactions)
+      .where(eq(transactions.id, transactionId))
+  )[0]
+  if (!row || (!row.forecastId && !row.debtId)) return
+
+  if (row.occurrencePeriod) {
+    await db
+      .delete(skippedOccurrences)
+      .where(
+        and(
+          row.forecastId ? eq(skippedOccurrences.forecastId, row.forecastId) : eq(skippedOccurrences.debtId, row.debtId!),
+          eq(skippedOccurrences.period, row.occurrencePeriod),
+        ),
+      )
+  }
+  if (row.debtId) await undoLinkedDebtPayment(row.debtId, transactionId)
+  // Solta o lançamento antes de regerar, senão o mês dele ainda contaria como atendido.
+  await db.update(transactions).set({ forecastId: null, debtId: null, occurrencePeriod: null }).where(eq(transactions.id, transactionId))
+  if (row.forecastId) await materialize(row.forecastId)
+  if (row.debtId) await materializeDebtInstallments(row.debtId)
 }
 
 
@@ -925,4 +1003,39 @@ export async function debtReconciliationQueue(): Promise<DebtReconciliationQueue
       nenhumaAcaoAutomatica: 'nenhuma divida muda de status por uma sugestao nao confirmada -- so confirm-match/dismiss, os mesmos usados pelo Painel',
     },
   }
+}
+
+/**
+ * Parcelas pendentes (de previsão ou dívida) de uma conta que uma linha
+ * importada pode estar pagando: mesmo valor, até 15 dias antes ou depois.
+ * Mesmo critério de `reconciliationCandidates`, só que contra linhas que
+ * ainda nem entraram no ledger. Uma consulta só para o lote inteiro.
+ */
+export async function pendingScheduleCandidates(
+  accountId: number,
+  rows: Array<{ postedOn: string | null; amountCents: number | null }>,
+): Promise<Array<number[]>> {
+  const dated = rows.filter((r): r is { postedOn: string; amountCents: number } => r.postedOn !== null && r.amountCents !== null)
+  if (dated.length === 0) return rows.map(() => [])
+  const earliest = addDays(dated.reduce((a, r) => (r.postedOn < a ? r.postedOn : a), dated[0]!.postedOn), -15)
+  const latest = addDays(dated.reduce((a, r) => (r.postedOn > a ? r.postedOn : a), dated[0]!.postedOn), 15)
+
+  const pending = await db
+    .select({ id: transactions.id, postedOn: transactions.postedOn, amountCents: transactions.amountCents })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.accountId, accountId),
+        eq(transactions.pending, true),
+        sql`(${transactions.forecastId} is not null or ${transactions.debtId} is not null)`,
+        sql`${transactions.postedOn} between ${earliest} and ${latest}`,
+      ),
+    )
+
+  return rows.map((r) => {
+    if (r.postedOn === null || r.amountCents === null) return []
+    const from = addDays(r.postedOn, -15)
+    const to = addDays(r.postedOn, 15)
+    return pending.filter((p) => p.amountCents === r.amountCents && p.postedOn >= from && p.postedOn <= to).map((p) => p.id)
+  })
 }

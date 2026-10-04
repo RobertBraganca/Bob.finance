@@ -206,6 +206,16 @@ export async function ledgerRoutes(app: FastifyInstance) {
     return withError(reply, () => bankConnections.syncConnection(id))
   })
 
+  app.post('/bank-connections/sync-all', async () => bankConnections.syncAll())
+
+  // Rotina diária (decisions/0039). Na Edge Function ela entra sem sessão de
+  // usuário, só com o segredo; aqui, no servidor local, vale o mesmo segredo.
+  app.post('/cron/bank-sync', async (req, reply) => {
+    const secret = process.env.BANK_SYNC_CRON_SECRET
+    if (!secret || req.headers['x-cron-secret'] !== secret) return reply.code(401).send({ error: 'não autorizado' })
+    return bankConnections.syncAll()
+  })
+
   app.get('/imports', async () => ({ batches: await importsService.listBatches() }))
 
   app.get('/imports/:id', async (req, reply) => {
@@ -225,6 +235,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
             categoryId: z.number().int().positive().nullable().optional(),
             include: z.boolean().optional(),
             replaceManualMatch: z.boolean().optional(),
+            settlePayoff: z.boolean().optional(),
           }),
         ),
       })
@@ -380,6 +391,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
         direction: z.enum(['in', 'out']).optional(),
         categoryKind: z.enum(['income', 'expense', 'transfer', 'investment']).optional(),
         uncategorized: z.coerce.boolean().optional(),
+        needsReview: z.coerce.boolean().optional(),
         search: z.string().optional(),
         source: z.string().optional(),
         includeHidden: z.coerce.boolean().optional(),
@@ -389,6 +401,12 @@ export async function ledgerRoutes(app: FastifyInstance) {
       })
       .parse(req.query)
     return txnService.listTransactions(query)
+  })
+
+  // "Entradas automáticas": marca como conferidas as dadas, ou todas.
+  app.post('/transactions/mark-reviewed', async (req) => {
+    const body = z.object({ ids: z.array(z.number().int().positive()).optional() }).parse(req.body ?? {})
+    return txnService.markReviewed(body.ids)
   })
 
   app.post('/transactions', async (req) => {

@@ -1,6 +1,6 @@
 # 0038. Open Finance via Meu Pluggy, sempre pela fila de revisão da importação
 
-Status: aceita
+Status: aceita; o item 2 (tudo pela fila) foi substituído pela 0039 (entrada direta do que não tem dúvida)
 
 ## Contexto
 O PRD (seção 8) punha Open Finance fora de escopo, e a spec

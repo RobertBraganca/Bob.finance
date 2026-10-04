@@ -334,6 +334,22 @@ export const stagedTransactions = pgTable(
     replaceManualMatch: boolean('replace_manual_match').notNull().default(false),
     /** Id da transação no provedor de Open Finance (Pluggy). Nulo em linha de CSV. Vai junto para `transactions.externalId` no commit. */
     externalId: text('external_id'),
+    /**
+     * Parcela pendente (de previsão ou dívida) que esta linha paga: mesma
+     * conta, mesmo valor, até 15 dias de diferença. Só preenchido quando há
+     * EXATAMENTE uma candidata (`pendingMatchCount = 1`); aí o commit liga
+     * as duas sozinho (decisions/0039). Com duas ou mais, a linha fica na
+     * fila e a ligação continua sendo pela sugestão do Painel.
+     */
+    pendingMatchId: int('pending_match_id').references(() => transactions.id, { onDelete: 'set null' }),
+    pendingMatchCount: int('pending_match_count').notNull().default(0),
+    /**
+     * Sugestão de quitação: o valor bate (até 3%) com o saldo devedor de
+     * uma dívida ativa paga por esta conta. Nunca automático: só quita se o
+     * usuário marcar `settlePayoff` na revisão.
+     */
+    possiblePayoffDebtId: int('possible_payoff_debt_id').references(() => debts.id, { onDelete: 'set null' }),
+    settlePayoff: boolean('settle_payoff').notNull().default(false),
   },
   (t) => [
     index('staged_batch_idx').on(t.batchId),
@@ -448,6 +464,14 @@ export const transactions = pgTable(
      * não pega a repetição.
      */
     externalId: text('external_id'),
+    /**
+     * Entrou sozinho, sem passar pela fila de revisão (Open Finance com
+     * entrada direta, decisions/0039): nem duplicado, nem parecido com um
+     * lançamento manual, nem ambíguo entre parcelas. Fica `true` até o
+     * usuário marcar como conferido (ou editar o lançamento), e é isso que
+     * alimenta a lista "Entradas automáticas".
+     */
+    needsReview: boolean('needs_review').notNull().default(false),
     createdAt: text('created_at').notNull().default(now),
     updatedAt: text('updated_at').notNull().default(now),
   },
@@ -476,6 +500,7 @@ export const transactions = pgTable(
       .on(t.debtId, t.occurrencePeriod)
       .where(sql`${t.debtId} is not null`),
     uniqueIndex('txn_external_id_uq').on(t.externalId).where(sql`${t.externalId} is not null`),
+    index('txn_needs_review_idx').on(t.needsReview).where(sql`${t.needsReview}`),
   ],
 )
 

@@ -57,6 +57,8 @@ type Row = {
   hidden: boolean
   /** Ignorada: continua na lista, riscada, e não entra em nenhum total nem saldo. */
   ignored: boolean
+  /** Entrou sozinha pelo Open Finance e ainda não foi conferida (decisions/0039). */
+  needsReview: boolean
   pending: boolean
   forecastId: number | null
   debtId: number | null
@@ -169,6 +171,8 @@ export function TransactionsPage() {
 
   const [search, setSearch] = useState('')
   const [onlyUncategorized, setOnlyUncategorized] = useState(params.get('uncategorized') === '1')
+  /** `?revisar=1`: só as entradas automáticas ainda não conferidas, de qualquer data (vem do Painel). */
+  const [onlyNeedsReview, setOnlyNeedsReview] = useState(params.get('revisar') === '1')
   const [direction, setDirection] = useState<DirectionFilter | null>(null)
   const [parentCategoryId, setParentCategoryId] = useState<number | null>(() => {
     const raw = params.get('parentCategoryId')
@@ -190,8 +194,10 @@ export function TransactionsPage() {
     else params.delete('uncategorized')
     if (parentCategoryId !== null) params.set('parentCategoryId', String(parentCategoryId))
     else params.delete('parentCategoryId')
+    if (onlyNeedsReview) params.set('revisar', '1')
+    else params.delete('revisar')
     setParams(params, { replace: true })
-  }, [onlyUncategorized, parentCategoryId])
+  }, [onlyUncategorized, parentCategoryId, onlyNeedsReview])
 
   const { byId: categoriesById } = useCategoryIndex()
   const parentCategoryName = parentCategoryId !== null ? categoriesById.get(parentCategoryId)?.path ?? null : null
@@ -219,15 +225,19 @@ export function TransactionsPage() {
       categoryId,
       sort,
       includeHidden,
+      onlyNeedsReview,
       page,
     ],
     queryFn: () =>
       api.get<ListResponse>('/transactions', {
-        from: range.from,
-        to,
+        // Conferir entradas automáticas não depende do período do topo: uma
+        // sincronização pode trazer dias do mês anterior.
+        from: onlyNeedsReview ? undefined : range.from,
+        to: onlyNeedsReview ? undefined : to,
         accountId: range.accountId,
         search: search || undefined,
         uncategorized: onlyUncategorized ? true : undefined,
+        needsReview: onlyNeedsReview ? true : undefined,
         direction: direction === 'transfer' ? undefined : direction,
         categoryKind: direction === 'transfer' ? 'transfer' : undefined,
         parentCategoryId: parentCategoryId ?? undefined,
@@ -256,6 +266,7 @@ export function TransactionsPage() {
   const clearFilters = () => {
     setSearch('')
     setOnlyUncategorized(false)
+    setOnlyNeedsReview(false)
     setDirection(null)
     setParentCategoryId(null)
     setCategoryId(null)
@@ -266,6 +277,7 @@ export function TransactionsPage() {
   const hasActiveFilters =
     search !== '' ||
     onlyUncategorized ||
+    onlyNeedsReview ||
     direction !== null ||
     parentCategoryId !== null ||
     categoryId !== null ||
@@ -300,6 +312,16 @@ export function TransactionsPage() {
       queryClient.invalidateQueries({ queryKey: ['transactions'] })
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao ocultar', 'error'),
+  })
+
+  const markReviewed = useMutation({
+    mutationFn: (ids?: number[]) => api.post<{ updated: number }>('/transactions/mark-reviewed', ids ? { ids } : {}),
+    onSuccess: (result) => {
+      toast(`${result.updated} ${result.updated === 1 ? 'entrada conferida' : 'entradas conferidas'}`)
+      setSelected(new Set())
+      queryClient.invalidateQueries({ queryKey: ['transactions'] })
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao marcar', 'error'),
   })
 
   const rows = query.data?.rows ?? []
@@ -572,6 +594,29 @@ export function TransactionsPage() {
                     Limpar filtros
                   </Button>
                 )}
+                {onlyNeedsReview && (
+                  <span className="badge badge--info row" style={{ gap: 'var(--sp-2)' }}>
+                    Entradas automáticas a conferir
+                    <button
+                      type="button"
+                      onClick={() => setOnlyNeedsReview(false)}
+                      aria-label="Remover filtro de entradas automáticas"
+                      style={{ background: 'none', border: 0, cursor: 'pointer', padding: 0, display: 'flex' }}
+                    >
+                      <Icon name="x" size={12} />
+                    </button>
+                  </span>
+                )}
+                {onlyNeedsReview && (query.data?.total ?? 0) > 0 && (
+                  <Button
+                    size="sm"
+                    icon="check"
+                    onClick={() => markReviewed.mutate(selected.size > 0 ? [...selected] : undefined)}
+                    loading={markReviewed.isPending}
+                  >
+                    {selected.size > 0 ? `Marcar ${selected.size} como conferidas` : 'Marcar todas como conferidas'}
+                  </Button>
+                )}
                 {parentCategoryId !== null && (
                   <span className="badge badge--info row" style={{ gap: 'var(--sp-2)' }}>
                     {parentCategoryName ?? `TAG #${parentCategoryId}`}
@@ -703,6 +748,7 @@ export function TransactionsPage() {
                                 {row.duplicateAccepted && <span className="badge badge--warning">duplicata aceita</span>}
                                 {row.hidden && <span className="badge">oculto</span>}
                                 {row.ignored && <span className="badge">ignorada</span>}
+                                {row.needsReview && <span className="badge badge--info">entrou sozinha</span>}
                               </div>
                             </td>
                           <td data-label="TAG">
