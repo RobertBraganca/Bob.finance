@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from './api'
+import { currentPeriod as currentLocalPeriod, todayIso } from './period'
 import { bps, money, points } from './format'
 import type { AssumptionBag } from '../components/ui/Assumptions'
 
@@ -131,23 +132,59 @@ function riskRuleContent(r: RiskRule): { title: string; description: string } {
 function dismissedInsightsKey() {
   // Por data (não um "nunca mais") — mesmo padrão de chave usada em
   // outros lugares deste projeto para "hoje" (new Date().toISOString()).
-  return `bob-finance:dismissed-banners:${new Date().toISOString().slice(0, 10)}`
+  // Dia local, não UTC: depois das 21h `toISOString()` já era amanhã e o
+  // "dispensar por hoje" valia para o dia errado.
+  return `bob-finance:dismissed-banners:${todayIso()}`
+}
+
+/**
+ * Os avisos do sino são um resumo do mês, não um dado de tempo real: 5
+ * minutos de cache. Antes valia o padrão de 10s do app, e como o sino mora no
+ * cabeçalho de TODA tela, cada navegação refazia o radar de risco e o
+ * checklist (1,2 a 1,8 s cada, medidos em 04/10/2026) disputando o servidor
+ * com os dados da própria página.
+ */
+const INSIGHTS_STALE_MS = 5 * 60_000
+
+/**
+ * Só começa a buscar depois que a página teve a vez dela: no primeiro momento
+ * ocioso do navegador (ou 1,5 s, o que vier antes). Com o cache acima, a
+ * partir da segunda tela o sino já abre com o resultado guardado.
+ */
+function useAfterFirstIdle(): boolean {
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(() => setReady(true), { timeout: 1500 })
+      return () => window.cancelIdleCallback(id)
+    }
+    const id = window.setTimeout(() => setReady(true), 800)
+    return () => window.clearTimeout(id)
+  }, [])
+  return ready
 }
 
 export function useInsights() {
-  const currentPeriod = new Date().toISOString().slice(0, 7)
+  const currentPeriod = currentLocalPeriod()
+  const ready = useAfterFirstIdle()
 
   const bannersQuery = useQuery({
     queryKey: ['home-banners'],
     queryFn: () => api.get<{ banners: HomeBanner[] }>('/home/banners'),
+    staleTime: INSIGHTS_STALE_MS,
+    enabled: ready,
   })
   const riskQuery = useQuery({
     queryKey: ['dashboard-risk-radar', currentPeriod],
     queryFn: () => api.get<{ rules: RiskRule[] }>('/financial-health/risk-radar', { period: currentPeriod }),
+    staleTime: INSIGHTS_STALE_MS,
+    enabled: ready,
   })
   const checklistQuery = useQuery({
     queryKey: ['dashboard-closing-checklist', currentPeriod],
     queryFn: () => api.get<ClosingChecklist>('/financial-health/closing-checklist', { period: currentPeriod }),
+    staleTime: INSIGHTS_STALE_MS,
+    enabled: ready,
   })
 
   const [dismissed, setDismissed] = useState<Set<string>>(() => {

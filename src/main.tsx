@@ -18,7 +18,11 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
-      staleTime: 10_000,
+      // 2 minutos, não 10 s: o app tem um usuário só e toda gravação já marca
+      // como velho o que ela afeta (`invalidateQueries`), então voltar a uma
+      // tela visitada há pouco pode mostrar o cache em vez de refazer todas
+      // as chamadas (revisão de desempenho de 04/10/2026).
+      staleTime: 2 * 60_000,
       retry: 1,
     },
   },

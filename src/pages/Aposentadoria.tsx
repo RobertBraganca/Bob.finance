@@ -17,6 +17,7 @@ import {
   Card,
   EmptyState,
   HeroFigure,
+  KpiTile,
   Meter,
   Segmented,
   Slab,
@@ -99,6 +100,12 @@ export function AposentadoriaTab() {
   const withdrawalFieldId = useId()
   const expectedReturnFieldId = useId()
   const ageFieldId = useId()
+  /** A idade fica nas Premissas, abaixo; o link do card de cima leva até o campo. */
+  const focusAge = () => {
+    const field = document.getElementById(ageFieldId)
+    field?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    field?.focus({ preventScroll: true })
+  }
   const horizonYearsFieldId = useId()
 
   // Acumulação: a mesma rota que Investimentos > Metas já chama — nenhuma
@@ -178,7 +185,7 @@ export function AposentadoriaTab() {
 
   return (
     <>
-      <div className="page">
+      <div>
         <Bento>
           {portfolio.isLoading ? (
             <Card span={12}>
@@ -228,83 +235,80 @@ export function AposentadoriaTab() {
                 </Card>
               ) : (
                 <>
-                  <Slab span={5} accent>
-                    <HeroFigure label={accumGoal.name} value={money(accumData.currentValueCents)}>
-                      <div className="stack stack--tight" style={{ marginTop: 'var(--sp-3)' }}>
-                        <div className="row row--between">
-                          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--on-slab-2)' }}>
-                            meta {money(accumGoal.targetValueCents)}
-                          </span>
-                          <StatusBadge state={accumData.state} />
-                        </div>
-                        <Meter usedBps={accumData.progressBps ?? 0} state={accumData.state} />
-                        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--on-slab-2)' }}>
-                          Valor inicial: {money(accumData.currentValueCents)}, patrimônio negociável
-                          de hoje, nunca digitado.
-                        </span>
+                  {/* Mesma linha de KPIs de Metas e do Painel (04/10/2026): o
+                      destaque é o progresso, os outros três respondem
+                      "quando" e "quanto por mês". */}
+                  <div className="kpi-row col-12">
+                    <Slab accent className="kpi">
+                      <div className="card__title-row">
+                        <span className="stat__label truncate">{accumGoal.name}</span>
                       </div>
-                    </HeroFigure>
-                  </Slab>
+                      <span className="stat__value kpi__value">{money(accumData.currentValueCents)}</span>
+                      <Meter usedBps={accumData.progressBps ?? 0} state={accumData.state} />
+                      <span className="stat__foot" style={{ justifyContent: 'space-between' }}>
+                        <span>
+                          {accumData.progressBps === null ? '' : `${bps(accumData.progressBps, 0)} de `}
+                          {money(accumGoal.targetValueCents)}
+                        </span>
+                        <StatusBadge state={accumData.state} />
+                      </span>
+                    </Slab>
+                    <KpiTile
+                      label="No ritmo atual, alcança em"
+                      value={accumData.reachedPeriod ? fmtPeriod(accumData.reachedPeriod) : 'além do horizonte'}
+                      foot={
+                        accumData.reachedMonth === null ? (
+                          <span>aumente o aporte para chegar antes</span>
+                        ) : currentAge !== null ? (
+                          <span>você teria {currentAge + Math.floor(accumData.reachedMonth / 12)} anos</span>
+                        ) : (
+                          <button type="button" className="link-button" onClick={focusAge}>
+                            Informe sua idade para ver com quantos anos
+                          </button>
+                        )
+                      }
+                    />
+                    <KpiTile
+                      label="Aporte mensal planejado"
+                      value={money(accumGoal.monthlyContributionCents)}
+                      foot={<span>retorno esperado {bps(accumGoal.expectedReturnBps)} a.a.</span>}
+                    />
+                    <KpiTile
+                      label="Aporte necessário"
+                      value={accumData.requiredMonthlyCents === null ? '-' : money(accumData.requiredMonthlyCents)}
+                      foot={
+                        <span>
+                          {accumGoal.targetDate ? `por mês, para chegar em ${fmtDate(accumGoal.targetDate)}` : 'defina uma data-alvo'}
+                        </span>
+                      }
+                    />
+                  </div>
 
-                  <Card span={7} title="Trajetória até a meta" subtitle="Projeção a partir do que você tem investido hoje">
+                  <Card
+                    span={12}
+                    title="Trajetória até a meta"
+                    subtitle={
+                      accumData.projectedAtTargetCents === null
+                        ? 'Projeção a partir da sua carteira de hoje, sem imobilizado'
+                        : `Na data-alvo, ${money(accumData.projectedAtTargetCents)}: ${
+                            accumData.projectedAtTargetCents >= accumGoal.targetValueCents
+                              ? 'acima do alvo'
+                              : `${money(accumGoal.targetValueCents - accumData.projectedAtTargetCents)} abaixo do alvo`
+                          }`
+                    }
+                    actions={
+                      <Button variant="quiet" size="sm" icon="pencil" onClick={() => setGoalEditing(accumGoal)}>
+                        Editar meta
+                      </Button>
+                    }
+                  >
                     <GoalProjectionChart
                       data={accumData.series}
                       targetCents={accumGoal.targetValueCents}
+                      targetPeriod={accumGoal.targetDate?.slice(0, 7) ?? null}
                       surface="paper"
-                      height={250}
+                      height={260}
                     />
-                  </Card>
-
-                  <Card span={6}>
-                    <StatTile
-                      label="Aporte mensal planejado"
-                      value={money(accumGoal.monthlyContributionCents)}
-                      foot={`retorno esperado ${bps(accumGoal.expectedReturnBps)} a.a.`}
-                    />
-                  </Card>
-                  <Card span={6}>
-                    <StatTile
-                      label="No ritmo atual, alcança a meta em"
-                      value={accumData.reachedMonth === null ? 'além do horizonte' : fmtPeriod(accumData.reachedPeriod ?? '')}
-                      foot={
-                        accumData.reachedMonth === null
-                          ? 'aumente o aporte para chegar antes'
-                          : currentAge !== null
-                            ? `você teria ${currentAge + Math.floor(accumData.reachedMonth / 12)} anos`
-                            : 'informe sua idade nas Premissas abaixo para ver com quantos anos'
-                      }
-                    />
-                  </Card>
-                  <Card span={6}>
-                    <StatTile
-                      label="Aporte necessário na data-alvo"
-                      value={accumData.requiredMonthlyCents === null ? '-' : money(accumData.requiredMonthlyCents)}
-                      foot={accumGoal.targetDate ? `para chegar em ${fmtDate(accumGoal.targetDate)}` : 'defina uma data-alvo'}
-                    />
-                  </Card>
-                  <Card span={6}>
-                    <StatTile
-                      label="Projetado na data-alvo"
-                      value={accumData.projectedAtTargetCents === null ? '-' : money(accumData.projectedAtTargetCents)}
-                      foot={
-                        accumData.projectedAtTargetCents !== null
-                          ? accumData.projectedAtTargetCents >= accumGoal.targetValueCents
-                            ? 'acima do alvo'
-                            : `${money(accumGoal.targetValueCents - accumData.projectedAtTargetCents)} de diferença`
-                          : ''
-                      }
-                    />
-                  </Card>
-
-                  <Card span={12} flush>
-                    <div className="row row--between" style={{ padding: 'var(--sp-4) var(--sp-5)' }}>
-                      <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                        Quer ajustar valor-alvo, data ou aporte desta meta?
-                      </span>
-                      <Button icon="pencil" onClick={() => setGoalEditing(accumGoal)}>
-                        Editar meta
-                      </Button>
-                    </div>
                   </Card>
                 </>
               )}
@@ -338,6 +342,7 @@ export function AposentadoriaTab() {
                   id={withdrawalFieldId}
                   value={withdrawal}
                   onChange={(e) => setWithdrawal(e.target.value)}
+                  inputMode="decimal"
                   placeholder="12.000,00"
                   className="text-right tabular-nums"
                 />
@@ -348,6 +353,7 @@ export function AposentadoriaTab() {
                   id={expectedReturnFieldId}
                   value={expectedReturn}
                   onChange={(e) => setExpectedReturn(e.target.value)}
+                  inputMode="decimal"
                   placeholder="5"
                   className="text-right tabular-nums"
                 />
@@ -358,6 +364,7 @@ export function AposentadoriaTab() {
                   id={ageFieldId}
                   value={age}
                   onChange={(e) => setAge(e.target.value)}
+                  inputMode="numeric"
                   placeholder="opcional"
                   className="text-right tabular-nums"
                 />
@@ -368,6 +375,7 @@ export function AposentadoriaTab() {
                   id={horizonYearsFieldId}
                   value={horizonYears}
                   onChange={(e) => setHorizonYears(e.target.value)}
+                  inputMode="numeric"
                   placeholder="40"
                   className="text-right tabular-nums"
                 />
@@ -427,7 +435,9 @@ export function AposentadoriaTab() {
             </Card>
           ) : (
             <>
-              <Slab span={5} accent>
+              {/* Card comum, não o escuro de destaque: o destaque da tela já é o
+                  progresso da meta lá em cima (um por tela). */}
+              <Card span={5}>
                 <HeroFigure
                   label="Duração do patrimônio"
                   value={
@@ -436,7 +446,7 @@ export function AposentadoriaTab() {
                       : `${Math.floor(result.depletionMonth / 12)} anos`
                   }
                 >
-                  <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-xs)', marginTop: 'var(--sp-3)' }}>
+                  <p style={{ color: 'var(--ink-2)', fontSize: 'var(--text-xs)', marginTop: 'var(--sp-3)' }}>
                     {result.depletionPeriod === null
                       ? `Retirando ${money(result.monthlyWithdrawalCents)} por mês, o patrimônio não se esgota dentro dos ${Math.round(committed.horizonMonths / 12)} anos simulados, nestas premissas.`
                       : `Retirando ${money(result.monthlyWithdrawalCents)} por mês, o patrimônio projetado chega a zero em ${fmtPeriod(result.depletionPeriod)}${currentAge !== null ? `, quando você teria ${currentAge + Math.floor(result.depletionMonth! / 12)} anos` : ''}.`}
@@ -448,7 +458,7 @@ export function AposentadoriaTab() {
                     .
                   </p>
                 </HeroFigure>
-              </Slab>
+              </Card>
 
               <Card span={7} title="Trajetória do patrimônio" subtitle="Mês a mês, sob a retirada informada">
                 <DecumulationChart

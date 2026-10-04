@@ -439,6 +439,22 @@
   display: none;
 }
 
+/* Navegação de seções de uma página (ex.: as 7 abas de Investimentos).
+   Rolar por dentro escondia 3 delas fora da tela do telefone sem nenhuma
+   pista; aqui elas quebram linha e todas ficam à vista. */
+@media (max-width: 767px) {
+  .segmented--nav {
+    display: flex;
+    flex-wrap: wrap;
+    overflow: visible;
+    border-radius: var(--r-lg);
+  }
+  .segmented--nav .segmented__btn {
+    flex: 1 1 auto;
+    min-height: 40px;
+  }
+}
+
 .on-slab .segmented {
   background: var(--slab-overlay-weak);
 }
@@ -1074,7 +1090,9 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ink-3);
+  /* --ink-2, não --ink-3: 11px em caixa alta sobre --surface-muted dava
+     4,4:1 com --ink-3, abaixo do 4,5 de texto (revisão de 03/10/2026). */
+  color: var(--ink-2);
   padding: 10px var(--sp-4);
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
@@ -1248,6 +1266,40 @@
 
   .table-wrap:has(> .table--stack-mobile) {
     overflow-x: visible;
+    /* Sem teto: o `max-height` de `.card > .table-wrap` (rolagem interna
+       no desktop) continuava valendo com `overflow: visible`, e o card,
+       com `overflow: hidden`, cortava tudo depois da segunda linha
+       (Movimentações, 375px, 03/10/2026). */
+    max-height: none;
+  }
+
+  /* Cartão compacto: dois campos por linha, rótulo acima do valor, sem fio
+     entre campos. Para tabelas de muitas colunas curtas (ativos, operações,
+     proventos), onde um campo por linha dava 400px por registro. */
+  .table.table--stack-compact tbody td {
+    padding: 2px 0;
+    border-bottom: none;
+  }
+  .table--stack-compact td:not([data-label='__lead']):not([data-label='__trail']) {
+    flex: 1 1 calc(50% - var(--sp-2));
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+  .table--stack-compact td[data-label]:not([data-label='__lead']):not([data-label='__trail'])::before {
+    min-width: 0;
+  }
+  /* Título e ações ocupam a primeira linha sozinhos; os campos começam na
+     de baixo, em pares. */
+  .table--stack-compact td[data-label='__lead'] {
+    flex: 1 1 calc(100% - 140px);
+    font-weight: 500;
+  }
+  .table--stack-compact td[data-label='__trail'] {
+    flex: 0 0 auto;
+  }
+  .table--stack-compact td[data-empty] {
+    display: none;
   }
 
   /* Coluna secundária (ex.: "Qtde", "%") que só existe pra completar o
@@ -1305,10 +1357,40 @@
   background: var(--surface-hover);
 }
 
+/* Selo clicável (nota, reserva): alvo de toque de pelo menos 24px. */
+.badge--btn {
+  min-height: 26px;
+  cursor: pointer;
+}
+.badge--btn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+/* Ações de linha com espaço entre si: excluir colado em editar é
+   toque errado garantido no telefone. */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+
 .group-head__stats {
   flex: 1;
   gap: var(--sp-5);
   justify-content: flex-end;
+}
+
+/* No telefone os cinco números da classe viravam uma coluna de ~250px:
+   em grade de três eles cabem em duas linhas, abaixo do nome. */
+@media (max-width: 767px) {
+  .group-head__stats {
+    order: 3;
+    flex: 1 1 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--sp-3);
+  }
 }
 
 .group-head__chevron {
@@ -1383,7 +1465,9 @@
 .meter__fill {
   height: 100%;
   border-radius: var(--r-pill);
-  transition: width 240ms ease;
+  /* O preenchimento ocupa a trilha toda e é recortado (ver `Meter`):
+     transição de `clip-path` não refaz o layout, a de `width` refazia. */
+  transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* The pace marker: where spending SHOULD be today. A hairline, not a
@@ -1500,6 +1584,14 @@
   flex: none;
 }
 
+.chart__legend-key--dash {
+  width: 14px;
+  height: 0;
+  border-top: 2px dashed currentColor;
+  border-radius: 0;
+  background: none;
+}
+
 .chart__legend-key--block {
   width: 10px;
   height: 10px;
@@ -1511,7 +1603,9 @@
 }
 
 .chart__note {
-  font-size: var(--text-2xs);
+  /* 12px: a nota explica o número ao lado, e 11px ficava no limite da
+     leitura (revisão de Investimentos de 03/10/2026). */
+  font-size: var(--text-xs);
   color: var(--ink-3);
 }
 
@@ -1980,4 +2074,76 @@
   height: 3px;
   border-radius: var(--r-pill);
   flex: none;
+}
+
+/* Ativo acompanhado, sem cota: fica na lista, mas recua para o segundo plano. */
+.table tbody tr.row--tracked td {
+  color: var(--ink-3);
+}
+
+/* Ação dentro de uma frase (ex.: "Informe sua idade"): parece link, é botão. */
+.link-button {
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.link-button:hover {
+  color: var(--ink-1);
+}
+
+/* Em tela de toque, campo com menos de 16px faz o iOS dar zoom ao focar,
+   e botão pequeno vira alvo difícil. Só no ponteiro grosso: o desktop
+   mantém a densidade (revisão de Investimentos de 03/10/2026). Fica no fim
+   de components.css de propósito: em base.css a regra `.input` daqui de
+   baixo, carregada depois, ganhava e o campo seguia com 13px. */
+@media (pointer: coarse) {
+  .input,
+  .select,
+  .textarea {
+    font-size: 16px;
+  }
+  .btn--sm {
+    min-height: 36px;
+  }
+  .btn--icon.btn--sm {
+    width: 36px;
+  }
+}
+
+/* Rótulo que vira só ícone no telefone estreito, sem sair da árvore de
+   acessibilidade (o botão continua se chamando pelo texto). */
+@media (max-width: 420px) {
+  .btn__label--collapse {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .btn:has(> .btn__label--collapse) {
+    padding-inline: 10px;
+  }
+}
+
+/* Troca de seção (Investimentos): o painel novo sobe 6px e aparece, um único
+   movimento curto. `backwards`, não `both`: terminada a animação não sobra
+   `transform` no painel, que viraria o bloco de referência dos modais
+   `position: fixed` abertos dentro dele. Sob prefers-reduced-motion a regra
+   global de base.css zera a duração. */
+@keyframes tab-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.tab-panel {
+  animation: tab-panel-in 240ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
