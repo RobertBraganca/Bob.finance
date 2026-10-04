@@ -1128,6 +1128,15 @@
   opacity: 0.7;
 }
 
+/* Ignorada: fica na lista, mas não soma em nada. O risco vai só no texto
+   (data, descrição, valor); seleção, TAG e ações continuam legíveis e
+   clicáveis, porque é por elas que se desfaz. */
+.table tbody tr[data-ignored='true'] td:not([data-label='__lead']):not([data-label='__trail']):not([data-label='TAG']) {
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-3);
+  color: var(--ink-3);
+}
+
 /* Existia só como `style={{ textAlign: 'center' }}` repetido célula a
    célula; virou classe para o cabeçalho e a coluna nunca discordarem. */
 .table__center {

@@ -690,7 +690,7 @@ export async function reconciliationCandidates(): Promise<ReconciliationCandidat
     cross join lateral (
       select t.id, t.posted_on, t.description, t.amount_cents
       from transactions t
-      where t.pending = false
+      where t.pending = false and t.ignored = false
         and t.account_id = p.account_id
         and t.amount_cents = p.amount_cents
         and t.posted_on between to_char(p.posted_on::date - 15, 'YYYY-MM-DD')
@@ -867,7 +867,7 @@ export async function debtReconciliationQueue(): Promise<DebtReconciliationQueue
     ) p on p.debt_id = d.id
     left join (
       select debt_id, sum(abs(amount_cents)) as total, count(*) as count
-      from transactions where debt_id is not null and pending = false group by debt_id
+      from transactions where debt_id is not null and pending = false and ignored = false group by debt_id
     ) t on t.debt_id = d.id
     where coalesce(p.total, 0) > 0 or coalesce(t.total, 0) > 0
   `)
@@ -898,7 +898,7 @@ export async function debtReconciliationQueue(): Promise<DebtReconciliationQueue
             amountCents: transactions.amountCents,
           })
           .from(transactions)
-          .where(and(inArray(transactions.debtId, mismatchedIds), eq(transactions.pending, false)))
+          .where(and(inArray(transactions.debtId, mismatchedIds), eq(transactions.pending, false), eq(transactions.ignored, false)))
           .orderBy(desc(transactions.postedOn)),
       ])
     : [[], []]

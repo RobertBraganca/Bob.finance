@@ -41,7 +41,7 @@ async function uncategorizedGroups(range: Range): Promise<{ groups: Uncategorize
     from transactions
     where posted_on between ${range.from} and ${range.to}
       and category_id is null
-      and pending = false
+      and pending = false and ignored = false
       ${range.accountId ? sql`and account_id = ${range.accountId}` : sql``}
   `)
 
@@ -119,6 +119,7 @@ export async function formalDre(range: Range): Promise<FormalDre> {
         c.dre_group,
         case
           -- Reajuste de saldo nunca é receita nem despesa (ver FLOW_KIND em analytics.ts).
+          when t.ignored then 'ignored'
           when t.source = 'adjustment' then 'transfer'
           when c.kind is null then (case when t.amount_cents > 0 then 'income' else 'expense' end)
           else c.kind::text
@@ -126,7 +127,7 @@ export async function formalDre(range: Range): Promise<FormalDre> {
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = false
+        and t.pending = false and t.ignored = false
         ${range.accountId ? sql`and t.account_id = ${range.accountId}` : sql``}
     ) x
   `)

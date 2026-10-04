@@ -113,7 +113,7 @@ export async function accountFlows(range: Range): Promise<AccountFlow> {
     join accounts a on a.id = t.account_id and a.archived = false
     left join categories c on c.id = t.category_id
     where t.posted_on between ${range.from} and ${range.to}
-      and t.pending = false
+      and t.pending = false and t.ignored = false
     order by abs(t.amount_cents) desc, t.posted_on`)
 
   // `legs` is what the unpaired remainder is measured against: the rows that

@@ -436,6 +436,7 @@ app.patch('/transactions/:id', async (c) => {
       amountCents: z.number().int().optional(),
       accountId: z.number().int().positive().optional(),
       notes: z.string().nullable().optional(),
+      ignored: z.boolean().optional(),
       scope: z.enum(['only', 'this_and_future', 'all']).optional(),
     })
     .parse(await c.req.json())

@@ -32,6 +32,7 @@ import { merchantSignature } from '../core/normalize'
 // ele é derivado de todos os lançamentos, não desta classificação.
 const FLOW_KIND = sql`
   case
+    when t.ignored then 'ignored'
     when t.source = 'adjustment' then 'transfer'
     when c.kind is null then (case when t.amount_cents > 0 then 'income' else 'expense' end)
     else c.kind::text
@@ -83,7 +84,7 @@ export async function totals(range: Range): Promise<Totals> {
         from transactions t
         left join categories c on c.id = t.category_id
         where t.posted_on between ${range.from} and ${range.to}
-          and t.pending = false
+          and t.pending = false and t.ignored = false
         ${accountFilter(range.accountId)}
       ) x
     `)
@@ -172,7 +173,7 @@ export async function monthlyTotals(options: {
         from transactions t
         left join categories c on c.id = t.category_id
         where t.posted_on between ${from} and ${to}
-          and t.pending = false
+          and t.pending = false and t.ignored = false
         ${accountFilter(options.accountId)}
       ) x
       group by period
@@ -219,7 +220,7 @@ export async function historicalServiceAverages(accountId: number): Promise<Serv
       select t.amount_cents, ${FLOW_KIND} as flow
       from transactions t
       left join categories c on c.id = t.category_id
-      where t.pending = false and t.account_id = ${accountId}
+      where t.pending = false and t.ignored = false and t.account_id = ${accountId}
     ) x
   `)
   const row = rows[0]
@@ -264,7 +265,7 @@ export async function monthlySeries(range: Range): Promise<MonthlyPoint[]> {
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = false
+        and t.pending = false and t.ignored = false
       ${accountFilter(range.accountId)}
     ) x
     group by period
@@ -304,7 +305,7 @@ export async function dailyIncomeExpenseSeries(range: Range): Promise<MonthlyPoi
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = false
+        and t.pending = false and t.ignored = false
       ${accountFilter(range.accountId)}
     ) x
     group by day
@@ -372,7 +373,7 @@ export async function categoryBreakdown(
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = false
+        and t.pending = false and t.ignored = false
       ${accountFilter(range.accountId)}
     ) x
     left join categories g on g.id = x.group_id
@@ -409,7 +410,7 @@ export async function dailySeries(range: Range): Promise<DailyPoint[]> {
       from transactions t
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = false
+        and t.pending = false and t.ignored = false
       ${accountFilter(range.accountId)}
     ) x
     group by day
@@ -599,7 +600,7 @@ export async function topMerchants(range: Range, limit = 8) {
     from transactions t
     left join categories c on c.id = t.category_id
     where t.posted_on between ${range.from} and ${range.to}
-      and t.pending = false
+      and t.pending = false and t.ignored = false
       and ${FLOW_KIND} = 'expense'
       and t.amount_cents < 0
     ${accountFilter(range.accountId)}
@@ -643,9 +644,9 @@ export async function accountBalances(asOfDate?: string) {
       a.name,
       a.institution,
       a.kind,
-      a.opening_balance_cents + coalesce(sum(case when t.pending = false then t.amount_cents else 0 end), 0) as "balanceCents",
-      count(case when t.pending = false then t.id else null end) as "transactionCount",
-      max(case when t.pending = false then t.posted_on else null end) as "lastPostedOn"
+      a.opening_balance_cents + coalesce(sum(case when t.pending = false and t.ignored = false then t.amount_cents else 0 end), 0) as "balanceCents",
+      count(case when t.pending = false and t.ignored = false then t.id else null end) as "transactionCount",
+      max(case when t.pending = false and t.ignored = false then t.posted_on else null end) as "lastPostedOn"
     from accounts a
     left join transactions t on t.account_id = a.id ${cutoff}
     where a.archived = false
@@ -781,7 +782,7 @@ export async function cashFlowProjection(opts: {
         + coalesce((
           select sum(t.amount_cents)
           from transactions t
-          where t.pending = false
+          where t.pending = false and t.ignored = false
             and t.posted_on <= to_char((m.mes + interval '1 month' - interval '1 day')::date, 'YYYY-MM-DD')
             and t.account_id in (select id from accounts where archived = false
               ${(accountId ? sql`and id = ${accountId}` : sql``)})
@@ -865,7 +866,7 @@ export async function cashFlowProjection(opts: {
     openingBalanceCents: balanceNow,
     assumptions: {
       formula:
-        'por mes, realizado (pending = false) e pendente (pending = true) somados em faixas separadas. A linha de saldo tem duas metades: mes passado usa o saldo CONFIRMADO consultado no banco, e do mes corrente para frente acumula o saldo de hoje mais o net de cada mes',
+        'por mes, realizado (pending = false and ignored = false) e pendente (pending = true) somados em faixas separadas. A linha de saldo tem duas metades: mes passado usa o saldo CONFIRMADO consultado no banco, e do mes corrente para frente acumula o saldo de hoje mais o net de cada mes',
       janela: `${monthsBack} meses para tras e ${monthsAhead} para frente (${firstPeriod} a ${lastPeriod})`,
       saldoDeHojeCents: balanceNow,
       contasSomadas: scoped.length,

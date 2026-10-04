@@ -381,6 +381,14 @@ export const transactions = pgTable(
      * explicitamente.
      */
     hidden: boolean('hidden').notNull().default(false),
+    /**
+     * "Ignorar transação" (01/10/2026): o lançamento continua na lista, riscado,
+     * mas não entra em NENHUMA conta do app: totais, gráficos, DRE, metas e o
+     * saldo da conta. Diferente de `hidden`, que só some da lista e continua
+     * contando. A importação ainda o enxerga como duplicado: ignorado é um
+     * evento real que o usuário não quer somar, não um evento que não existiu.
+     */
+    ignored: boolean('ignored').notNull().default(false),
     notes: text('notes'),
     /**
      * A confirmed future receipt/expense the bank hasn't posted yet — a

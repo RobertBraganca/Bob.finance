@@ -104,7 +104,7 @@ const platformBalanceQuery = sql`
     -- agregação do app aplica, decisions/0003).
     select partner_platform_id, sum(amount_cents) as withdrawn, max(posted_on) as last_on
     from transactions
-    where partner_platform_id is not null and pending = false
+    where partner_platform_id is not null and pending = false and ignored = false
     group by partner_platform_id
   ) w on w.partner_platform_id = p.id
   order by p.name`
@@ -399,7 +399,7 @@ async function partnerIncomeIn(range: Range): Promise<number> {
     select coalesce(sum(amount_cents), 0) as total
     from transactions
     where partner_platform_id is not null
-      and pending = false
+      and pending = false and ignored = false
       and posted_on between ${range.from} and ${range.to}`)
   return rows[0]?.total ?? 0
 }
@@ -515,7 +515,7 @@ export async function partnerEvolution(monthsBack = 12): Promise<PartnerEvolutio
     db.execute<{ platformId: number; period: string; total: number }>(sql`
       select partner_platform_id as "platformId", substr(posted_on, 1, 7) as period, sum(amount_cents) as total
       from transactions
-      where partner_platform_id is not null and pending = false
+      where partner_platform_id is not null and pending = false and ignored = false
       group by 1, 2`),
   ])
 
@@ -574,10 +574,10 @@ export async function getPlatform(id: number): Promise<PlatformRow | null> {
     select
       p.id, p.name, p.min_withdrawal_cents as "minWithdrawalCents", p.notes, p.active,
       coalesce((select sum(amount_cents) from partner_commissions where platform_id = p.id), 0) as "earnedCents",
-      coalesce((select sum(amount_cents) from transactions where partner_platform_id = p.id and pending = false), 0) as "withdrawnCents",
+      coalesce((select sum(amount_cents) from transactions where partner_platform_id = p.id and pending = false and ignored = false), 0) as "withdrawnCents",
       coalesce((select count(*) from partner_commissions where platform_id = p.id), 0) as "commissionCount",
       (select max(earned_on) from partner_commissions where platform_id = p.id) as "lastCommissionOn",
-      (select max(posted_on) from transactions where partner_platform_id = p.id and pending = false) as "lastWithdrawalOn"
+      (select max(posted_on) from transactions where partner_platform_id = p.id and pending = false and ignored = false) as "lastWithdrawalOn"
     from p`)
   return rows[0] ? withProgress(rows[0]) : null
 }
