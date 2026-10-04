@@ -1,5 +1,6 @@
 import { useId, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { api, fileToBase64 } from '../lib/api'
 import { telemetry } from '../lib/telemetry'
 import { useAccounts } from '../lib/store'
@@ -83,7 +84,21 @@ export function ImportPage() {
 
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [dragging, setDragging] = useState(false)
-  const [activeBatchId, setActiveBatchId] = useState<number | null>(null)
+  // `?lote=ID` abre a revisão de um lote direto: é para onde a sincronização
+  // de Open Finance (Contas e bancos) manda depois de criar o lote.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [activeBatchId, setActiveBatchIdState] = useState<number | null>(() => {
+    const fromUrl = Number(searchParams.get('lote'))
+    return Number.isInteger(fromUrl) && fromUrl > 0 ? fromUrl : null
+  })
+  const setActiveBatchId = (id: number | null) => {
+    setActiveBatchIdState(id)
+    if (id === null && searchParams.has('lote')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('lote')
+      setSearchParams(next, { replace: true })
+    }
+  }
   const queueFieldIdBase = useId()
 
   const profiles = useQuery({

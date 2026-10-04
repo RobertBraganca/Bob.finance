@@ -35,7 +35,7 @@ export class ApiError extends Error {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 
-const LEDGER_PREFIXES = ['/accounts', '/profiles', '/imports', '/categories', '/rules', '/transactions']
+const LEDGER_PREFIXES = ['/accounts', '/profiles', '/imports', '/categories', '/rules', '/transactions', '/bank-connections']
 
 function functionFor(path: string): 'pricing' | 'ledger' | 'insights' {
   if (path === '/pricing' || path.startsWith('/pricing/')) return 'pricing'

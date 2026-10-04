@@ -495,7 +495,7 @@ export async function financialEngineRecords(months = 24): Promise<FinancialEngi
     from (
       select posted_on as day, sum(amount_cents) as daily_delta
       from transactions
-      where pending = false
+      where pending = false and ignored = false
       group by posted_on
     ) x
     order by day

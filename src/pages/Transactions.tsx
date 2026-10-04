@@ -55,6 +55,8 @@ type Row = {
   accountName: string | null
   duplicateAccepted: boolean
   hidden: boolean
+  /** Ignorada: continua na lista, riscada, e não entra em nenhum total nem saldo. */
+  ignored: boolean
   pending: boolean
   forecastId: number | null
   debtId: number | null
@@ -675,6 +677,7 @@ export function TransactionsPage() {
                             data-selected={selected.has(row.id)}
                             data-settled={settled}
                             data-hidden={row.hidden}
+                            data-ignored={row.ignored}
                           >
                             <td data-label="__lead">
                               <input
@@ -699,6 +702,7 @@ export function TransactionsPage() {
                                 {settled && <span className="badge badge--good">{settledLabel}</span>}
                                 {row.duplicateAccepted && <span className="badge badge--warning">duplicata aceita</span>}
                                 {row.hidden && <span className="badge">oculto</span>}
+                                {row.ignored && <span className="badge">ignorada</span>}
                               </div>
                             </td>
                           <td data-label="TAG">
@@ -1232,7 +1236,9 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
   // data ou a categoria não tem o que propagar, segue direto.
   const [scopePrompt, setScopePrompt] = useState(false)
   const [creditCardId, setCreditCardId] = useState<number | null>(row.creditCardId)
+  const [ignored, setIgnored] = useState(row.ignored)
   const creditCardFieldId = useId()
+  const ignoredFieldId = useId()
 
   const cards = useQuery({
     queryKey: ['credit-cards'],
@@ -1260,6 +1266,7 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
         description: value.description.trim(),
         amountCents,
         accountId: value.accountId,
+        ...(ignored !== row.ignored ? { ignored } : {}),
         ...(scope ? { scope } : {}),
       })
       if (value.categoryId !== row.categoryId) {
@@ -1322,6 +1329,22 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
           />
           <span className="field__hint">
             Liga esta compra a um cartão, para ela entrar na fatura em Cartões. Nunca é ligado sozinho.
+          </span>
+        </div>
+        <div className="field" style={{ marginTop: 'var(--sp-3)' }}>
+          <label className="row" htmlFor={ignoredFieldId} style={{ gap: 'var(--sp-2)', fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+            <input
+              id={ignoredFieldId}
+              type="checkbox"
+              className="checkbox"
+              checked={ignored}
+              onChange={(event) => setIgnored(event.target.checked)}
+            />
+            Ignorar transação
+          </label>
+          <span className="field__hint">
+            Continua na lista, riscada, mas sai de todos os totais, gráficos, metas e do saldo da conta. Dá para desfazer
+            desmarcando.
           </span>
         </div>
       </Modal>

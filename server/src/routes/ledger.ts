@@ -7,6 +7,7 @@ import { profileConfigSchema, validateProfileShape } from '../csv/profile'
 import * as categoriesService from '../services/categories'
 import * as categorization from '../services/categorization'
 import * as importsService from '../services/imports'
+import * as bankConnections from '../services/bankConnections'
 import * as txnService from '../services/transactions'
 
 const idParam = z.object({ id: z.coerce.number().int().positive() })
@@ -160,6 +161,49 @@ export async function ledgerRoutes(app: FastifyInstance) {
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
     }
+  })
+
+  /* -------------------------------------------------------------- *
+   * Open Finance (Meu Pluggy) — decisions/0038. Só produz lotes de
+   * importação revisáveis; nada daqui grava direto no ledger.
+   * -------------------------------------------------------------- */
+  const withError = async <T>(reply: { code: (n: number) => { send: (b: unknown) => unknown } }, run: () => Promise<T>) => {
+    try {
+      return await run()
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  app.get('/bank-connections', async () => ({
+    connections: await bankConnections.listConnections(),
+    pendingBatches: await bankConnections.pendingBatches(),
+  }))
+
+  app.get('/bank-connections/discover', async (req, reply) => {
+    const { itemId } = z.object({ itemId: z.string().uuid() }).parse(req.query)
+    return withError(reply, async () => ({ accounts: await bankConnections.discover(itemId) }))
+  })
+
+  app.post('/bank-connections', async (req, reply) => {
+    const body = z
+      .object({
+        accountId: z.number().int().positive(),
+        providerItemId: z.string().uuid(),
+        providerAccountId: z.string().uuid(),
+      })
+      .parse(req.body)
+    return withError(reply, () => bankConnections.createConnection(body))
+  })
+
+  app.delete('/bank-connections/:id', async (req) => {
+    const { id } = idParam.parse(req.params)
+    return bankConnections.deleteConnection(id)
+  })
+
+  app.post('/bank-connections/:id/sync', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    return withError(reply, () => bankConnections.syncConnection(id))
   })
 
   app.get('/imports', async () => ({ batches: await importsService.listBatches() }))
@@ -371,6 +415,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
         amountCents: z.number().int().optional(),
         accountId: z.number().int().positive().optional(),
         notes: z.string().nullable().optional(),
+        ignored: z.boolean().optional(),
         scope: z.enum(['only', 'this_and_future', 'all']).optional(),
       })
       .parse(req.body)

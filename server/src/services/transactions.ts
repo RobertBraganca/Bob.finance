@@ -166,6 +166,7 @@ export async function listTransactions(filter: TransactionFilter) {
         notes: transactions.notes,
         duplicateAccepted: transactions.duplicateAccepted,
         hidden: transactions.hidden,
+        ignored: transactions.ignored,
         pending: transactions.pending,
         forecastId: transactions.forecastId,
         debtId: transactions.debtId,
@@ -187,10 +188,10 @@ export async function listTransactions(filter: TransactionFilter) {
       .select({
         count: sql<number>`count(*)`,
         pendingCount: sql<number>`coalesce(sum(case when pending = true then 1 else 0 end), 0)`,
-        inflowCents: sql<number>`coalesce(sum(case when amount_cents > 0 and pending = false then amount_cents else 0 end), 0)`,
-        outflowCents: sql<number>`coalesce(sum(case when amount_cents < 0 and pending = false then -amount_cents else 0 end), 0)`,
-        pendingInflowCents: sql<number>`coalesce(sum(case when amount_cents > 0 and pending = true then amount_cents else 0 end), 0)`,
-        pendingOutflowCents: sql<number>`coalesce(sum(case when amount_cents < 0 and pending = true then -amount_cents else 0 end), 0)`,
+        inflowCents: sql<number>`coalesce(sum(case when amount_cents > 0 and pending = false and ignored = false then amount_cents else 0 end), 0)`,
+        outflowCents: sql<number>`coalesce(sum(case when amount_cents < 0 and pending = false and ignored = false then -amount_cents else 0 end), 0)`,
+        pendingInflowCents: sql<number>`coalesce(sum(case when amount_cents > 0 and pending = true and ignored = false then amount_cents else 0 end), 0)`,
+        pendingOutflowCents: sql<number>`coalesce(sum(case when amount_cents < 0 and pending = true and ignored = false then -amount_cents else 0 end), 0)`,
       })
       .from(transactions)
       .where(where),
@@ -390,6 +391,8 @@ export async function updateTransaction(
     amountCents?: number
     accountId?: number
     notes?: string | null
+    /** Ignorar transação: sai de todo total e saldo, continua na lista. */
+    ignored?: boolean
   },
   scope: PendingDeleteScope = 'only',
 ) {
@@ -422,6 +425,7 @@ export async function updateTransaction(
         accountId,
         direction: directionOf(amountCents),
         notes: patch.notes !== undefined ? patch.notes : current.notes,
+        ignored: patch.ignored ?? current.ignored,
         dedupeHash: dedupeHash({ accountId, postedOn, amountCents, descriptionNorm }),
         manuallyEdited,
         updatedAt: sql`now_iso()`,
