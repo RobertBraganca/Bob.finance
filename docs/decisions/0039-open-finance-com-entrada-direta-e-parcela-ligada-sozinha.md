@@ -42,8 +42,10 @@ da parcela pendente), confirmada à mão.
    pendente, apaga o pagamento de dívida que a ligação gravou e reabre a
    dívida se ela tinha fechado por causa dele.
 6. **Sincronização diária.** Um `pg_cron` chama `/ledger/cron/bank-sync` às
-   07:00 de Brasília, autorizado só por `BANK_SYNC_CRON_SECRET` (o resto da
+   22:00 de Brasília, autorizado só por `BANK_SYNC_CRON_SECRET` (o resto da
    `ledger` continua exigindo o usuário admin). O botão manual continua.
+   Começou às 07:00 e passou para as 22:00 em 05/10/2026: a Pluggy atualiza
+   cada conexão entre 17h e 21h, então às 22:00 o dia já entra no mesmo dia.
 
 ## Alternativas consideradas
 - **Tudo direto, revisão só de TAG.** Duplicados entrariam e precisariam ser
