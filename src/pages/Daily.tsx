@@ -93,7 +93,7 @@ export function DailyPage() {
           <Slab span={6} accent>
             <HeroFigure
               label={`Gasto em ${periodLong(period)}`}
-              value={money(pace?.spentCents ?? 0)}
+              value={pace ? money(pace.spentCents) : '-'}
             >
               <div className="stack stack--tight" style={{ marginTop: 'var(--sp-3)' }}>
                 <div className="row row--between">
@@ -139,7 +139,7 @@ export function DailyPage() {
           <Card span={6}>
             <StatTile
               label="A receber"
-              value={money(daily.data?.receivableCents ?? 0)}
+              value={daily.data ? money(daily.data.receivableCents) : '-'}
               foot="entradas pendentes de confirmação no período"
             />
           </Card>
@@ -151,7 +151,7 @@ export function DailyPage() {
           <Card span={6}>
             <StatTile
               label="Ritmo projetado para o mês"
-              value={money(pace?.projectedMonthCents ?? 0)}
+              value={pace ? money(pace.projectedMonthCents) : '-'}
               foot={
                 pace?.capCents
                   ? pace.projectedMonthCents > pace.capCents

@@ -194,6 +194,8 @@ export function DropdownSelect<T extends string | number>({
         break
       case 'Escape':
         event.preventDefault()
+        // Fecha só a lista: sem isto o Esc também chegava ao Modal (que escuta a janela) e fechava os dois.
+        event.stopPropagation()
         setOpen(false)
         triggerRef.current?.focus()
         break

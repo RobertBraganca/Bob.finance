@@ -48,7 +48,7 @@ export function InvoiceHistoryChart({
           <XAxis dataKey="closingOn" tickFormatter={(v: string) => fmtDate(v)} {...axisProps(theme)} />
           <YAxis tickFormatter={(v: number) => axisMoney(v)} width={46} {...axisProps(theme)} />
           <Tooltip content={<Tip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
-          <Bar
+          <Bar isAnimationActive={false}
             dataKey="amountCents"
             name="Fatura"
             fill={theme.expense}

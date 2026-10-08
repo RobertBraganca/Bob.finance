@@ -760,13 +760,35 @@ export async function linkToSchedule(pendingId: number, transactionId: number): 
       .select({
         forecastId: transactions.forecastId,
         debtId: transactions.debtId,
+        sourceProposalId: transactions.sourceProposalId,
+        categoryId: transactions.categoryId,
         occurrencePeriod: transactions.occurrencePeriod,
         postedOn: transactions.postedOn,
       })
       .from(transactions)
       .where(and(eq(transactions.id, pendingId), eq(transactions.pending, true)))
   )[0]
-  if (!pendingRow || (!pendingRow.forecastId && !pendingRow.debtId)) return false
+  if (!pendingRow) return false
+
+  // Parcela de orçamento aprovado (decisions/0040): não tem modelo que gere
+  // de novo, então basta a pendência sair e o lançamento real herdar o
+  // orçamento (e a TAG, se ele não tiver). `unlinkFromSchedule` recria a
+  // pendência a partir do real, se a importação for desfeita.
+  if (!pendingRow.forecastId && !pendingRow.debtId) {
+    if (!pendingRow.sourceProposalId) return false
+    await db.delete(transactions).where(eq(transactions.id, pendingId))
+    const real = (await db.select({ categoryId: transactions.categoryId }).from(transactions).where(eq(transactions.id, transactionId)))[0]
+    await db
+      .update(transactions)
+      .set({
+        sourceProposalId: pendingRow.sourceProposalId,
+        ...(real && real.categoryId === null && pendingRow.categoryId !== null
+          ? { categoryId: pendingRow.categoryId, categorizedBy: 'manual' as const }
+          : {}),
+      })
+      .where(eq(transactions.id, transactionId))
+    return true
+  }
 
   const period = pendingRow.occurrencePeriod ?? pendingRow.postedOn.slice(0, 7)
   // Primeiro a pendência sai (e o mês vira "pulado", para não ser gerado de
@@ -826,11 +848,44 @@ export async function linkToSchedule(pendingId: number, transactionId: number): 
 export async function unlinkFromSchedule(transactionId: number): Promise<void> {
   const row = (
     await db
-      .select({ forecastId: transactions.forecastId, debtId: transactions.debtId, occurrencePeriod: transactions.occurrencePeriod })
+      .select({
+        forecastId: transactions.forecastId,
+        debtId: transactions.debtId,
+        occurrencePeriod: transactions.occurrencePeriod,
+        sourceProposalId: transactions.sourceProposalId,
+        accountId: transactions.accountId,
+        postedOn: transactions.postedOn,
+        description: transactions.description,
+        amountCents: transactions.amountCents,
+        categoryId: transactions.categoryId,
+      })
       .from(transactions)
       .where(eq(transactions.id, transactionId))
   )[0]
-  if (!row || (!row.forecastId && !row.debtId)) return
+  if (!row) return
+
+  // Parcela de orçamento: a pendência volta, com o valor, a data e a
+  // descrição do lançamento real que a tinha baixado (decisions/0040).
+  if (!row.forecastId && !row.debtId) {
+    if (!row.sourceProposalId) return
+    await db.update(transactions).set({ sourceProposalId: null }).where(eq(transactions.id, transactionId))
+    const descriptionNorm = normalizeDescription(row.description)
+    await db.insert(transactions).values({
+      accountId: row.accountId,
+      postedOn: row.postedOn,
+      description: row.description,
+      descriptionNorm,
+      amountCents: row.amountCents,
+      direction: directionOf(row.amountCents),
+      categoryId: row.categoryId,
+      categorizedBy: row.categoryId ? 'manual' : 'none',
+      source: 'manual',
+      dedupeHash: dedupeHash({ accountId: row.accountId, postedOn: row.postedOn, amountCents: row.amountCents, descriptionNorm }),
+      pending: true,
+      sourceProposalId: row.sourceProposalId,
+    })
+    return
+  }
 
   if (row.occurrencePeriod) {
     await db
@@ -1027,7 +1082,7 @@ export async function pendingScheduleCandidates(
       and(
         eq(transactions.accountId, accountId),
         eq(transactions.pending, true),
-        sql`(${transactions.forecastId} is not null or ${transactions.debtId} is not null)`,
+        sql`(${transactions.forecastId} is not null or ${transactions.debtId} is not null or ${transactions.sourceProposalId} is not null)`,
         sql`${transactions.postedOn} between ${earliest} and ${latest}`,
       ),
     )

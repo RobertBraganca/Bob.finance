@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
 import {
   assetTrades,
@@ -7,6 +7,7 @@ import {
   emergencyReserveSettings,
   investmentGoals,
   passiveIncomeSettings,
+  propertyPlans,
   targetAllocations,
 } from '../db/schema.ts'
 import { addDays, addMonths, periodBounds, periodOf, periodRange, todayIso } from '../core/dates.ts'
@@ -140,6 +141,8 @@ export type Position = {
   totalCriteria: number
   /** counts toward the emergency-reserve progress */
   countsTowardReserve: boolean
+  /** meta para a qual o ativo está separado (decisions/0041); nulo = livre */
+  goalId: number | null
 }
 
 /**
@@ -163,6 +166,7 @@ export async function positions(asOfDate?: string): Promise<Position[]> {
     assetClass: string
     sector: string | null
     countsTowardReserve: boolean
+    goalId: number | null
     boughtQty: number
     soldQty: number
     boughtCents: number
@@ -179,6 +183,7 @@ export async function positions(asOfDate?: string): Promise<Position[]> {
       a.asset_class as "assetClass",
       a.sector as sector,
       a.counts_toward_reserve as "countsTowardReserve",
+      a.goal_id as "goalId",
       coalesce(sum(case when t.kind = 'buy'  then t.quantity else 0 end), 0) as "boughtQty",
       coalesce(sum(case when t.kind = 'sell' then t.quantity else 0 end), 0) as "soldQty",
       coalesce(sum(case when t.kind = 'buy'  then round(t.quantity * t.unit_price_cents) else 0 end), 0) as "boughtCents",
@@ -229,6 +234,7 @@ export async function positions(asOfDate?: string): Promise<Position[]> {
       answeredCriteria: note?.answered ?? 0,
       totalCriteria: note?.total ?? 0,
       countsTowardReserve: !!r.countsTowardReserve,
+      goalId: r.goalId === null ? null : Number(r.goalId),
     }
   })
 }
@@ -1415,7 +1421,7 @@ export async function goalProjection(
   const goal = (await db.select().from(investmentGoals).where(eq(investmentGoals.id, goalId)))[0]
   if (!goal) return null
 
-  const summary = await portfolioSummary()
+  const summary = await goalBase(goal.id)
   const monthlyReturn = Math.pow(1 + goal.expectedReturnBps / 10_000, 1 / 12) - 1
   const startPeriod = todayIso().slice(0, 7)
 
@@ -1576,6 +1582,14 @@ export async function createAsset(input: {
 }
 
 export async function updateAsset(id: number, patch: Record<string, unknown>) {
+  // Reserva e meta não dividem o mesmo ativo (decisions/0041).
+  if (patch.countsTowardReserve === true) {
+    const row = (await db.select({ goalId: assets.goalId }).from(assets).where(eq(assets.id, id)))[0]
+    if (row?.goalId) {
+      const goal = (await db.select({ name: investmentGoals.name }).from(investmentGoals).where(eq(investmentGoals.id, row.goalId)))[0]
+      throw new InvestmentRuleError(`Este ativo já está separado para a meta ${goal?.name ?? row.goalId}`)
+    }
+  }
   return (
     (await db.update(assets).set(patch as Partial<typeof assets.$inferInsert>).where(eq(assets.id, id)).returning())[0] ?? null
   )
@@ -1896,8 +1910,67 @@ export async function recordValuation(assetId: number, asOf: string, unitPriceCe
   return (await db.insert(assetValuations).values({ assetId, asOf, unitPriceCents }).returning())[0]!
 }
 
+/**
+ * O ponto de partida de uma meta: os ativos separados para ela, quando
+ * houver (decisions/0041); senão a carteira negociável inteira, como antes.
+ */
+export async function goalBase(goalId: number): Promise<{ marketValueCents: number; contributedCents: number; linked: Position[] }> {
+  const linked = (await tradablePositions()).filter((p) => p.goalId === goalId)
+  if (linked.length === 0) {
+    const summary = await portfolioSummary()
+    return { marketValueCents: summary.marketValueCents, contributedCents: summary.contributedCents, linked }
+  }
+  return {
+    marketValueCents: linked.reduce((sum, p) => sum + p.marketValueCents, 0),
+    contributedCents: linked.reduce((sum, p) => sum + p.contributedCents, 0),
+    linked,
+  }
+}
+
+/** Regra de dado de Investimentos violada pela entrada (ex.: ativo de reserva separado para uma meta). */
+export class InvestmentRuleError extends Error {
+  statusCode: number
+  constructor(message: string, statusCode = 409) {
+    super(message)
+    this.statusCode = statusCode
+  }
+}
+
+/**
+ * Separa exatamente estes ativos para a meta (decisions/0041): os que
+ * saem da lista ficam livres. Um ativo da reserva ou de outra meta é
+ * recusado, para entrada e reserva nunca contarem o mesmo dinheiro.
+ */
+export async function setGoalAssets(goalId: number, assetIds: number[]): Promise<Position[]> {
+  const wanted = new Set(assetIds)
+  if (wanted.size > 0) {
+    const rows = await db.select().from(assets).where(inArray(assets.id, [...wanted]))
+    if (rows.length !== wanted.size) throw new InvestmentRuleError('ativo não encontrado', 404)
+    for (const row of rows) {
+      if (row.countsTowardReserve) throw new InvestmentRuleError(`${row.name} já conta para a reserva`)
+      if (row.assetClass === ILLIQUID_ASSET_CLASS) throw new InvestmentRuleError(`${row.name} é imobilizado e não se resgata para a meta`)
+      if (row.archived) throw new InvestmentRuleError(`${row.name} está arquivado`)
+      if (row.goalId !== null && row.goalId !== goalId) {
+        const other = (await db.select({ name: investmentGoals.name }).from(investmentGoals).where(eq(investmentGoals.id, row.goalId)))[0]
+        throw new InvestmentRuleError(`${row.name} já está separado para a meta ${other?.name ?? row.goalId}`)
+      }
+    }
+  }
+  await db.transaction(async (tx) => {
+    await tx.update(assets).set({ goalId: null }).where(eq(assets.goalId, goalId))
+    if (wanted.size > 0) await tx.update(assets).set({ goalId }).where(inArray(assets.id, [...wanted]))
+  })
+  return (await goalBase(goalId)).linked
+}
+
 export async function listGoals() {
-  return db.select().from(investmentGoals).where(eq(investmentGoals.active, true))
+  const rows = await db
+    .select({ goal: investmentGoals, planStatus: propertyPlans.status })
+    .from(investmentGoals)
+    .leftJoin(propertyPlans, eq(propertyPlans.goalId, investmentGoals.id))
+    .where(eq(investmentGoals.active, true))
+  // `propertyPlan`: a aba Metas mostra a visão do plano de imóvel no lugar da projeção genérica.
+  return rows.map(({ goal, planStatus }) => ({ ...goal, propertyPlan: planStatus ? { status: planStatus } : null }))
 }
 
 export async function createGoal(input: {

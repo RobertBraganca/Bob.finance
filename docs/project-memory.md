@@ -1402,3 +1402,48 @@ Sobrou uma afinação segura: `useMeta` ganhou `staleTime` de 60s, igual ao
 `useCategories`. É metadado que muda raramente, já invalidado
 explicitamente quando muda, e era refeito em quase toda navegação por oito
 telas mais o shell.
+
+
+## 07/10/2026 — Plano de compra de imóvel (decisions/0041)
+
+Calculadora "Imóvel" em Investimentos › Calculadoras e meta `buy_property`
+com plano (`property_plans`), na aba Metas. Contas puras em
+`shared/propertyPlan.ts` (espelho `_shared/core/propertyPlan.ts`).
+
+- **Dívida amortizada é opcional por dívida** (`debts.amortization`,
+  `monthly_fees_cents`). Nulo mantém o ramo antigo; conferido que as cinco
+  dívidas reais saem idênticas. Com SAC/Price o saldo é o do cronograma
+  pelas parcelas pagas, e cada pendência tem o valor da sua parcela.
+- **`assets.goal_id`**: meta com ativo ligado mede só esses ativos
+  (`goalBase`); sem ativo ligado, carteira inteira como antes. Exclusivo
+  com a reserva. A tela de ligar ativos só existe no plano de imóvel; a
+  decisão geral (metas dividindo a carteira) segue na segunda etapa.
+- **Comportamento antigo observado, não corrigido**: excluir um pagamento
+  manual de dívida não volta a parcela pendente que ele confirmou
+  (`createPayment` → `settleOldestPendingInstallment`, `deletePayment`
+  não desfaz). Vale para todas as dívidas.
+- Publicar: `insights` e `ledger`.
+
+## 07/10/2026 — Revisão com as skills instaladas (só ajustes seguros)
+
+Cinco revisões só de leitura (userinterface-wiki, vercel-react-best-practices,
+vercel-composition-patterns, apple-design, impeccable critique+distill; nota
+da crítica 23/40). Aplicado o que não pede decisão:
+- tema escuro dos estados (linhas de erro/duplicado, badges, pílulas, botão
+  de excluir) por `color-mix` dos tokens de status; claro intacto;
+  contraste medido no escuro entre 4,76 e 8,08 (texto) e >16 (linhas);
+- `LoadError` com "Tentar de novo" no Painel, Investimentos, Saúde e
+  Patrimônio (antes: esqueleto eterno se a 1ª busca falhasse);
+- "-" no lugar de R$ 0,00 enquanto carrega (Diário, Lançamentos);
+- carteira vazia não esconde Metas, Aposentadoria e Calculadoras;
+- `:active`, entrada de modal/overlay/dropdown/popover/toast, toast com X e
+  pausa no hover, Esc do Dropdown não fecha o Modal, `dvh`, alvos coarse;
+- `useMeta` só com sessão (sem o 401 + retry de ~1s na largada);
+  `AuthProvider` com `value` memoizado; busca de Lançamentos com 250ms;
+  abas de Investimentos em `lazy`; grupos de vendor no build (index 722 →
+  135 kB); pré-carga do gerador de PDF no detalhe do orçamento.
+- Ferramenta: o React Query pausa o retry com a janela sem foco, então no
+  painel de automação um 404 pode parecer esqueleto eterno.
+Pendentes de decisão: receita dupla cotação × orçamento, modelo único de
+período, caixa "A conferir", um sistema de modal só (e folha no celular),
+enxugar telas repetidas, textos técnicos e menu.

@@ -583,6 +583,9 @@ export function TextInput({
   type = 'text',
   min,
   max,
+  ariaLabel,
+  list,
+  autoFocus,
 }: {
   id?: string
   value: string
@@ -592,10 +595,18 @@ export function TextInput({
   type?: string
   min?: string | number
   max?: string | number
+  /** Nome para leitor de tela quando não há <label> visível (ex.: busca). */
+  ariaLabel?: string
+  /** id de um <datalist> com sugestões (ex.: clientes já usados). */
+  list?: string
+  autoFocus?: boolean
 }) {
   return (
     <input
       id={id}
+      aria-label={ariaLabel}
+      list={list}
+      autoFocus={autoFocus}
       className={cx('input', numeral && 'input--numeral')}
       value={value}
       type={type}
@@ -603,6 +614,32 @@ export function TextInput({
       inputMode={numeral && type === 'text' ? 'decimal' : undefined}
       min={min}
       max={max}
+      placeholder={placeholder}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  )
+}
+
+/** Texto longo (descrição, observações), mesma moldura do `TextInput`. */
+export function TextArea({
+  id,
+  value,
+  onChange,
+  placeholder,
+  rows = 3,
+}: {
+  id?: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  rows?: number
+}) {
+  return (
+    <textarea
+      id={id}
+      className="textarea"
+      value={value}
+      rows={rows}
       placeholder={placeholder}
       onChange={(event) => onChange(event.target.value)}
     />
@@ -653,6 +690,38 @@ export function Select<T extends string | number>({
  * Empty states — designed, not an afterthought. Every chart and table
  * in this app renders one of these before the first CSV is imported.
  * ------------------------------------------------------------------ */
+/**
+ * Falha ao carregar (revisão de 07/10/2026): várias telas ficavam em
+ * esqueleto para sempre quando a primeira busca falhava, e as que avisavam
+ * pediam "tente novamente" sem botão para tentar.
+ */
+export function LoadError({
+  title = 'Não foi possível carregar',
+  body = 'A conexão falhou ou o servidor demorou a responder. Seus dados não foram alterados.',
+  onRetry,
+  retrying,
+}: {
+  title?: string
+  body?: string
+  onRetry?: () => void
+  retrying?: boolean
+}) {
+  return (
+    <EmptyState
+      icon="alert"
+      title={title}
+      body={body}
+      action={
+        onRetry ? (
+          <Button size="sm" icon="refresh" loading={retrying} onClick={onRetry}>
+            Tentar de novo
+          </Button>
+        ) : undefined
+      }
+    />
+  )
+}
+
 export function EmptyState({
   icon = 'sparkle',
   title,
@@ -781,12 +850,43 @@ export const useToast = () => useContext(ToastContext)
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
-
-  const push = useCallback((message: string, tone: 'info' | 'error' = 'info') => {
-    const id = Date.now() + Math.floor(performance.now() % 1000)
-    setToasts((current) => [...current, { id, message, tone }])
-    window.setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), 5200)
+  /**
+   * Um temporizador por aviso (revisão de 07/10/2026): passar o mouse ou o
+   * foco pausa todos, para dar tempo de ler, e o X dispensa na hora. Erro
+   * fica mais tempo que sucesso (9s contra 5,2s): é o que a pessoa precisa
+   * ler inteiro para agir.
+   */
+  const timers = useRef(new Map<number, { handle: number; remaining: number; startedAt: number }>())
+  const dismiss = useCallback((id: number) => {
+    const timer = timers.current.get(id)
+    if (timer) window.clearTimeout(timer.handle)
+    timers.current.delete(id)
+    setToasts((current) => current.filter((t) => t.id !== id))
   }, [])
+  const schedule = useCallback(
+    (id: number, ms: number) => {
+      timers.current.set(id, { handle: window.setTimeout(() => dismiss(id), ms), remaining: ms, startedAt: Date.now() })
+    },
+    [dismiss],
+  )
+  const pause = useCallback(() => {
+    for (const [id, timer] of timers.current) {
+      window.clearTimeout(timer.handle)
+      timers.current.set(id, { ...timer, handle: 0, remaining: Math.max(1500, timer.remaining - (Date.now() - timer.startedAt)) })
+    }
+  }, [])
+  const resume = useCallback(() => {
+    for (const [id, timer] of timers.current) if (!timer.handle) schedule(id, timer.remaining)
+  }, [schedule])
+
+  const push = useCallback(
+    (message: string, tone: 'info' | 'error' = 'info') => {
+      const id = Date.now() + Math.floor(performance.now() % 1000)
+      setToasts((current) => [...current, { id, message, tone }])
+      schedule(id, tone === 'error' ? 9000 : 5200)
+    },
+    [schedule],
+  )
 
   const value = useMemo(() => push, [push])
 
@@ -804,7 +904,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           fala. Cada `<div>` fica sempre montado (mesmo vazio) -- é isso
           que garante que o AT já conhece a região antes do conteúdo
           aparecer nela. */}
-      <div className="toasts">
+      <div className="toasts" onMouseEnter={pause} onMouseLeave={resume} onFocus={pause} onBlur={resume}>
         {toasts.map((toast) => (
           <div
             key={toast.id}
@@ -813,7 +913,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             className={cx('toast', toast.tone === 'error' && 'toast--error')}
           >
             <Icon name={toast.tone === 'error' ? 'alert' : 'check'} size={14} strokeWidth={2.2} />
-            <span>{toast.message}</span>
+            <span className="toast__text">{toast.message}</span>
+            <button type="button" className="toast__close" aria-label="Dispensar aviso" onClick={() => dismiss(toast.id)}>
+              <Icon name="x" size={13} />
+            </button>
           </div>
         ))}
       </div>

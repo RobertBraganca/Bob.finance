@@ -44,6 +44,7 @@ import {
 import { DebtHistoryChart } from '../components/charts/DebtHistoryChart'
 import { CategoryRing } from '../components/charts/CategoryRing'
 import { todayIso } from '../lib/period'
+import { installmentsCents, type AmortizationSystem } from '@shared/propertyPlan'
 
 const KIND_LABEL: Record<string, string> = {
   credit_card: 'Cartão de crédito',
@@ -88,6 +89,10 @@ type DebtRow = {
   installmentsPaid: number
   installmentsRemaining: number | null
   lastPaymentOn: string | null
+  /** contrato amortizado (decisions/0041); nulo = parcela fixa */
+  amortization: AmortizationSystem | null
+  monthlyFeesCents: number
+  principalCents: number
 }
 
 type PaymentRow = {
@@ -851,7 +856,16 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
   const [name, setName] = useState(debt?.name ?? '')
   const [kind, setKind] = useState(debt?.kind ?? 'credit_card')
   const [institution, setInstitution] = useState(debt?.institution ?? '')
-  const [balance, setBalance] = useState(centsToInput(debt?.balanceCents ?? null))
+  /**
+   * Contrato amortizado (SAC ou Price, só em Financiamento): o campo de
+   * valor edita o PRINCIPAL do contrato, base do cronograma, e não o saldo
+   * de hoje, que sai do cronograma pelas parcelas pagas. Editar o saldo ali
+   * reiniciaria o cronograma a partir dele.
+   */
+  const [amortization, setAmortization] = useState<AmortizationSystem | null>(debt?.amortization ?? null)
+  const [fees, setFees] = useState(centsToInput(debt?.monthlyFeesCents || null))
+  const amortized = kind === 'financing' && amortization !== null
+  const [balance, setBalance] = useState(centsToInput((debt?.amortization ? debt.principalCents : debt?.balanceCents) ?? null))
   /**
    * A taxa é GRAVADA sempre como efetiva anual, mas pode ser DIGITADA ao
    * mês, que é como cartão rotativo e cheque especial são publicados no
@@ -881,6 +895,8 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
   const installmentsFieldId = useId()
   const dueDayFieldId = useId()
   const accountFieldId = useId()
+  const amortizationFieldId = useId()
+  const feesFieldId = useId()
 
   const save = useMutation({
     mutationFn: () => {
@@ -891,6 +907,7 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
       // Uma única unidade canônica no banco, sempre: taxa efetiva anual.
       const aprBps = rateBasis === 'monthly' ? annualRateBpsFromMonthly(Math.abs(typedBps)) : typedBps
       const installmentCount = installments.trim() ? Math.abs(Math.round(Number(installments))) : null
+      if (amortized && !installmentCount) throw new Error('informe o número de parcelas do contrato')
       const body = {
         name: name.trim(),
         kind,
@@ -902,6 +919,8 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
         dueDay: Math.min(31, Math.max(1, Math.round(Number(dueDay)) || 10)),
         installmentCount,
         accountId,
+        amortization: amortized ? amortization : null,
+        monthlyFeesCents: amortized ? Math.abs(parseMoneyInput(fees) ?? 0) : 0,
       }
       return debt ? api.patch(`/debts/${debt.id}`, body) : api.post('/debts', body)
     },
@@ -946,6 +965,22 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
    * um rotativo, enquanto "180" sozinho não diz nada.
    */
   const typedRateBps = parsePercentInput(apr)
+  // Prévia do cronograma: 1ª e última parcela do contrato como está digitado.
+  const preview = (() => {
+    if (!amortized) return null
+    const principalCents = parseMoneyInput(balance)
+    const count = installments.trim() ? Math.abs(Math.round(Number(installments))) : 0
+    if (principalCents === null || typedRateBps === null || count <= 0) return null
+    const aprBps = rateBasis === 'monthly' ? annualRateBpsFromMonthly(Math.abs(typedRateBps)) : Math.abs(typedRateBps)
+    const all = installmentsCents({
+      principalCents: Math.abs(principalCents),
+      aprBps,
+      installmentCount: count,
+      amortization,
+      monthlyFeesCents: Math.abs(parseMoneyInput(fees) ?? 0),
+    })
+    return all.length ? { first: all[0]!, last: all.at(-1)! } : null
+  })()
   const aprHint =
     typedRateBps === null
       ? 'Taxa efetiva, não nominal. Cartão rotativo passa de 14% ao mês.'
@@ -980,7 +1015,8 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
             <span />
           )}
           <div className="row">
-            {debt && (
+            {/* Contrato amortizado: o saldo vem do cronograma, e o campo é o principal. */}
+            {debt && !amortized && (
               <Button icon="clock" onClick={() => updateBalance.mutate()}>
                 Registrar saldo de hoje
               </Button>
@@ -1019,10 +1055,32 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
           <TextInput id={institutionFieldId} value={institution} onChange={setInstitution} placeholder="opcional" />
         </div>
 
+        {kind === 'financing' && (
+          <div className="field">
+            <label className="field__label" htmlFor={amortizationFieldId}>Sistema de amortização</label>
+            <Select
+              id={amortizationFieldId}
+              value={amortization ?? 'none'}
+              options={[
+                { value: 'none', label: 'Sem sistema (parcela fixa)' },
+                { value: 'sac', label: 'SAC (parcela cai todo mês)' },
+                { value: 'price', label: 'Price (parcela fixa, com juros e amortização)' },
+              ]}
+              onChange={(value) => setAmortization(value === 'sac' || value === 'price' ? value : null)}
+            />
+            <span className="field__hint">
+              Com SAC ou Price, cada parcela sai do cronograma e o saldo cai só pela amortização.
+            </span>
+          </div>
+        )}
+
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label" htmlFor={balanceFieldId}>Saldo devedor (R$)</label>
+            <label className="field__label" htmlFor={balanceFieldId}>{amortized ? 'Valor financiado (R$)' : 'Saldo devedor (R$)'}</label>
             <TextInput id={balanceFieldId} value={balance} onChange={setBalance} placeholder="0,00" numeral />
+            {amortized && debt && (
+              <span className="field__hint">Saldo hoje pelo cronograma: {money(debt.balanceCents)}.</span>
+            )}
           </div>
           <div className="field" style={{ flex: 1, minWidth: 150 }}>
             <label className="field__label">Taxa de juros (%)</label>
@@ -1059,24 +1117,45 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
           </div>
         </div>
 
-        <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
-          <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label" htmlFor={minimumFieldId}>Pagamento mínimo (R$)</label>
-            <TextInput id={minimumFieldId} value={minimum} onChange={setMinimum} placeholder="0,00" numeral />
+        {amortized ? (
+          <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label" htmlFor={feesFieldId}>Seguros e taxas por mês (R$)</label>
+              <TextInput id={feesFieldId} value={fees} onChange={setFees} placeholder="0,00" numeral />
+              <span className="field__hint">Somados a cada parcela; não abatem o saldo.</span>
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <span className="field__label">Parcela</span>
+              <span className="numeral" style={{ paddingBlock: 'var(--sp-2)' }}>
+                {preview ? (amortization === 'sac' ? `${money(preview.first)} → ${money(preview.last)}` : money(preview.first)) : '-'}
+              </span>
+              <span className="field__hint">
+                {amortization === 'sac' ? 'Da 1ª à última, calculada pelo cronograma.' : 'Calculada pelo cronograma.'}
+              </span>
+            </div>
           </div>
-          <div className="field" style={{ flex: 1, minWidth: 150 }}>
-            <label className="field__label" htmlFor={scheduledFieldId}>Pagamento programado (R$)</label>
-            <TextInput id={scheduledFieldId} value={scheduled} onChange={setScheduled} placeholder="0,00" numeral />
-            <span className="field__hint">O que você realmente paga por mês.</span>
+        ) : (
+          <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label" htmlFor={minimumFieldId}>Pagamento mínimo (R$)</label>
+              <TextInput id={minimumFieldId} value={minimum} onChange={setMinimum} placeholder="0,00" numeral />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <label className="field__label" htmlFor={scheduledFieldId}>Pagamento programado (R$)</label>
+              <TextInput id={scheduledFieldId} value={scheduled} onChange={setScheduled} placeholder="0,00" numeral />
+              <span className="field__hint">O que você realmente paga por mês.</span>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
           <div className="field" style={{ maxWidth: 220 }}>
-            <label className="field__label" htmlFor={installmentsFieldId}>Nº de parcelas (opcional)</label>
+            <label className="field__label" htmlFor={installmentsFieldId}>{amortized ? 'Nº de parcelas' : 'Nº de parcelas (opcional)'}</label>
             <TextInput id={installmentsFieldId} value={installments} onChange={setInstallments} placeholder="ex. 48" numeral />
             <span className="field__hint">
-              Deixe em branco para dívida rotativa (cartão, cheque especial), sem número fixo de parcelas.
+              {amortized
+                ? 'O prazo do contrato, base do cronograma.'
+                : 'Deixe em branco para dívida rotativa (cartão, cheque especial), sem número fixo de parcelas.'}
             </span>
           </div>
           <div className="field" style={{ maxWidth: 160 }}>

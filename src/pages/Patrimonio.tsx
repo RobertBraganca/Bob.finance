@@ -18,6 +18,7 @@ import {
   SkeletonLines,
   useToast,
   type AssumptionBag,
+  LoadError,
 } from '../components/ui'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
@@ -95,6 +96,11 @@ export function PatrimonioPage() {
       />
 
       <div className="page">
+        {netWorth.isError && !nw && (
+          <Card>
+            <LoadError onRetry={() => netWorth.refetch()} retrying={netWorth.isFetching} />
+          </Card>
+        )}
         <Bento>
           <Slab span={6} accent>
             <HeroFigure label="Patrimônio líquido" value={nw ? money(netWorthCents) : '-'}>

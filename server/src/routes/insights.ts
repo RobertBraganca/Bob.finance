@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { addMonths, periodBounds, todayIso } from '../core/dates'
 import * as analytics from '../services/analytics'
 import * as benchmarksService from '../services/benchmarks'
+import * as budgetService from '../services/budget'
 import * as cashFlowService from '../services/cashFlow'
 import * as creditCardsService from '../services/creditCards'
 import * as criteriaService from '../services/criteria'
@@ -16,6 +17,7 @@ import * as investments from '../services/investments'
 import * as monthlyClosingService from '../services/monthlyClosing'
 import * as partners from '../services/partners'
 import * as profileService from '../services/profile'
+import * as propertyPlans from '../services/propertyPlans'
 import * as quotesService from '../services/quotes'
 import * as subscriptionsService from '../services/subscriptions'
 import { ledgerBounds } from '../services/transactions'
@@ -42,6 +44,49 @@ async function resolveRange(query: z.infer<typeof rangeQuery>): Promise<analytic
   const from = query.from ?? periodBounds(addMonths(anchor.slice(0, 7), -5)).start
   return { from, to, accountId: query.accountId ?? null }
 }
+
+
+/* Plano de compra de imóvel (specs/property-plan). Faixas de `core/propertyPlan#PLAN_LIMITS`. */
+const costItemSchema = z.object({
+  label: z.string().trim().min(1).max(60),
+  kind: z.enum(['pct', 'fixed']),
+  value: z.number().int().nonnegative(),
+})
+const planFieldsSchema = z.object({
+  priceCents: z.number().int().positive(),
+  appreciationBps: z.number().int().min(-2_000).max(3_000),
+  downPaymentBps: z.number().int().min(500).max(10_000),
+  costs: z.array(costItemSchema).max(20),
+  otherResourcesCents: z.number().int().nonnegative(),
+  financingRateBps: z.number().int().min(0).max(10_000),
+  termMonths: z.number().int().min(12).max(420),
+  system: z.enum(['sac', 'price']),
+  monthlyFeesCents: z.number().int().nonnegative(),
+  incomeOverrideCents: z.number().int().positive().nullable(),
+  incomeLimitBps: z.number().int().min(500).max(10_000),
+  expenseReliefCents: z.number().int().nonnegative(),
+})
+const planGoalSchema = z.object({
+  name: z.string().trim().min(1),
+  monthlyContributionCents: z.number().int().nonnegative(),
+  expectedReturnBps: z.number().int().min(-10_000).max(100_000),
+})
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+const purchaseSchema = z.object({
+  purchasePriceCents: z.number().int().positive(),
+  purchasedOn: isoDate,
+  financedCents: z.number().int().nonnegative(),
+  rateBps: z.number().int().min(0).max(10_000),
+  termMonths: z.number().int().min(1).max(420),
+  system: z.enum(['sac', 'price']),
+  monthlyFeesCents: z.number().int().nonnegative().default(0),
+  firstDueOn: isoDate,
+  accountId: z.number().int().positive(),
+  institution: z.string().nullable().optional(),
+  registerAsset: z.boolean().default(true),
+  assetName: z.string().nullable().optional(),
+})
+const goalIdParam = z.object({ goalId: z.coerce.number().int().positive() })
 
 export async function insightsRoutes(app: FastifyInstance) {
   /**
@@ -294,6 +339,9 @@ export async function insightsRoutes(app: FastifyInstance) {
         dueDay: z.number().int().min(1).max(31).default(10),
         installmentCount: z.number().int().positive().nullable().optional(),
         accountId: z.number().int().positive().nullable().optional(),
+        // Contrato amortizado (decisions/0041): só vale com installmentCount.
+        amortization: z.enum(['sac', 'price']).nullable().optional(),
+        monthlyFeesCents: z.number().int().nonnegative().default(0),
       })
       .parse(req.body)
     const debt = await debtService.createDebt(body)
@@ -315,6 +363,8 @@ export async function insightsRoutes(app: FastifyInstance) {
         dueDay: z.number().int().min(1).max(31).optional(),
         installmentCount: z.number().int().positive().nullable().optional(),
         accountId: z.number().int().positive().nullable().optional(),
+        amortization: z.enum(['sac', 'price']).nullable().optional(),
+        monthlyFeesCents: z.number().int().nonnegative().optional(),
         active: z.boolean().optional(),
       })
       .parse(req.body)
@@ -864,6 +914,82 @@ export async function insightsRoutes(app: FastifyInstance) {
   app.delete('/investments/goals/:id', async (req) => {
     const { id } = idParam.parse(req.params)
     return investments.deleteGoal(id)
+  })
+
+
+  /* Orçamento por grupos (specs/budget-groups). */
+  app.get('/budget/settings', async () => budgetService.budgetSettings())
+
+  app.get('/budget/:period', async (req) => {
+    const { period } = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.params)
+    return budgetService.budgetFor(period)
+  })
+
+  app.post('/budget/groups', async (req) => {
+    const body = z.object({ name: z.string().trim().min(1).max(40), color: z.string().regex(/^#[0-9a-fA-F]{6}$/) }).parse(req.body)
+    return budgetService.createGroup(body)
+  })
+
+  app.patch('/budget/groups/:id', async (req) => {
+    const { id } = idParam.parse(req.params)
+    const body = z
+      .object({
+        name: z.string().trim().min(1).max(40).optional(),
+        color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+        sortOrder: z.number().int().min(0).max(1000).optional(),
+        archived: z.boolean().optional(),
+      })
+      .parse(req.body)
+    return budgetService.updateGroup(id, body)
+  })
+
+  app.put('/budget/plan', async (req) => {
+    const body = z
+      .object({ allocations: z.array(z.object({ groupId: z.number().int().positive(), targetBps: z.number().int().min(0).max(10_000) })).max(30) })
+      .parse(req.body)
+    return budgetService.savePlan(body.allocations)
+  })
+
+  app.put('/budget/categories', async (req) => {
+    const body = z
+      .object({
+        items: z
+          .array(z.object({ categoryId: z.number().int().positive(), budgetGroupId: z.number().int().positive().nullable(), budgetExcluded: z.boolean() }))
+          .max(500),
+      })
+      .parse(req.body)
+    return budgetService.saveCategoryGroups(body.items)
+  })
+
+  app.get('/investments/property-plans/defaults', async () => propertyPlans.planDefaults())
+
+  app.get('/investments/property-plans/:goalId', async (req) => {
+    const { goalId } = goalIdParam.parse(req.params)
+    return propertyPlans.getPlan(goalId)
+  })
+
+  app.post('/investments/property-plans', async (req) => {
+    const body = z
+      .object({ goal: planGoalSchema, plan: planFieldsSchema, assetIds: z.array(z.number().int().positive()).optional() })
+      .parse(req.body)
+    return propertyPlans.createPlan(body)
+  })
+
+  app.patch('/investments/property-plans/:goalId', async (req) => {
+    const { goalId } = goalIdParam.parse(req.params)
+    const body = z.object({ goal: planGoalSchema.partial().optional(), plan: planFieldsSchema.partial().optional() }).parse(req.body)
+    return propertyPlans.updatePlan(goalId, body)
+  })
+
+  app.put('/investments/property-plans/:goalId/assets', async (req) => {
+    const { goalId } = goalIdParam.parse(req.params)
+    const { assetIds } = z.object({ assetIds: z.array(z.number().int().positive()) }).parse(req.body)
+    return propertyPlans.setPlanAssets(goalId, assetIds)
+  })
+
+  app.post('/investments/property-plans/:goalId/purchase', async (req) => {
+    const { goalId } = goalIdParam.parse(req.params)
+    return propertyPlans.purchase(goalId, purchaseSchema.parse(req.body))
   })
 
   app.get('/investments/goals/:id/projection', async (req, reply) => {

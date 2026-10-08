@@ -1,6 +1,7 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import * as pricing from '../services/pricing'
+import * as proposals from '../services/proposals'
 
 /**
  * Precificação de projetos. See `specs/project-pricing`.
@@ -33,6 +34,62 @@ const commercialTerms = {
   installments: z.number().int().min(1).max(60).optional(),
   paymentTerms: z.string().max(500).nullable().optional(),
 }
+
+/* ------------------------------------------------------------------ *
+ * Orçamentos de serviço (decisions/0040, specs/service-proposals)
+ * ------------------------------------------------------------------ */
+const proposalItemSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  description: z.string().max(2000).nullable().optional(),
+  unitPriceCents: z.number().int().min(0).max(1_000_000_000),
+  quantity: z.number().positive().max(100_000),
+  sourceQuoteId: z.number().int().positive().nullable().optional(),
+})
+
+const proposalFields = {
+  title: z.string().trim().min(1).max(160),
+  clientLabel: z.string().trim().min(1).max(160),
+  status: z.enum(proposals.EDITABLE_STATUSES).optional(),
+  discountBps: z.number().int().min(0).max(10_000).optional(),
+  validityDays: z.number().int().min(1).max(365).optional(),
+  installments: z.number().int().min(1).max(60).optional(),
+  paymentTerms: z.string().max(1000).nullable().optional(),
+  deliveryTerms: z.string().max(1000).nullable().optional(),
+  notes: z.string().max(4000).nullable().optional(),
+  items: z.array(proposalItemSchema).max(100),
+}
+const proposalCreateBody = z.object(proposalFields)
+const proposalPatchBody = z.object(proposalFields).partial()
+
+const proposalListQuery = z.object({
+  q: z.string().max(160).optional(),
+  status: z.string().optional(),
+  sort: z.enum(proposals.PROPOSAL_SORTS).optional(),
+})
+
+const statusList = (raw: string | undefined) =>
+  (raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s): s is proposals.ProposalStatus => (proposals.PROPOSAL_STATUSES as readonly string[]).includes(s))
+
+const approveProposalBody = z.object({
+  accountId: z.number().int().positive(),
+  firstDueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  installments: z.number().int().min(1).max(60).optional(),
+  firstAlreadyReceived: z.boolean().optional(),
+})
+
+const issuerBody = z
+  .object({
+    businessName: z.string().max(160).nullable(),
+    document: z.string().max(30).nullable(),
+    email: z.string().max(160).nullable(),
+    phone: z.string().max(40).nullable(),
+    logoPath: z.string().max(300).nullable(),
+    defaultValidityDays: z.number().int().min(1).max(365),
+  })
+  .partial()
 
 export async function pricingRoutes(app: FastifyInstance) {
   /* ---------------------------------------------------------------- *
@@ -206,6 +263,95 @@ export async function pricingRoutes(app: FastifyInstance) {
     } catch (error) {
       if (error instanceof pricing.PricingError) return reply.code(422).send({ error: error.message })
       throw error
+    }
+  })
+
+  /* ---------------------------------------------------------------- *
+   * Orçamentos de serviço (decisions/0040). Rotas fixas antes das com :id.
+   * ---------------------------------------------------------------- */
+  const proposalError = (reply: FastifyReply, error: unknown) => {
+    if (error instanceof pricing.PricingError) return reply.code(422).send({ error: error.message })
+    throw error
+  }
+
+  app.get('/pricing/proposals', async (req) => {
+    const query = proposalListQuery.parse(req.query)
+    return proposals.listProposals({ q: query.q, statuses: statusList(query.status), sort: query.sort })
+  })
+  app.get('/pricing/proposals/summary', async () => proposals.proposalsSummary())
+  app.get('/pricing/proposals/item-suggestions', async (req) => {
+    const { q } = z.object({ q: z.string().max(160).optional() }).parse(req.query)
+    return { suggestions: await proposals.itemSuggestions(q) }
+  })
+  app.get('/pricing/proposals/client-suggestions', async () => ({ clients: await proposals.clientSuggestions() }))
+  app.get('/pricing/proposals/quote-options', async () => ({ quotes: await proposals.quotesForPicker() }))
+  app.get('/pricing/proposal-issuer', async () => proposals.getIssuer())
+  app.put('/pricing/proposal-issuer', async (req) => proposals.updateIssuer(issuerBody.parse(req.body)))
+
+  app.post('/pricing/proposals', async (req, reply) => {
+    try {
+      return await proposals.createProposal(proposalCreateBody.parse(req.body))
+    } catch (error) {
+      return proposalError(reply, error)
+    }
+  })
+  app.get('/pricing/proposals/:id', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    const proposal = await proposals.getProposal(id)
+    if (!proposal) return reply.code(404).send({ error: 'orçamento não encontrado' })
+    return proposal
+  })
+  app.patch('/pricing/proposals/:id', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    try {
+      const proposal = await proposals.updateProposal(id, proposalPatchBody.parse(req.body))
+      if (!proposal) return reply.code(404).send({ error: 'orçamento não encontrado' })
+      return proposal
+    } catch (error) {
+      return proposalError(reply, error)
+    }
+  })
+  app.post('/pricing/proposals/:id/status', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    const { status } = z.object({ status: z.enum(proposals.EDITABLE_STATUSES) }).parse(req.body)
+    try {
+      const proposal = await proposals.setProposalStatus(id, status)
+      if (!proposal) return reply.code(404).send({ error: 'orçamento não encontrado' })
+      return proposal
+    } catch (error) {
+      return proposalError(reply, error)
+    }
+  })
+  app.post('/pricing/proposals/:id/mark-sent', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    try {
+      const proposal = await proposals.markProposalSent(id)
+      if (!proposal) return reply.code(404).send({ error: 'orçamento não encontrado' })
+      return proposal
+    } catch (error) {
+      return proposalError(reply, error)
+    }
+  })
+  app.post('/pricing/proposals/:id/approve', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    try {
+      return await proposals.approveProposal(id, approveProposalBody.parse(req.body))
+    } catch (error) {
+      return proposalError(reply, error)
+    }
+  })
+  app.post('/pricing/proposals/:id/duplicate', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    const proposal = await proposals.duplicateProposal(id)
+    if (!proposal) return reply.code(404).send({ error: 'orçamento não encontrado' })
+    return proposal
+  })
+  app.delete('/pricing/proposals/:id', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    try {
+      return await proposals.deleteProposal(id)
+    } catch (error) {
+      return proposalError(reply, error)
     }
   })
 }

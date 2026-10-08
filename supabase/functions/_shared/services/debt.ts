@@ -4,6 +4,7 @@ import { accounts, debtPayments, debtSnapshots, debts, skippedOccurrences, trans
 import { addMonths, daysInMonth, periodBounds, todayIso } from '../core/dates.ts'
 import { medianCents, monthlyRateOf } from '../core/money.ts'
 import { dedupeHash, directionOf, normalizeDescription } from '../core/normalize.ts'
+import { balanceAfter, installmentsCents, type AmortizationSystem, type AmortizedContract } from '../core/propertyPlan.ts'
 import { monthlyTotals, totals } from './analytics.ts'
 
 /**
@@ -16,6 +17,30 @@ const MAX_MONTHS = 600 // 50 years — the guard against a never-amortizing loan
 
 type DebtKind = (typeof debts.$inferSelect)['kind']
 type DebtPaymentKind = (typeof debtPayments.$inferSelect)['kind']
+type DebtRecord = typeof debts.$inferSelect
+
+/**
+ * Contrato amortizado (decisions/0041): SAC ou Price com número de parcelas.
+ * Cada parcela sai do cronograma e o saldo é o do cronograma depois das
+ * parcelas pagas. Qualquer outra dívida segue a regra antiga (parcela fixa,
+ * pagamento inteiro abate o saldo).
+ */
+const isAmortized = (d: Pick<DebtRecord, 'amortization' | 'installmentCount'>) => d.amortization !== null && d.installmentCount !== null
+const contractOf = (d: Pick<DebtRecord, 'principalCents' | 'aprBps' | 'installmentCount' | 'amortization' | 'monthlyFeesCents'>): AmortizedContract => ({
+  principalCents: d.principalCents,
+  aprBps: d.aprBps,
+  installmentCount: d.installmentCount,
+  amortization: d.amortization,
+  monthlyFeesCents: d.monthlyFeesCents,
+})
+/** Parcela de um contrato amortizado a pagar depois de `paid` parcelas (0 se acabou). */
+const nextInstallment = (d: DebtRecord, paid: number) => installmentsCents(contractOf(d))[paid] ?? 0
+/** Quantos meses do período âncora até `period` (a parcela k desse período). */
+const monthIndex = (anchor: string, period: string) => {
+  const [ay, am] = anchor.split('-').map(Number) as [number, number]
+  const [py, pm] = period.split('-').map(Number) as [number, number]
+  return (py - ay) * 12 + (pm - am)
+}
 
 export type DebtRow = {
   id: number
@@ -46,6 +71,12 @@ export type DebtRow = {
   /** installmentCount - installmentsPaid — null whenever installmentCount is null */
   installmentsRemaining: number | null
   lastPaymentOn: string | null
+  /** sistema do contrato amortizado; nulo na dívida de parcela fixa */
+  amortization: AmortizationSystem | null
+  /** seguros e taxas somados a cada parcela de um contrato amortizado */
+  monthlyFeesCents: number
+  /** principal do contrato (base do cronograma de um contrato amortizado) */
+  principalCents: number
 }
 
 /** Latest measured balance if there is one, otherwise the opening principal. */
@@ -92,7 +123,8 @@ export async function listDebts(): Promise<DebtRow[]> {
         balanceCents,
         aprBps: d.aprBps,
         minimumPaymentCents: d.minimumPaymentCents,
-        scheduledPaymentCents: d.scheduledPaymentCents || d.minimumPaymentCents,
+        // Contrato amortizado: a parcela da vez (no SAC ela cai todo mês).
+        scheduledPaymentCents: isAmortized(d) ? nextInstallment(d, installmentsPaid) : d.scheduledPaymentCents || d.minimumPaymentCents,
         dueDay: d.dueDay,
         monthlyInterestCents: Math.round(balanceCents * monthlyRate(d.aprBps)),
         monthlyRateBps: Math.round(monthlyRate(d.aprBps) * 10_000),
@@ -101,6 +133,9 @@ export async function listDebts(): Promise<DebtRow[]> {
         installmentsPaid,
         installmentsRemaining: d.installmentCount === null ? null : Math.max(0, d.installmentCount - installmentsPaid),
         lastPaymentOn: lastPaidOn,
+        amortization: d.amortization,
+        monthlyFeesCents: d.monthlyFeesCents,
+        principalCents: d.principalCents,
       }
     }),
   )
@@ -156,7 +191,8 @@ export async function listClosedDebts(): Promise<ClosedDebtRow[]> {
         balanceCents,
         aprBps: d.aprBps,
         minimumPaymentCents: d.minimumPaymentCents,
-        scheduledPaymentCents: d.scheduledPaymentCents || d.minimumPaymentCents,
+        // Contrato amortizado: a parcela da vez (no SAC ela cai todo mês).
+        scheduledPaymentCents: isAmortized(d) ? nextInstallment(d, installmentsPaid) : d.scheduledPaymentCents || d.minimumPaymentCents,
         dueDay: d.dueDay,
         monthlyInterestCents: Math.round(balanceCents * monthlyRate(d.aprBps)),
         monthlyRateBps: Math.round(monthlyRate(d.aprBps) * 10_000),
@@ -165,6 +201,9 @@ export async function listClosedDebts(): Promise<ClosedDebtRow[]> {
         installmentsPaid,
         installmentsRemaining: d.installmentCount === null ? null : Math.max(0, d.installmentCount - installmentsPaid),
         lastPaymentOn: lastPaidOn,
+        amortization: d.amortization,
+        monthlyFeesCents: d.monthlyFeesCents,
+        principalCents: d.principalCents,
         closedOn: d.closedOn,
         totalPaidCents: stats[0]?.total ?? 0,
       }
@@ -195,8 +234,10 @@ export async function materializeDebtInstallments(debtId: number): Promise<{ cre
   const debt = (await db.select().from(debts).where(eq(debts.id, debtId)))[0]
   if (!debt || !debt.accountId || !debt.active) return { created: 0 }
 
-  const amountCents = debt.scheduledPaymentCents || debt.minimumPaymentCents
-  if (amountCents <= 0) return { created: 0 }
+  const fixedAmountCents = debt.scheduledPaymentCents || debt.minimumPaymentCents
+  // Contrato amortizado: cada parcela tem o valor do cronograma.
+  const scheduleAmounts = isAmortized(debt) ? installmentsCents(contractOf(debt)) : null
+  if (!scheduleAmounts && fixedAmountCents <= 0) return { created: 0 }
 
   const { count: installmentsPaid } = await paymentStats(debtId)
   const currentPeriod = todayIso().slice(0, 7)
@@ -254,7 +295,7 @@ export async function materializeDebtInstallments(debtId: number): Promise<{ cre
     ).map((r) => r.period),
   )
 
-  const periods: string[] = []
+  const periods: Array<{ period: string; amountCents: number }> = []
   if (debt.installmentCount === null) {
     // Revolving (cartão, cheque especial): one occurrence per month,
     // indefinitely, same as a "recorrente" cash-flow forecast — except when
@@ -263,17 +304,18 @@ export async function materializeDebtInstallments(debtId: number): Promise<{ cre
     // endPeriod does; a revolving debt has no natural end otherwise).
     for (let i = 0; i < MATERIALIZE_HORIZON_MONTHS; i++) {
       const period = addMonths(currentPeriod, i)
-      if (!debt.endPeriod || period <= debt.endPeriod) periods.push(period)
+      if (!debt.endPeriod || period <= debt.endPeriod) periods.push({ period, amountCents: fixedAmountCents })
     }
   } else {
     for (let i = installmentsPaid; i < debt.installmentCount; i++) {
       const period = addMonths(anchorPeriod, i)
-      if (period <= horizon) periods.push(period)
+      const amountCents = scheduleAmounts ? (scheduleAmounts[i] ?? 0) : fixedAmountCents
+      if (period <= horizon && amountCents > 0) periods.push({ period, amountCents })
     }
   }
 
   let created = 0
-  for (const period of periods) {
+  for (const { period, amountCents } of periods) {
     if (existingPeriods.has(period) || skippedPeriods.has(period)) continue
     const [year, month] = period.split('-').map(Number) as [number, number]
     const day = Math.min(debt.dueDay, daysInMonth(year, month))
@@ -345,8 +387,10 @@ async function runMaterializeAllDebts(): Promise<{ created: number }> {
  */
 async function syncMaterializedRows(debt: typeof debts.$inferSelect): Promise<void> {
   if (!debt.accountId) return
-  const amountCents = debt.scheduledPaymentCents || debt.minimumPaymentCents
-  if (amountCents <= 0) return
+  const fixedAmountCents = debt.scheduledPaymentCents || debt.minimumPaymentCents
+  const scheduleAmounts = isAmortized(debt) ? installmentsCents(contractOf(debt)) : null
+  const anchor = debt.openedOn?.slice(0, 7) ?? null
+  if (!scheduleAmounts && fixedAmountCents <= 0) return
 
   const rows = await db
     .select()
@@ -367,6 +411,9 @@ async function syncMaterializedRows(debt: typeof debts.$inferSelect): Promise<vo
     const [year, month] = period.split('-').map(Number) as [number, number]
     const day = Math.min(debt.dueDay, daysInMonth(year, month))
     const postedOn = `${period}-${String(day).padStart(2, '0')}`
+    // Contrato amortizado: o valor da parcela k deste período no cronograma.
+    const amountCents = scheduleAmounts && anchor ? (scheduleAmounts[monthIndex(anchor, period)] ?? 0) : fixedAmountCents
+    if (amountCents <= 0) continue
     await db
       .update(transactions)
       .set({
@@ -538,6 +585,9 @@ type SimDebt = {
   rate: number
   minimum: number
   scheduled: number
+  /** SAC: amortização fixa do mês; a parcela é ela mais os juros do mês. Nulo nos demais. */
+  sacAmortization: number | null
+  interestThisMonth: number
   interestPaid: number
   months: number | null
 }
@@ -567,7 +617,12 @@ export async function projectPaydown(options: {
     balance: d.balanceCents,
     rate: monthlyRate(d.aprBps),
     minimum: d.minimumPaymentCents,
-    scheduled: Math.max(d.scheduledPaymentCents, d.minimumPaymentCents),
+    // Contrato amortizado: seguros e taxas saem do caixa mas não abatem o saldo.
+    scheduled: d.amortization
+      ? Math.max(0, d.scheduledPaymentCents - d.monthlyFeesCents)
+      : Math.max(d.scheduledPaymentCents, d.minimumPaymentCents),
+    sacAmortization: d.amortization === 'sac' && d.installmentCount ? Math.round(d.principalCents / d.installmentCount) : null,
+    interestThisMonth: 0,
     interestPaid: 0,
     months: null,
   }))
@@ -602,6 +657,7 @@ export async function projectPaydown(options: {
       const interest = d.balance * d.rate
       d.balance += interest
       d.interestPaid += interest
+      d.interestThisMonth = interest
     }
 
     // 2. Scheduled payments, plus whatever closed debts freed up.
@@ -611,6 +667,8 @@ export async function projectPaydown(options: {
         pool += d.scheduled
         continue
       }
+      // SAC: a parcela do mês é a amortização fixa mais os juros do mês.
+      if (d.sacAmortization !== null) d.scheduled = d.sacAmortization + d.interestThisMonth
       const payment = Math.min(d.scheduled, d.balance)
       d.balance -= payment
       if (payment < d.scheduled) pool += d.scheduled - payment
@@ -710,15 +768,28 @@ export type DebtInput = {
   dueDay?: number
   installmentCount?: number | null
   accountId?: number | null
+  amortization?: AmortizationSystem | null
+  monthlyFeesCents?: number
+  /** âncora da parcela 0 (YYYY-MM-DD); padrão hoje */
+  openedOn?: string
+}
+
+/** Contrato amortizado guarda a 1ª parcela (com taxas) em `scheduledPaymentCents`, para as telas que mostram "parcela". */
+async function syncFirstInstallment(row: DebtRecord): Promise<DebtRecord> {
+  if (!isAmortized(row)) return row
+  const first = nextInstallment(row, 0)
+  if (first === row.scheduledPaymentCents) return row
+  return (await db.update(debts).set({ scheduledPaymentCents: first }).where(eq(debts.id, row.id)).returning())[0] ?? row
 }
 
 export async function createDebt(input: DebtInput) {
-  const row = (
+  const inserted = (
     await db
       .insert(debts)
-      .values({ ...input, kind: input.kind as DebtKind | undefined, openedOn: todayIso() })
+      .values({ ...input, kind: input.kind as DebtKind | undefined, openedOn: input.openedOn ?? todayIso() })
       .returning()
   )[0]!
+  const row = await syncFirstInstallment(inserted)
   // The opening principal is also the first measured point on the trend.
   await db
     .insert(debtSnapshots)
@@ -736,8 +807,10 @@ export async function updateDebt(id: number, patch: Partial<DebtInput> & { activ
         .where(eq(debts.id, id))
         .returning()
     )[0] ?? null
-  if (updated) await syncMaterializedRows(updated)
-  return updated
+  if (!updated) return null
+  const synced = await syncFirstInstallment(updated)
+  await syncMaterializedRows(synced)
+  return synced
 }
 
 export async function deleteDebt(id: number) {
@@ -764,10 +837,23 @@ export async function deleteDebt(id: number) {
 export async function recordPaymentSnapshot(debtId: number, amountCents: number, kind: string): Promise<void> {
   const debt = (await db.select().from(debts).where(eq(debts.id, debtId)))[0]
   if (!debt) return
+  // Contrato amortizado: o saldo é o do cronograma depois das parcelas
+  // pagas (o pagamento já está em debt_payments), então só a amortização
+  // sai, nunca juros e taxas.
+  if (kind === 'payment' && isAmortized(debt)) {
+    await recordScheduledBalance(debt)
+    return
+  }
   const balance = await currentBalance(debt)
   const delta = Math.abs(amountCents)
   const newBalance = kind === 'payment' ? Math.max(0, balance - delta) : balance + delta
   await recordSnapshot(debtId, todayIso(), newBalance)
+}
+
+/** Grava o saldo do cronograma de um contrato amortizado para as parcelas pagas hoje. */
+async function recordScheduledBalance(debt: DebtRecord): Promise<void> {
+  const { count } = await paymentStats(debt.id)
+  await recordSnapshot(debt.id, todayIso(), balanceAfter(contractOf(debt), count))
 }
 
 export async function recordSnapshot(debtId: number, asOf: string, balanceCents: number) {
@@ -930,6 +1016,8 @@ export async function deletePayment(id: number) {
 
   if (row) {
     const debt = (await db.select().from(debts).where(eq(debts.id, row.debtId)))[0]
+    // Contrato amortizado: desfazer o pagamento devolve o saldo do cronograma.
+    if (debt && isAmortized(debt)) await recordScheduledBalance(debt)
     if (debt && !debt.active && debt.installmentCount !== null) {
       const { count: installmentsPaid } = await paymentStats(debt.id)
       if (installmentsPaid < debt.installmentCount) {
@@ -1037,7 +1125,9 @@ export async function undoLinkedDebtPayment(debtId: number, transactionId: numbe
   for (const payment of payments) {
     if (payment.notes === payoffPaymentNote(transactionId)) {
       await db.delete(debtPayments).where(eq(debtPayments.id, payment.id))
-      await db.update(debts).set({ active: true, closedOn: null }).where(eq(debts.id, debtId))
+      const reopened = (await db.update(debts).set({ active: true, closedOn: null }).where(eq(debts.id, debtId)).returning())[0]
+      // Contrato amortizado: a quitação desfeita volta ao saldo do cronograma.
+      if (reopened && isAmortized(reopened)) await recordScheduledBalance(reopened)
       await materializeDebtInstallments(debtId)
     } else if (payment.notes === linkedPaymentNote(transactionId)) {
       await deletePayment(payment.id)

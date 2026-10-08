@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { z, ZodError } from 'zod'
 import * as pricing from '../_shared/services/pricing.ts'
+import * as proposals from '../_shared/services/proposals.ts'
 import { requireAdmin } from '../_shared/auth.ts'
 
 /**
@@ -36,6 +37,62 @@ const simulateBody = z.object({
   extraMarginBps: z.number().int().min(0).max(100_000).optional(),
   period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
 })
+
+/* ------------------------------------------------------------------ *
+ * Orçamentos de serviço (decisions/0040, specs/service-proposals)
+ * ------------------------------------------------------------------ */
+const proposalItemSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  description: z.string().max(2000).nullable().optional(),
+  unitPriceCents: z.number().int().min(0).max(1_000_000_000),
+  quantity: z.number().positive().max(100_000),
+  sourceQuoteId: z.number().int().positive().nullable().optional(),
+})
+
+const proposalFields = {
+  title: z.string().trim().min(1).max(160),
+  clientLabel: z.string().trim().min(1).max(160),
+  status: z.enum(proposals.EDITABLE_STATUSES).optional(),
+  discountBps: z.number().int().min(0).max(10_000).optional(),
+  validityDays: z.number().int().min(1).max(365).optional(),
+  installments: z.number().int().min(1).max(60).optional(),
+  paymentTerms: z.string().max(1000).nullable().optional(),
+  deliveryTerms: z.string().max(1000).nullable().optional(),
+  notes: z.string().max(4000).nullable().optional(),
+  items: z.array(proposalItemSchema).max(100),
+}
+const proposalCreateBody = z.object(proposalFields)
+const proposalPatchBody = z.object(proposalFields).partial()
+
+const proposalListQuery = z.object({
+  q: z.string().max(160).optional(),
+  status: z.string().optional(),
+  sort: z.enum(proposals.PROPOSAL_SORTS).optional(),
+})
+
+const statusList = (raw: string | undefined) =>
+  (raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s): s is proposals.ProposalStatus => (proposals.PROPOSAL_STATUSES as readonly string[]).includes(s))
+
+const approveProposalBody = z.object({
+  accountId: z.number().int().positive(),
+  firstDueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  installments: z.number().int().min(1).max(60).optional(),
+  firstAlreadyReceived: z.boolean().optional(),
+})
+
+const issuerBody = z
+  .object({
+    businessName: z.string().max(160).nullable(),
+    document: z.string().max(30).nullable(),
+    email: z.string().max(160).nullable(),
+    phone: z.string().max(40).nullable(),
+    logoPath: z.string().max(300).nullable(),
+    defaultValidityDays: z.number().int().min(1).max(365),
+  })
+  .partial()
 
 const app = new Hono().basePath('/pricing')
 
@@ -213,6 +270,66 @@ app.post('/quotes/:id/approve', async (c) => {
     })
     .parse(await c.req.json())
   return c.json(await pricing.approveQuote(id, body))
+})
+
+
+/* ------------------------------------------------------------------ *
+ * Orçamentos de serviço (decisions/0040). Rotas fixas antes das com :id.
+ * PricingError vira 422 no onError acima.
+ * ------------------------------------------------------------------ */
+app.get('/proposals', async (c) => {
+  const query = proposalListQuery.parse(c.req.query())
+  return c.json(await proposals.listProposals({ q: query.q, statuses: statusList(query.status), sort: query.sort }))
+})
+app.get('/proposals/summary', async (c) => c.json(await proposals.proposalsSummary()))
+app.get('/proposals/item-suggestions', async (c) => {
+  const { q } = z.object({ q: z.string().max(160).optional() }).parse(c.req.query())
+  return c.json({ suggestions: await proposals.itemSuggestions(q) })
+})
+app.get('/proposals/client-suggestions', async (c) => c.json({ clients: await proposals.clientSuggestions() }))
+app.get('/proposals/quote-options', async (c) => c.json({ quotes: await proposals.quotesForPicker() }))
+app.get('/proposal-issuer', async (c) => c.json(await proposals.getIssuer()))
+app.put('/proposal-issuer', async (c) => c.json(await proposals.updateIssuer(issuerBody.parse(await c.req.json()))))
+
+app.post('/proposals', async (c) => c.json(await proposals.createProposal(proposalCreateBody.parse(await c.req.json()))))
+app.get('/proposals/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const proposal = await proposals.getProposal(id)
+  if (!proposal) return c.json({ error: 'orçamento não encontrado' }, 404)
+  return c.json(proposal)
+})
+app.patch('/proposals/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const proposal = await proposals.updateProposal(id, proposalPatchBody.parse(await c.req.json()))
+  if (!proposal) return c.json({ error: 'orçamento não encontrado' }, 404)
+  return c.json(proposal)
+})
+app.post('/proposals/:id/status', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const { status } = z.object({ status: z.enum(proposals.EDITABLE_STATUSES) }).parse(await c.req.json())
+  const proposal = await proposals.setProposalStatus(id, status)
+  if (!proposal) return c.json({ error: 'orçamento não encontrado' }, 404)
+  return c.json(proposal)
+})
+app.post('/proposals/:id/mark-sent', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const proposal = await proposals.markProposalSent(id)
+  if (!proposal) return c.json({ error: 'orçamento não encontrado' }, 404)
+  return c.json(proposal)
+})
+app.post('/proposals/:id/approve', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  return c.json(await proposals.approveProposal(id, approveProposalBody.parse(await c.req.json())))
+})
+app.post('/proposals/:id/duplicate', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const proposal = await proposals.duplicateProposal(id)
+  if (!proposal) return c.json({ error: 'orçamento não encontrado' }, 404)
+  return c.json(proposal)
+})
+app.delete('/proposals/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  return c.json(await proposals.deleteProposal(id))
 })
 
 Deno.serve(app.fetch)

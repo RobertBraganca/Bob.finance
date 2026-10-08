@@ -70,8 +70,8 @@ export function AnnualPaceChart({
           <XAxis dataKey="monthIndex" tickFormatter={fmtMonth} {...axisProps(theme)} />
           <YAxis tickFormatter={(v: number) => axisMoney(v)} width={56} {...axisProps(theme)} />
           <Tooltip content={<Tip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
-          <Bar dataKey="previousCents" name={previousLabel} fill={theme.neutral} maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius} />
-          <Bar dataKey="currentCents" name={currentLabel} fill={theme.primary} maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius} />
+          <Bar isAnimationActive={false} dataKey="previousCents" name={previousLabel} fill={theme.neutral} maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius} />
+          <Bar isAnimationActive={false} dataKey="currentCents" name={currentLabel} fill={theme.primary} maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius} />
         </BarChart>
       </ResponsiveContainer>
     </ChartFrame>

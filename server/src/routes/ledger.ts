@@ -9,6 +9,7 @@ import * as categorization from '../services/categorization'
 import * as importsService from '../services/imports'
 import * as bankConnections from '../services/bankConnections'
 import * as txnService from '../services/transactions'
+import * as budgetService from '../services/budget'
 
 const idParam = z.object({ id: z.coerce.number().int().positive() })
 
@@ -398,9 +399,13 @@ export async function ledgerRoutes(app: FastifyInstance) {
         sort: z.enum(['date_desc', 'date_asc', 'amount_desc', 'amount_asc']).optional(),
         limit: z.coerce.number().int().min(1).max(2000).optional(),
         offset: z.coerce.number().int().min(0).optional(),
+        /** id de um grupo do orçamento, ou `none` para "Sem grupo" */
+        budgetGroup: z.union([z.literal('none'), z.coerce.number().int().positive()]).optional(),
       })
       .parse(req.query)
-    return txnService.listTransactions(query)
+    const { budgetGroup, ...filter } = query
+    const scope = budgetGroup === undefined ? null : await budgetService.groupTransactionScope(budgetGroup)
+    return txnService.listTransactions(scope ? { ...filter, categoryIdIn: scope.categoryIds, accountIdIn: scope.accountIds } : filter)
   })
 
   // "Entradas automáticas": marca como conferidas as dadas, ou todas.

@@ -47,6 +47,10 @@ import {
   IconBellFilled,
   IconUserFilled,
   IconLoader2,
+  IconCopyFilled,
+  IconSendFilled,
+  IconMinus,
+  IconPhotoFilled,
   type Icon as TablerIcon,
 } from '@tabler/icons-react'
 
@@ -143,6 +147,12 @@ const ICONS: Record<string, TablerIcon> = {
   // ícone do app girava antes disto, então nenhuma ação assíncrona dava
   // qualquer sinal visual além do cursor "disabled" (revisão 27/09/2026).
   loader: IconLoader2,
+  // Orçamentos (decisions/0040): duplicar, compartilhar o PDF, diminuir a
+  // quantidade e a logo do emissor. `minus` não tem variante filled.
+  copy: IconCopyFilled,
+  send: IconSendFilled,
+  minus: IconMinus,
+  image: IconPhotoFilled,
 }
 
 export type IconName = keyof typeof ICONS

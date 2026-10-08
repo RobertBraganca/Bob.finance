@@ -181,7 +181,7 @@ export function AllocationChart({
           <YAxis type="category" dataKey="label" width={124} {...axisProps(theme)} />
           <Tooltip content={<AllocTip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
           {/* Bar, target tick and drift all drawn per row — see AllocationRow. */}
-          <Bar
+          <Bar isAnimationActive={false}
             dataKey="actualBps"
             maxBarSize={MARK.barMaxWidth}
             background={{ fill: 'transparent' }}
@@ -247,8 +247,8 @@ export function AllocationVsTargetChart({
           <XAxis dataKey="label" interval={0} angle={-20} textAnchor="end" height={56} {...axisProps(theme)} />
           <YAxis tickFormatter={(v: number) => `${Math.round(v / 100)}%`} {...axisProps(theme)} />
           <Tooltip content={<Tip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
-          <Bar dataKey="actualBps" fill={theme.series[0]} maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius} />
-          <Bar dataKey="targetBps" fill={theme.series[1]} maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius} />
+          <Bar isAnimationActive={false} dataKey="actualBps" fill={theme.series[0]} maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius} />
+          <Bar isAnimationActive={false} dataKey="targetBps" fill={theme.series[1]} maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius} />
         </BarChart>
       </ResponsiveContainer>
     </ChartFrame>
@@ -356,8 +356,8 @@ export function PortfolioEvolutionChart({
           <Tooltip content={<Tip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
           {/* The baseline the signs are read against. */}
           <ReferenceLine y={0} stroke={theme.axis} strokeWidth={1} />
-          <Bar dataKey="contributedCents" stackId="patrimonio" fill={theme.neutral} maxBarSize={MARK.barMaxWidth} />
-          <Bar
+          <Bar isAnimationActive={false} dataKey="contributedCents" stackId="patrimonio" fill={theme.neutral} maxBarSize={MARK.barMaxWidth} />
+          <Bar isAnimationActive={false}
             dataKey="gainCents"
             stackId="patrimonio"
             maxBarSize={MARK.barMaxWidth}

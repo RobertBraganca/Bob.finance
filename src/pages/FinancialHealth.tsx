@@ -21,6 +21,7 @@ import {
   useToast,
   type AssumptionBag,
   PeriodNav,
+  LoadError,
 } from '../components/ui'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
@@ -273,11 +274,7 @@ export function FinancialHealthPage() {
           <MotorFinanceiroTab period={resolvedPeriod} />
         ) : meta.isError ? (
           <Card>
-            <EmptyState
-              icon="alert"
-              title="Falha ao carregar"
-              body="Não foi possível carregar os dados da conta agora. Tente novamente em instantes."
-            />
+            <LoadError onRetry={() => meta.refetch()} retrying={meta.isFetching} />
           </Card>
         ) : !hasLedger ? (
           <Card>
@@ -286,6 +283,10 @@ export function FinancialHealthPage() {
               title="Nenhum dado importado ainda"
               body="A saúde financeira é derivada dos lançamentos, das dívidas, dos cartões e da carteira. Ela aparece assim que houver histórico para ler."
             />
+          </Card>
+        ) : !data && score.isError ? (
+          <Card>
+            <LoadError onRetry={() => score.refetch()} retrying={score.isFetching} />
           </Card>
         ) : !data ? (
           <Card>

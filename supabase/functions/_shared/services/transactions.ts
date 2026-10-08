@@ -23,6 +23,9 @@ export type TransactionFilter = {
   /** Item 4 do backlog de 07/09/2026: por padrão, oculto some da lista. `true` traz todos, ocultos inclusive. */
   includeHidden?: boolean
   sort?: 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'
+  /** Restringe a estas TAGs e contas (o "N transações" de um grupo do orçamento, decisions/0042). Lista vazia não traz nada. */
+  categoryIdIn?: number[]
+  accountIdIn?: number[]
   limit?: number
   offset?: number
 }
@@ -103,6 +106,8 @@ export async function buildWhere(filter: TransactionFilter): Promise<SQL | undef
       sql`${transactions.categoryId} IN (SELECT id FROM categories WHERE kind = ${filter.categoryKind})`,
     )
   }
+  if (filter.categoryIdIn) parts.push(filter.categoryIdIn.length ? inArray(transactions.categoryId, filter.categoryIdIn) : sql`false`)
+  if (filter.accountIdIn) parts.push(filter.accountIdIn.length ? inArray(transactions.accountId, filter.accountIdIn) : sql`false`)
   if (filter.uncategorized) parts.push(isNull(transactions.categoryId))
   if (filter.needsReview) parts.push(eq(transactions.needsReview, true))
   if (!filter.includeHidden) parts.push(eq(transactions.hidden, false))
@@ -330,6 +335,8 @@ export type ManualEntry = {
   source?: 'manual' | 'daily' | 'adjustment'
   /** the approved quote this revenue came from, if any */
   sourceQuoteId?: number | null
+  /** o orçamento de serviço aprovado de onde veio esta receita, se veio (decisions/0040) */
+  sourceProposalId?: number | null
   /** the partner platform this withdrawal came from, if any (services/partners.ts) */
   partnerPlatformId?: number | null
   /**
@@ -366,6 +373,7 @@ export async function createTransaction(entry: ManualEntry) {
         categorizedBy: entry.categoryId ? 'manual' : 'none',
         dedupeHash: hash,
         sourceQuoteId: entry.sourceQuoteId ?? null,
+        sourceProposalId: entry.sourceProposalId ?? null,
         partnerPlatformId: entry.partnerPlatformId ?? null,
         // `notes` estava no tipo `ManualEntry` desde sempre e NUNCA era
         // gravado — nenhum chamador passava o campo, então a perda nunca

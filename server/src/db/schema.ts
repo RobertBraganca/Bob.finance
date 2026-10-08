@@ -123,6 +123,11 @@ export const investmentGoalPurposeEnum = pgEnum('investment_goal_purpose', [
   'children_education',
   'travel',
 ])
+/** Sistema de amortização de um contrato (decisions/0041). */
+export const amortizationSystemEnum = pgEnum('amortization_system', ['sac', 'price'])
+export const propertyPlanStatusEnum = pgEnum('property_plan_status', ['planning', 'purchased'])
+/** De onde vem o realizado de um grupo do orçamento (decisions/0042). */
+export const budgetGroupSourceEnum = pgEnum('budget_group_source', ['categories', 'goal_contributions', 'other_contributions'])
 export const pricingDimensionEnum = pgEnum('pricing_dimension', [
   'complexity',
   'urgency',
@@ -167,12 +172,21 @@ export const categories = pgTable(
     color: text('color').notNull().default('#2a78d6'),
     icon: text('icon').notNull().default('tag'),
     dreGroup: dreGroupEnum('dre_group'),
+    /**
+     * Grupo do orçamento (decisions/0042). Nulo herda o da mãe; sem grupo
+     * na cadeia, a despesa cai em "Sem grupo". Classificação, não meta:
+     * vale também para os meses passados.
+     */
+    budgetGroupId: int('budget_group_id').references((): AnyPgColumn => budgetGroups.id, { onDelete: 'set null' }),
+    /** "Fora do orçamento" (ex.: Negócio numa conta pessoal); herda da mãe como o grupo. */
+    budgetExcluded: boolean('budget_excluded').notNull().default(false),
     sortOrder: int('sort_order').notNull().default(0),
     archived: boolean('archived').notNull().default(false),
     createdAt: text('created_at').notNull().default(now),
   },
   (t) => [
     index('categories_parent_idx').on(t.parentId),
+    index('categories_budget_group_idx').on(t.budgetGroupId),
     uniqueIndex('categories_parent_name_uq').on(t.parentId, t.name),
   ],
 )
@@ -422,6 +436,8 @@ export const transactions = pgTable(
     debtId: int('debt_id').references(() => debts.id, { onDelete: 'cascade' }),
     /** the approved quote whose revenue this row is, if any (decisions/0032 follow-up) */
     sourceQuoteId: int('source_quote_id').references(() => projectQuotes.id, { onDelete: 'set null' }),
+    /** o orçamento de serviço aprovado de onde veio esta receita, se veio (decisions/0040) */
+    sourceProposalId: int('source_proposal_id').references(() => serviceProposals.id, { onDelete: 'set null' }),
     /**
      * The partner platform whose withdrawal this row is, if any — set only
      * on the entrada that a saque generates in the destination account.
@@ -486,6 +502,7 @@ export const transactions = pgTable(
     index('txn_forecast_idx').on(t.forecastId),
     index('txn_debt_idx').on(t.debtId),
     index('txn_source_quote_idx').on(t.sourceQuoteId),
+    index('txn_source_proposal_idx').on(t.sourceProposalId),
     index('txn_partner_platform_idx').on(t.partnerPlatformId).where(sql`${t.partnerPlatformId} is not null`),
     // Guards the race in materialize()/materializeDebtInstallments(): two
     // concurrent calls both seeing "period missing" before either INSERT
@@ -535,6 +552,15 @@ export const debts = pgTable(
      * desta coluna existir de verdade, hoje corrigida por migração.
      */
     openedOn: text('opened_on'),
+    /**
+     * Contrato amortizado (decisions/0041): `sac` ou `price` fazem cada
+     * parcela sair do cronograma e o saldo ser o do cronograma depois das
+     * parcelas pagas. Nulo = parcela fixa e pagamento inteiro abatendo o
+     * saldo, o comportamento de toda dívida anterior a esta coluna.
+     */
+    amortization: amortizationSystemEnum('amortization'),
+    /** Seguros e taxas somados a cada parcela de um contrato amortizado; não entram em juros nem amortização. */
+    monthlyFeesCents: int('monthly_fees_cents').notNull().default(0),
     closedOn: text('closed_on'),
     active: boolean('active').notNull().default(true),
     createdAt: text('created_at').notNull().default(now),
@@ -630,6 +656,33 @@ export const monthlyGoals = pgTable(
   (t) => [uniqueIndex('monthly_goals_period_uq').on(t.period)],
 )
 
+/** Grupos do orçamento por % da renda (specs/budget-groups). */
+export const budgetGroups = pgTable('budget_groups', {
+  id: id(),
+  name: text('name').notNull(),
+  color: text('color').notNull(),
+  sortOrder: int('sort_order').notNull().default(0),
+  source: budgetGroupSourceEnum('source').notNull().default('categories'),
+  archived: boolean('archived').notNull().default(false),
+  createdAt: text('created_at').notNull().default(now),
+})
+
+/**
+ * Os % de cada grupo, válidos a partir de `effectivePeriod` (YYYY-MM). O mês
+ * M usa o plano de maior período ≤ M: mudar os % nunca reescreve o passado.
+ */
+export const budgetPlans = pgTable(
+  'budget_plans',
+  {
+    id: id(),
+    effectivePeriod: text('effective_period').notNull(),
+    /** `[{ groupId, targetBps }]`, soma 10000 */
+    allocations: jsonb('allocations').notNull(),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('budget_plans_period_uq').on(t.effectivePeriod)],
+)
+
 export const categoryCaps = pgTable(
   'category_caps',
   {
@@ -659,10 +712,19 @@ export const assets = pgTable(
     accountId: int('account_id').references(() => accounts.id),
     /** counts toward the emergency-reserve progress (e.g. a CDB/Tesouro Selic held as reserve) */
     countsTowardReserve: boolean('counts_toward_reserve').notNull().default(false),
+    /**
+     * Ativo separado para uma meta (decisions/0041). Exclusivo com
+     * `countsTowardReserve`; meta sem ativo ligado mede a carteira inteira.
+     */
+    goalId: int('goal_id').references((): AnyPgColumn => investmentGoals.id, { onDelete: 'set null' }),
     archived: boolean('archived').notNull().default(false),
     createdAt: text('created_at').notNull().default(now),
   },
-  (t) => [index('assets_account_idx').on(t.accountId), uniqueIndex('assets_name_uq').on(t.name)],
+  (t) => [
+    index('assets_account_idx').on(t.accountId),
+    uniqueIndex('assets_name_uq').on(t.name),
+    index('assets_goal_idx').on(t.goalId),
+  ],
 )
 
 /**
@@ -891,6 +953,42 @@ export const investmentGoals = pgTable('investment_goals', {
   createdAt: text('created_at').notNull().default(now),
 })
 
+/**
+ * Plano de compra de imóvel: premissas de uma meta `buy_property`
+ * (specs/property-plan). As contas moram em `shared/propertyPlan.ts`.
+ */
+export const propertyPlans = pgTable(
+  'property_plans',
+  {
+    id: id(),
+    goalId: int('goal_id')
+      .notNull()
+      .references(() => investmentGoals.id, { onDelete: 'cascade' }),
+    priceCents: int('price_cents').notNull(),
+    appreciationBps: int('appreciation_bps').notNull().default(400),
+    downPaymentBps: int('down_payment_bps').notNull().default(2000),
+    /** `[{ label, kind: 'pct' | 'fixed', value }]`: bps quando pct, centavos quando fixed. */
+    costs: jsonb('costs').notNull(),
+    otherResourcesCents: int('other_resources_cents').notNull().default(0),
+    financingRateBps: int('financing_rate_bps').notNull().default(1100),
+    termMonths: int('term_months').notNull().default(360),
+    system: amortizationSystemEnum('system').notNull().default('sac'),
+    monthlyFeesCents: int('monthly_fees_cents').notNull().default(0),
+    /** Renda informada; nulo usa a renda típica do app. */
+    incomeOverrideCents: int('income_override_cents'),
+    incomeLimitBps: int('income_limit_bps').notNull().default(3000),
+    /** Gasto que some depois da compra (ex.: aluguel), descontado do custo de vida da reserva. */
+    expenseReliefCents: int('expense_relief_cents').notNull().default(0),
+    status: propertyPlanStatusEnum('status').notNull().default('planning'),
+    debtId: int('debt_id').references(() => debts.id, { onDelete: 'set null' }),
+    assetId: int('asset_id').references(() => assets.id, { onDelete: 'set null' }),
+    purchasedOn: text('purchased_on'),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('property_plans_goal_uq').on(t.goalId)],
+)
+
 export const targetAllocations = pgTable(
   'target_allocations',
   {
@@ -1089,6 +1187,81 @@ export const projectQuotes = pgTable(
     index('project_quotes_client_size_idx').on(t.clientSizeOptionId),
     index('project_quotes_usage_rights_idx').on(t.usageRightsOptionId),
   ],
+)
+
+/* ------------------------------------------------------------------ *
+ * Orçamentos de serviço (decisions/0040, specs/service-proposals): o
+ * documento que vai ao cliente, separado da cotação, que continua sendo a
+ * calculadora. Totais nunca guardados: `shared/proposals.ts` deriva dos
+ * itens a cada leitura; só a aprovação congela o valor
+ * (`approvedAmountCents`), que é o que foi para as receitas geradas.
+ * ------------------------------------------------------------------ */
+export const proposalStatusEnum = pgEnum('proposal_status', ['draft', 'sent', 'approved', 'rejected'])
+
+export const serviceProposals = pgTable(
+  'service_proposals',
+  {
+    id: id(),
+    /** sequencial próprio, exibido como #0001 (default vem de `service_proposal_number_seq`) */
+    number: int('number').notNull().default(sql`nextval('service_proposal_number_seq')`),
+    title: text('title').notNull(),
+    /** texto livre, como em `project_quotes` (decisions/0012) */
+    clientLabel: text('client_label').notNull(),
+    status: proposalStatusEnum('status').notNull().default('draft'),
+    /** desconto sobre o subtotal, 10000 = 100% */
+    discountBps: int('discount_bps').notNull().default(0),
+    validityDays: int('validity_days').notNull().default(15),
+    installments: int('installments').notNull().default(1),
+    paymentTerms: text('payment_terms'),
+    deliveryTerms: text('delivery_terms'),
+    notes: text('notes'),
+    /** primeira vez que o PDF foi compartilhado */
+    sentAt: text('sent_at'),
+    /** total congelado na aprovação (o que foi para as receitas); nulo fora dela */
+    approvedAmountCents: int('approved_amount_cents'),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('service_proposals_number_uq').on(t.number), index('service_proposals_status_idx').on(t.status)],
+)
+
+export const serviceProposalItems = pgTable(
+  'service_proposal_items',
+  {
+    id: id(),
+    proposalId: int('proposal_id')
+      .notNull()
+      .references(() => serviceProposals.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    description: text('description'),
+    unitPriceCents: int('unit_price_cents').notNull(),
+    /** aceita decimais (12,5 horas) */
+    quantity: doublePrecision('quantity').notNull().default(1),
+    sortOrder: int('sort_order').notNull().default(0),
+    /** cotação de onde o preço veio, se veio; apagar a cotação não muda o item */
+    sourceQuoteId: int('source_quote_id').references(() => projectQuotes.id, { onDelete: 'set null' }),
+  },
+  (t) => [
+    index('service_proposal_items_proposal_idx').on(t.proposalId),
+    index('service_proposal_items_quote_idx').on(t.sourceQuoteId),
+  ],
+)
+
+/** Quem emite o orçamento: o cabeçalho do PDF. Uma linha só. */
+export const proposalIssuerSettings = pgTable(
+  'proposal_issuer_settings',
+  {
+    id: singletonId(),
+    businessName: text('business_name'),
+    /** CPF ou CNPJ, só dígitos */
+    document: text('document'),
+    email: text('email'),
+    phone: text('phone'),
+    /** caminho no bucket privado `proposal-assets` do Storage */
+    logoPath: text('logo_path'),
+    defaultValidityDays: int('default_validity_days').notNull().default(15),
+  },
+  () => [check('proposal_issuer_settings_singleton', sql`id = 1`)],
 )
 
 /* ------------------------------------------------------------------ *

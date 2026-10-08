@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from './supabaseClient'
 import { setAccessToken } from './authToken'
@@ -38,14 +38,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, next) => {
-      setSession(next)
+      // Mesmo token = mesma sessão: não re-renderiza o app inteiro a cada evento do supabase-js.
+      setSession((current) => (current?.access_token === next?.access_token ? current : next))
       setAccessToken(next?.access_token ?? null)
     })
 
     return () => subscription.subscription.unsubscribe()
   }, [])
 
-  const value: AuthState = {
+  const value = useMemo<AuthState>(() => ({
     session,
     user: session?.user ?? null,
     loading,
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signOut: async () => {
       await supabase.auth.signOut()
     },
-  }
+  }), [session, loading])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

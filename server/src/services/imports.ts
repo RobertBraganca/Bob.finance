@@ -679,7 +679,7 @@ export async function revertBatch(batchId: number) {
     .where(
       and(
         eq(transactions.importBatchId, batchId),
-        sql`(${transactions.forecastId} is not null or ${transactions.debtId} is not null)`,
+        sql`(${transactions.forecastId} is not null or ${transactions.debtId} is not null or ${transactions.sourceProposalId} is not null)`,
       ),
     )) {
     await unlinkFromSchedule(linked.id)
