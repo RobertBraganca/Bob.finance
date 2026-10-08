@@ -4,6 +4,7 @@ import { addMonths, periodBounds, todayIso } from '../core/dates'
 import * as analytics from '../services/analytics'
 import * as benchmarksService from '../services/benchmarks'
 import * as budgetService from '../services/budget'
+import * as companyService from '../services/company'
 import * as cashFlowService from '../services/cashFlow'
 import * as creditCardsService from '../services/creditCards'
 import * as criteriaService from '../services/criteria'
@@ -916,6 +917,26 @@ export async function insightsRoutes(app: FastifyInstance) {
     return investments.deleteGoal(id)
   })
 
+
+  /* Minha empresa (MEI), specs/company-mei. */
+  app.get('/company/overview', async (req) => {
+    const { period } = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query)
+    return companyService.companyOverview(period)
+  })
+
+  app.get('/company/settings', async () => companyService.companySettings())
+
+  app.put('/company/settings', async (req) => {
+    const body = z
+      .object({
+        dasMonthlyCents: z.number().int().nonnegative().nullable(),
+        pjCushionMonths: z.number().min(0).max(24),
+        meiAnnualLimitCents: z.number().int().positive(),
+        dasCategoryIds: z.array(z.number().int().positive()).max(50).nullable(),
+      })
+      .parse(req.body)
+    return companyService.saveCompanySettings(body)
+  })
 
   /* Orçamento por grupos (specs/budget-groups). */
   app.get('/budget/settings', async () => budgetService.budgetSettings())

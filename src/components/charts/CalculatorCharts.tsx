@@ -1,4 +1,4 @@
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { axisMoney, money } from '../../lib/format'
 import { MARK, axisProps, gridProps, themeFor, type Surface } from '../../lib/chartTheme'
 import { useEffectiveSurface } from '../../lib/theme'
@@ -127,6 +127,61 @@ export function BalanceChart({ points, surface = 'paper', height = 280 }: { poin
             isAnimationActive={false}
           />
         </AreaChart>
+      </ResponsiveContainer>
+    </ChartFrame>
+  )
+}
+
+/**
+ * Comparar alocações: uma linha por cenário. Mês a mês até 3 anos, depois
+ * um ponto por ano. Sem cor de "melhor": cada cenário tem a sua cor fixa.
+ */
+export function ScenarioChart({
+  months,
+  scenarios,
+  surface = 'paper',
+  height = 280,
+}: {
+  months: number
+  scenarios: Array<{ name: string; color: string; series: number[] }>
+  surface?: Surface
+  height?: number
+}) {
+  const theme = themeFor(useEffectiveSurface(surface))
+  const steps: number[] = []
+  for (let m = 0; m <= months; m++) if (months <= 36 || m % 12 === 0 || m === months) steps.push(m)
+  const rows = steps.map((m) => ({ month: m, ...Object.fromEntries(scenarios.map((s, i) => [`s${i}`, s.series[m] ?? 0])) }))
+  const label = stepLabel(rows)
+  const Tip = makeTooltip<Record<string, number>>((p) => ({
+    title: label(p.month ?? 0),
+    rows: scenarios.map((s, i) => ({ label: s.name, value: money(p[`s${i}`] ?? 0), color: s.color })),
+  }))
+  return (
+    <ChartFrame
+      legend={scenarios.map((s) => ({ label: s.name, color: s.color, shape: 'line' as const }))}
+      isEmpty={rows.length < 2}
+      emptyTitle="Escolha um prazo"
+      emptyBody="Com um prazo maior que zero, a evolução aparece aqui."
+      table={{
+        caption: 'Valor total por cenário',
+        rows,
+        columns: [
+          { header: 'Período', value: (row) => label(row.month) },
+          ...scenarios.map((s, i) => ({ header: s.name, value: (row: Record<string, number>) => money(row[`s${i}`] ?? 0), align: 'right' as const })),
+        ],
+      }}
+      note="Taxa constante, sem oscilação. Com isso, o cenário com maior taxa sempre termina maior; o risco de queda de cada classe não está nesta conta."
+    >
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
+        <LineChart data={rows} margin={{ top: 16, right: 12, bottom: 4, left: 0 }}>
+          <CartesianGrid {...gridProps(theme)} />
+          <XAxis dataKey="month" tickFormatter={label} minTickGap={28} {...axisProps(theme)} />
+          <YAxis tickFormatter={(v: number) => axisMoney(v)} width={52} {...axisProps(theme)} />
+          <Tooltip content={<Tip />} cursor={{ stroke: theme.axis, strokeWidth: 1 }} />
+          {scenarios.map((s, i) => (
+            <Line key={i} type="monotone" dataKey={`s${i}`} stroke={s.color} strokeWidth={MARK.lineWidth} dot={false} isAnimationActive={false} />
+          ))}
+        </LineChart>
       </ResponsiveContainer>
     </ChartFrame>
   )

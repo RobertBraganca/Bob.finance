@@ -1447,3 +1447,22 @@ da crítica 23/40). Aplicado o que não pede decisão:
 Pendentes de decisão: receita dupla cotação × orçamento, modelo único de
 período, caixa "A conferir", um sistema de modal só (e folha no celular),
 enxugar telas repetidas, textos técnicos e menu.
+
+
+## 08/10/2026 — Endividamento e DRE revisados; "Minha empresa" (MEI)
+
+- Revisão beta + impeccable (relatório local em docs/beta-reviews, fora do
+  git). Ajustes rápidos: aviso de taxa x contrato em Endividamento
+  (`impliedMonthlyRate`), data livre de dívidas e prazo por dívida, nota do
+  gráfico pela estratégia, "como calculamos" na renda comprometida;
+  retiradas na DRE formal.
+- "Minha empresa" (decisions/0043) substitui a DRE em `/dre`: retirada
+  possível, cascata do MEI, teto do MEI, cobertura do custo de vida, 12
+  meses, e a DRE antiga recolhida (`DreDetails`, uma coluna por conta
+  pessoal). Repasse PJ → pessoal unificado em `services/withdrawals.ts`.
+- Dado observado: só um DAS na conta PJ em 2026 (jan, R$ 81,90); a conta PJ
+  tem gastos pessoais. Usuário é MEI; o fixo do estúdio (R$ 4.000) cai na PJ
+  e conta como faturamento.
+- Próximo: spec do novo Endividamento (cartão junto, calendário de saída,
+  custo em reais, data livre coerente, renegociação). Publicar `insights` e
+  `ledger`.

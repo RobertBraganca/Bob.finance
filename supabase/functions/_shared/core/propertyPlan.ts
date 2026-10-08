@@ -358,3 +358,23 @@ export function thinSeries<T extends { month: number }>(points: T[]): T[] {
   if (!last || last.month <= 36) return points
   return points.filter((pt) => pt.month % 12 === 0 || pt.month === last.month)
 }
+
+/**
+ * Taxa mensal que fecha um contrato de parcela fixa: a `i` tal que
+ * `saldo = parcela × (1 − (1+i)^−n) / i`. Nula quando as parcelas restantes
+ * nem cobrem o saldo (taxa negativa) ou faltam dados. Usada para avisar
+ * quando a taxa cadastrada não bate com o contrato (revisão de 08/10/2026).
+ */
+export function impliedMonthlyRate(balanceCents: number, paymentCents: number, remaining: number): number | null {
+  if (balanceCents <= 0 || paymentCents <= 0 || remaining <= 0) return null
+  if (paymentCents * remaining < balanceCents) return null
+  const pv = (i: number) => (i === 0 ? paymentCents * remaining : (paymentCents * (1 - Math.pow(1 + i, -remaining))) / i)
+  let lo = 0
+  let hi = 1
+  for (let k = 0; k < 80; k++) {
+    const mid = (lo + hi) / 2
+    if (pv(mid) > balanceCents) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}

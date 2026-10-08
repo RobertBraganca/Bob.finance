@@ -19,7 +19,7 @@ import { NotFoundPage, RouteErrorBoundary, clearChunkReloadFlag } from './compon
  * `.then` extrai só o export nomeado que `React.lazy` precisa (`default`).
  */
 const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })))
-const DrePage = lazy(() => import('./pages/Dre').then((m) => ({ default: m.DrePage })))
+const CompanyPage = lazy(() => import('./pages/company/CompanyPage').then((m) => ({ default: m.CompanyPage })))
 const ImportPage = lazy(() => import('./pages/Import').then((m) => ({ default: m.ImportPage })))
 const TransactionsPage = lazy(() => import('./pages/Transactions').then((m) => ({ default: m.TransactionsPage })))
 const CategoriesPage = lazy(() => import('./pages/Categories').then((m) => ({ default: m.CategoriesPage })))
@@ -120,7 +120,7 @@ const PAGE_TITLE_BY_PATH: Record<string, string> = {
   '/patrimonio': 'Patrimônio',
   '/diario': 'Diário',
   '/lancamentos': 'Lançamentos',
-  '/dre': 'DRE',
+  '/dre': 'Minha empresa',
   '/saude': 'Saúde financeira',
   '/precificacao': 'Precificação',
   '/parceiros': 'Receita de parceiros',
@@ -189,7 +189,7 @@ function AuthedApp() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/diario" element={<DailyPage />} />
               <Route path="/lancamentos" element={<TransactionsPage />} />
-              <Route path="/dre" element={<DrePage />} />
+              <Route path="/dre" element={<CompanyPage />} />
               <Route path="/metas" element={<GoalsPage />} />
               <Route path="/metas/ajustar" element={<BudgetSettingsPage />} />
               <Route path="/dividas" element={<DebtPage />} />

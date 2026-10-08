@@ -16,16 +16,18 @@ import {
 } from '@shared/calculators'
 import { Button, Card, EmptyState, KpiTile, Segmented } from '../../components/ui'
 import { PropertyCalculator } from '../property/PropertyCalculator'
+import { AllocationCompare, type AllocationClass, type AllocationSliceLite } from './AllocationCompare'
 import { InputCard, MoneyField, PeriodField, RateField, annualBps, cents, decimal, dueDate } from './fields'
 import { GoalModal, type Goal } from '../../components/ui/GoalModal'
 import { BalanceChart, GrowthChart } from '../../components/charts/CalculatorCharts'
 
-type CalculatorKey = 'juros' | 'renda' | 'milhao' | 'imovel'
+type CalculatorKey = 'juros' | 'renda' | 'milhao' | 'imovel' | 'alocacoes'
 const CALCULATORS: Array<{ value: CalculatorKey; label: string }> = [
   { value: 'juros', label: 'Juros compostos' },
   { value: 'renda', label: 'Renda' },
   { value: 'milhao', label: 'Primeiro milhão' },
   { value: 'imovel', label: 'Imóvel' },
+  { value: 'alocacoes', label: 'Comparar alocações' },
 ]
 
 /** O que passa de uma calculadora para outra ("Simular retiradas desse montante"): o montante e a mesma taxa. */
@@ -34,6 +36,9 @@ type Seed = { initialCents: number; rate: string; rateUnit: RateUnit }
 type Props = {
   portfolioValueCents: number
   goalPurposes: Array<{ value: string; label: string }>
+  /** classes que recebem alocação e a divisão atual/alvo, para "Comparar alocações" */
+  allocatableClasses: AllocationClass[]
+  allocation: AllocationSliceLite[]
 }
 
 /**
@@ -42,7 +47,7 @@ type Props = {
  * nunca diz o que fazer. As contas moram em `shared/calculators.ts`. A
  * calculadora escolhida fica no endereço (`&calc=renda`).
  */
-export function CalculatorsTab({ portfolioValueCents, goalPurposes }: Props) {
+export function CalculatorsTab({ portfolioValueCents, goalPurposes, allocatableClasses, allocation }: Props) {
   const [params, setParams] = useSearchParams()
   const calc = (CALCULATORS.find((c) => c.value === params.get('calc'))?.value ?? 'juros') as CalculatorKey
   const [seed, setSeed] = useState<Seed | null>(null)
@@ -76,6 +81,7 @@ export function CalculatorsTab({ portfolioValueCents, goalPurposes }: Props) {
         <IncomeCalculator key={`renda-${handoff}`} seed={seed} {...shared} onContribute={(next) => open('juros', next)} />
       )}
       {calc === 'milhao' && <MillionCalculator key="milhao" {...shared} />}
+      {calc === 'alocacoes' && <AllocationCompare classes={allocatableClasses} allocation={allocation} portfolioValueCents={portfolioValueCents} />}
       {calc === 'imovel' && (
         <PropertyCalculator
           portfolioValueCents={portfolioValueCents}

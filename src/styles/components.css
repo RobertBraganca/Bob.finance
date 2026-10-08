@@ -3002,3 +3002,100 @@ button {
     gap: var(--sp-1);
   }
 }
+
+/* ---- Minha empresa (specs/company-mei) ---------------------------- */
+.company-foot {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--on-slab-2, var(--ink-2));
+  text-wrap: pretty;
+}
+.company-lines {
+  margin: var(--sp-3) 0 0;
+  display: grid;
+}
+.company-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--text-sm);
+}
+.company-line dt {
+  color: var(--ink-2);
+  min-width: 0;
+}
+.company-line dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink-1);
+}
+.company-line--total {
+  font-weight: 700;
+}
+.company-line--total dt {
+  color: var(--ink-1);
+}
+.company-lines--slab .company-line {
+  border-bottom-color: var(--slab-overlay-strong, rgba(255, 255, 255, 0.12));
+}
+.company-lines--slab .company-line dt {
+  color: var(--on-slab-2);
+}
+.company-lines--slab .company-line dd,
+.company-lines--slab .company-line--total dt {
+  color: var(--on-slab-1);
+}
+.company-details {
+  display: grid;
+  gap: var(--sp-4);
+}
+.company-details__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-1);
+  cursor: pointer;
+  text-align: left;
+}
+
+/* ---- Comparar alocações ------------------------------------------- */
+.alloc-scenarios {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+@media (min-width: 760px) {
+  .alloc-scenarios {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+}
+.alloc-rates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-1);
+}
+.alloc-rates li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px;
+  gap: var(--sp-2);
+  align-items: center;
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+.alloc-rates .input {
+  text-align: right;
+}
