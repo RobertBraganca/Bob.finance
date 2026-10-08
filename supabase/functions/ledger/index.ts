@@ -12,6 +12,7 @@ import * as categorization from '../_shared/services/categorization.ts'
 import * as importsService from '../_shared/services/imports.ts'
 import * as bankConnections from '../_shared/services/bankConnections.ts'
 import * as txnService from '../_shared/services/transactions.ts'
+import * as budgetService from '../_shared/services/budget.ts'
 import { friendlyErrorMessage } from '../_shared/core/errors.ts'
 
 /**
@@ -431,9 +432,13 @@ app.get('/transactions', async (c) => {
       sort: z.enum(['date_desc', 'date_asc', 'amount_desc', 'amount_asc']).optional(),
       limit: z.coerce.number().int().min(1).max(2000).optional(),
       offset: z.coerce.number().int().min(0).optional(),
+      /** id de um grupo do orçamento, ou `none` para "Sem grupo" */
+      budgetGroup: z.union([z.literal('none'), z.coerce.number().int().positive()]).optional(),
     })
     .parse(c.req.query())
-  return c.json(await txnService.listTransactions(query))
+  const { budgetGroup, ...filter } = query
+  const scope = budgetGroup === undefined ? null : await budgetService.groupTransactionScope(budgetGroup)
+  return c.json(await txnService.listTransactions(scope ? { ...filter, categoryIdIn: scope.categoryIds, accountIdIn: scope.accountIds } : filter))
 })
 
 // "Entradas automáticas": marca como conferidas as dadas, ou todas.

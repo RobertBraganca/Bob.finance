@@ -60,7 +60,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/saude', label: 'Saúde financeira', icon: 'sparkle' },
       { to: '/precificacao', label: 'Precificação', icon: 'calculator', freelancerOnly: true },
       { to: '/parceiros', label: 'Receita de parceiros', icon: 'banknote', freelancerOnly: true },
-      { to: '/metas', label: 'Metas do mês', icon: 'target' },
+      { to: '/metas', label: 'Orçamento', icon: 'target' },
       { to: '/dividas', label: 'Endividamento', icon: 'landmark' },
       { to: '/investimentos', label: 'Investimentos', icon: 'trending' },
     ],

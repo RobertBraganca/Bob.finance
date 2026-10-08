@@ -7,6 +7,7 @@ import { addMonths, periodBounds, todayIso } from '../_shared/core/dates.ts'
 import { friendlyErrorMessage } from '../_shared/core/errors.ts'
 import * as analytics from '../_shared/services/analytics.ts'
 import * as benchmarksService from '../_shared/services/benchmarks.ts'
+import * as budgetService from '../_shared/services/budget.ts'
 import * as cashFlowService from '../_shared/services/cashFlow.ts'
 import * as creditCardsService from '../_shared/services/creditCards.ts'
 import * as criteriaService from '../_shared/services/criteria.ts'
@@ -20,6 +21,7 @@ import * as investments from '../_shared/services/investments.ts'
 import * as monthlyClosingService from '../_shared/services/monthlyClosing.ts'
 import * as partners from '../_shared/services/partners.ts'
 import * as profileService from '../_shared/services/profile.ts'
+import * as propertyPlans from '../_shared/services/propertyPlans.ts'
 import * as quotesService from '../_shared/services/quotes.ts'
 import * as simulatorService from '../_shared/services/simulator.ts'
 import * as subscriptionsService from '../_shared/services/subscriptions.ts'
@@ -64,6 +66,49 @@ async function resolvePeriod(period?: string): Promise<string> {
   return bounds.max?.slice(0, 7) ?? todayIso().slice(0, 7)
 }
 
+
+/* Plano de compra de imóvel (specs/property-plan). Faixas de `core/propertyPlan#PLAN_LIMITS`. */
+const costItemSchema = z.object({
+  label: z.string().trim().min(1).max(60),
+  kind: z.enum(['pct', 'fixed']),
+  value: z.number().int().nonnegative(),
+})
+const planFieldsSchema = z.object({
+  priceCents: z.number().int().positive(),
+  appreciationBps: z.number().int().min(-2_000).max(3_000),
+  downPaymentBps: z.number().int().min(500).max(10_000),
+  costs: z.array(costItemSchema).max(20),
+  otherResourcesCents: z.number().int().nonnegative(),
+  financingRateBps: z.number().int().min(0).max(10_000),
+  termMonths: z.number().int().min(12).max(420),
+  system: z.enum(['sac', 'price']),
+  monthlyFeesCents: z.number().int().nonnegative(),
+  incomeOverrideCents: z.number().int().positive().nullable(),
+  incomeLimitBps: z.number().int().min(500).max(10_000),
+  expenseReliefCents: z.number().int().nonnegative(),
+})
+const planGoalSchema = z.object({
+  name: z.string().trim().min(1),
+  monthlyContributionCents: z.number().int().nonnegative(),
+  expectedReturnBps: z.number().int().min(-10_000).max(100_000),
+})
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+const purchaseSchema = z.object({
+  purchasePriceCents: z.number().int().positive(),
+  purchasedOn: isoDate,
+  financedCents: z.number().int().nonnegative(),
+  rateBps: z.number().int().min(0).max(10_000),
+  termMonths: z.number().int().min(1).max(420),
+  system: z.enum(['sac', 'price']),
+  monthlyFeesCents: z.number().int().nonnegative().default(0),
+  firstDueOn: isoDate,
+  accountId: z.number().int().positive(),
+  institution: z.string().nullable().optional(),
+  registerAsset: z.boolean().default(true),
+  assetName: z.string().nullable().optional(),
+})
+const goalIdParam = z.object({ goalId: z.coerce.number().int().positive() })
+
 const app = new Hono().basePath('/insights')
 app.use('*', cors({ origin: '*' }))
 app.use('*', requireAdmin)
@@ -74,6 +119,9 @@ app.onError((error, c) => {
   // entrada, não falha de servidor — mesmo 422 que a function pricing dá
   // para PricingError.
   if (error instanceof partners.PartnerError) return c.json({ error: error.message }, 422)
+  // Regra de Investimentos (ativo da reserva numa meta, compra já registrada): 409/404/400.
+  if (error instanceof budgetService.BudgetError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
+  if (error instanceof investments.InvestmentRuleError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
   console.error(error)
   return c.json({ error: friendlyErrorMessage(error) }, 500)
 })
@@ -296,6 +344,9 @@ app.post('/debts', async (c) => {
       dueDay: z.number().int().min(1).max(31).default(10),
       installmentCount: z.number().int().positive().nullable().optional(),
       accountId: z.number().int().positive().nullable().optional(),
+      // Contrato amortizado (decisions/0041): só vale com installmentCount.
+      amortization: z.enum(['sac', 'price']).nullable().optional(),
+      monthlyFeesCents: z.number().int().nonnegative().default(0),
     })
     .parse(await c.req.json())
   const debt = await debtService.createDebt(body)
@@ -317,6 +368,8 @@ app.patch('/debts/:id', async (c) => {
       dueDay: z.number().int().min(1).max(31).optional(),
       installmentCount: z.number().int().positive().nullable().optional(),
       accountId: z.number().int().positive().nullable().optional(),
+      amortization: z.enum(['sac', 'price']).nullable().optional(),
+      monthlyFeesCents: z.number().int().nonnegative().optional(),
       active: z.boolean().optional(),
     })
     .parse(await c.req.json())
@@ -780,6 +833,82 @@ app.patch('/investments/goals/:id', async (c) => {
 app.delete('/investments/goals/:id', async (c) => {
   const { id } = idParam.parse(c.req.param())
   return c.json(await investments.deleteGoal(id))
+})
+
+
+/* Orçamento por grupos (specs/budget-groups). */
+app.get('/budget/settings', async (c) => c.json(await budgetService.budgetSettings()))
+
+app.get('/budget/:period', async (c) => {
+  const { period } = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) }).parse(c.req.param())
+  return c.json(await budgetService.budgetFor(period))
+})
+
+app.post('/budget/groups', async (c) => {
+  const body = z.object({ name: z.string().trim().min(1).max(40), color: z.string().regex(/^#[0-9a-fA-F]{6}$/) }).parse(await c.req.json())
+  return c.json(await budgetService.createGroup(body))
+})
+
+app.patch('/budget/groups/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const body = z
+    .object({
+      name: z.string().trim().min(1).max(40).optional(),
+      color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      sortOrder: z.number().int().min(0).max(1000).optional(),
+      archived: z.boolean().optional(),
+    })
+    .parse(await c.req.json())
+  return c.json(await budgetService.updateGroup(id, body))
+})
+
+app.put('/budget/plan', async (c) => {
+  const body = z
+    .object({ allocations: z.array(z.object({ groupId: z.number().int().positive(), targetBps: z.number().int().min(0).max(10_000) })).max(30) })
+    .parse(await c.req.json())
+  return c.json(await budgetService.savePlan(body.allocations))
+})
+
+app.put('/budget/categories', async (c) => {
+  const body = z
+    .object({
+      items: z
+        .array(z.object({ categoryId: z.number().int().positive(), budgetGroupId: z.number().int().positive().nullable(), budgetExcluded: z.boolean() }))
+        .max(500),
+    })
+    .parse(await c.req.json())
+  return c.json(await budgetService.saveCategoryGroups(body.items))
+})
+
+app.get('/investments/property-plans/defaults', async (c) => c.json(await propertyPlans.planDefaults()))
+
+app.get('/investments/property-plans/:goalId', async (c) => {
+  const { goalId } = goalIdParam.parse(c.req.param())
+  return c.json(await propertyPlans.getPlan(goalId))
+})
+
+app.post('/investments/property-plans', async (c) => {
+  const body = z
+    .object({ goal: planGoalSchema, plan: planFieldsSchema, assetIds: z.array(z.number().int().positive()).optional() })
+    .parse(await c.req.json())
+  return c.json(await propertyPlans.createPlan(body))
+})
+
+app.patch('/investments/property-plans/:goalId', async (c) => {
+  const { goalId } = goalIdParam.parse(c.req.param())
+  const body = z.object({ goal: planGoalSchema.partial().optional(), plan: planFieldsSchema.partial().optional() }).parse(await c.req.json())
+  return c.json(await propertyPlans.updatePlan(goalId, body))
+})
+
+app.put('/investments/property-plans/:goalId/assets', async (c) => {
+  const { goalId } = goalIdParam.parse(c.req.param())
+  const { assetIds } = z.object({ assetIds: z.array(z.number().int().positive()) }).parse(await c.req.json())
+  return c.json(await propertyPlans.setPlanAssets(goalId, assetIds))
+})
+
+app.post('/investments/property-plans/:goalId/purchase', async (c) => {
+  const { goalId } = goalIdParam.parse(c.req.param())
+  return c.json(await propertyPlans.purchase(goalId, purchaseSchema.parse(await c.req.json())))
 })
 
 app.get('/investments/goals/:id/projection', async (c) => {

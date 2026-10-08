@@ -25,6 +25,8 @@ export type Goal = {
   monthlyContributionCents: number
   expectedReturnBps: number
   purpose: string | null
+  /** meta de imóvel com plano (decisions/0041): a aba Metas mostra o plano no lugar da projeção genérica */
+  propertyPlan?: { status: 'planning' | 'purchased' } | null
 }
 
 export type Projection = {
@@ -45,6 +47,7 @@ export function GoalModal({
   goal,
   goalPurposes,
   defaultPurpose,
+  draft,
   onClose,
 }: {
   goal: Goal | null
@@ -58,16 +61,22 @@ export function GoalModal({
    * continua idêntico.
    */
   defaultPurpose?: string
+  /**
+   * Meta nova já preenchida (ex.: "Criar meta com este plano" das
+   * Calculadoras). Só vale quando `goal` é nulo; nada é gravado até Salvar.
+   */
+  draft?: Partial<Omit<Goal, 'id'>>
   onClose: () => void
 }) {
   const toast = useToast()
   const queryClient = useQueryClient()
-  const [name, setName] = useState(goal?.name ?? '')
-  const [target, setTarget] = useState(centsToInput(goal?.targetValueCents ?? null))
-  const [targetDate, setTargetDate] = useState(goal?.targetDate ?? '')
-  const [monthly, setMonthly] = useState(centsToInput(goal?.monthlyContributionCents ?? null))
-  const [expected, setExpected] = useState(bpsToInput(goal?.expectedReturnBps ?? 800))
-  const [purpose, setPurpose] = useState<string | null>(goal?.purpose ?? defaultPurpose ?? null)
+  const initial = goal ?? draft ?? null
+  const [name, setName] = useState(initial?.name ?? '')
+  const [target, setTarget] = useState(centsToInput(initial?.targetValueCents ?? null))
+  const [targetDate, setTargetDate] = useState(initial?.targetDate ?? '')
+  const [monthly, setMonthly] = useState(centsToInput(initial?.monthlyContributionCents ?? null))
+  const [expected, setExpected] = useState(bpsToInput(initial?.expectedReturnBps ?? 800))
+  const [purpose, setPurpose] = useState<string | null>(initial?.purpose ?? defaultPurpose ?? null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const nameFieldId = useId()

@@ -108,8 +108,8 @@ export function ProventosEvolutionChart({
           <XAxis dataKey="period" tickFormatter={(v: string) => formatBucket(v, granularity)} {...axisProps(theme)} />
           <YAxis tickFormatter={(v: number) => axisMoney(v)} width={46} {...axisProps(theme)} />
           <Tooltip content={<Tip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
-          <Bar dataKey="paidCents" name="Recebidos" fill={theme.income} radius={MARK.barRadius} />
-          <Bar dataKey="pendingCents" name="A receber" fill={pendingColor} radius={MARK.barRadius} />
+          <Bar isAnimationActive={false} dataKey="paidCents" name="Recebidos" fill={theme.income} radius={MARK.barRadius} />
+          <Bar isAnimationActive={false} dataKey="pendingCents" name="A receber" fill={pendingColor} radius={MARK.barRadius} />
         </BarChart>
       </ResponsiveContainer>
     </ChartFrame>

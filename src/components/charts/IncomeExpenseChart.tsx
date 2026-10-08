@@ -84,14 +84,14 @@ export function IncomeExpenseChart({
           <XAxis dataKey="period" tickFormatter={fmtAxis} {...axisProps(theme)} />
           <YAxis tickFormatter={(v: number) => axisMoney(v)} width={46} {...axisProps(theme)} />
           <Tooltip content={<Tip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
-          <Bar
+          <Bar isAnimationActive={false}
             dataKey="incomeCents"
             name="Entradas"
             fill={theme.income}
             maxBarSize={MARK.barMaxWidth}
             radius={MARK.barRadius}
           />
-          <Bar
+          <Bar isAnimationActive={false}
             dataKey="expenseCents"
             name="Saídas"
             fill={theme.expense}

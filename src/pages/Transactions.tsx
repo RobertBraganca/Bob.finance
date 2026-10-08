@@ -170,6 +170,14 @@ export function TransactionsPage() {
   const [tab, setTab] = useState<'ledger' | 'installments'>('ledger')
 
   const [search, setSearch] = useState('')
+  // A busca vai ao servidor 250ms depois da última tecla, não a cada letra
+  // (revisão de 07/10/2026; mesmo atraso da busca de Orçamentos). O campo
+  // continua mostrando o texto na hora.
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedSearch(search.trim()), 250)
+    return () => window.clearTimeout(handle)
+  }, [search])
   const [onlyUncategorized, setOnlyUncategorized] = useState(params.get('uncategorized') === '1')
   /** `?revisar=1`: só as entradas automáticas ainda não conferidas, de qualquer data (vem do Painel). */
   const [onlyNeedsReview, setOnlyNeedsReview] = useState(params.get('revisar') === '1')
@@ -178,6 +186,13 @@ export function TransactionsPage() {
     const raw = params.get('parentCategoryId')
     return raw ? Number(raw) : null
   })
+  /**
+   * `?grupo=<id|none>`: o "N transações" de um card do Orçamento
+   * (decisions/0042). O nome vem junto (`grupoNome`) só para o selo do
+   * filtro; quem decide o que entra é o servidor.
+   */
+  const [budgetGroup, setBudgetGroup] = useState<string | null>(() => params.get('grupo'))
+  const budgetGroupName = params.get('grupoNome')
   /** Item 4 do backlog de 07/09/2026: filtro de categoria "de verdade" (escolhe, não só limpa) -- independente do badge de `parentCategoryId` acima, que continua vindo só de navegação por URL. */
   const [categoryId, setCategoryId] = useState<number | null>(null)
   const [sort, setSort] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('date_desc')
@@ -196,8 +211,12 @@ export function TransactionsPage() {
     else params.delete('parentCategoryId')
     if (onlyNeedsReview) params.set('revisar', '1')
     else params.delete('revisar')
+    if (budgetGroup === null) {
+      params.delete('grupo')
+      params.delete('grupoNome')
+    }
     setParams(params, { replace: true })
-  }, [onlyUncategorized, parentCategoryId, onlyNeedsReview])
+  }, [onlyUncategorized, parentCategoryId, onlyNeedsReview, budgetGroup])
 
   const { byId: categoriesById } = useCategoryIndex()
   const parentCategoryName = parentCategoryId !== null ? categoriesById.get(parentCategoryId)?.path ?? null : null
@@ -218,7 +237,7 @@ export function TransactionsPage() {
       range.from,
       to,
       range.accountId,
-      search,
+      debouncedSearch,
       onlyUncategorized,
       direction,
       parentCategoryId,
@@ -226,6 +245,7 @@ export function TransactionsPage() {
       sort,
       includeHidden,
       onlyNeedsReview,
+      budgetGroup,
       page,
     ],
     queryFn: () =>
@@ -235,9 +255,10 @@ export function TransactionsPage() {
         from: onlyNeedsReview ? undefined : range.from,
         to: onlyNeedsReview ? undefined : to,
         accountId: range.accountId,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         uncategorized: onlyUncategorized ? true : undefined,
         needsReview: onlyNeedsReview ? true : undefined,
+        budgetGroup: budgetGroup ?? undefined,
         direction: direction === 'transfer' ? undefined : direction,
         categoryKind: direction === 'transfer' ? 'transfer' : undefined,
         parentCategoryId: parentCategoryId ?? undefined,
@@ -269,6 +290,7 @@ export function TransactionsPage() {
     setOnlyNeedsReview(false)
     setDirection(null)
     setParentCategoryId(null)
+    setBudgetGroup(null)
     setCategoryId(null)
     setSort('date_desc')
     setIncludeHidden(false)
@@ -280,6 +302,7 @@ export function TransactionsPage() {
     onlyNeedsReview ||
     direction !== null ||
     parentCategoryId !== null ||
+    budgetGroup !== null ||
     categoryId !== null ||
     sort !== 'date_desc' ||
     includeHidden
@@ -507,7 +530,7 @@ export function TransactionsPage() {
           <Slab span={4}>
             <StatTile
               label="Resultado"
-              value={money((query.data?.inflowCents ?? 0) - (query.data?.outflowCents ?? 0))}
+              value={query.data ? money(query.data.inflowCents - query.data.outflowCents) : '-'}
               foot="entradas menos saídas já confirmadas"
               large
             />
@@ -624,6 +647,19 @@ export function TransactionsPage() {
                       type="button"
                       onClick={() => setParentCategoryId(null)}
                       aria-label="Remover filtro de TAG"
+                      style={{ background: 'none', border: 0, cursor: 'pointer', padding: 0, display: 'flex' }}
+                    >
+                      <Icon name="x" size={12} />
+                    </button>
+                  </span>
+                )}
+                {budgetGroup !== null && (
+                  <span className="badge badge--info row" style={{ gap: 'var(--sp-2)' }}>
+                    {budgetGroup === 'none' ? 'Sem grupo no orçamento' : `Grupo: ${budgetGroupName ?? `#${budgetGroup}`}`}
+                    <button
+                      type="button"
+                      onClick={() => setBudgetGroup(null)}
+                      aria-label="Remover filtro de grupo do orçamento"
                       style={{ background: 'none', border: 0, cursor: 'pointer', padding: 0, display: 'flex' }}
                     >
                       <Icon name="x" size={12} />

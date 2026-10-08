@@ -202,8 +202,8 @@ export function QuoteSentVsApprovedChart({
           <XAxis dataKey="period" tickFormatter={fmtPeriod} {...axisProps(theme)} />
           <YAxis tickFormatter={(v: number) => axisMoney(v)} width={46} {...axisProps(theme)} />
           <Tooltip content={<Tip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
-          <Bar dataKey="sentCents" name="Enviado" fill={theme.income} radius={MARK.barRadius} />
-          <Bar dataKey="approvedCents" name="Aprovado" fill={theme.expense} radius={MARK.barRadius} />
+          <Bar isAnimationActive={false} dataKey="sentCents" name="Enviado" fill={theme.income} radius={MARK.barRadius} />
+          <Bar isAnimationActive={false} dataKey="approvedCents" name="Aprovado" fill={theme.expense} radius={MARK.barRadius} />
         </BarChart>
       </ResponsiveContainer>
     </ChartFrame>

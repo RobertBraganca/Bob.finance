@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react'
+import { lazy, Suspense, useId, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -46,6 +46,7 @@ import {
   type AssumptionBag,
   type IconName,
   type MeterState,
+  LoadError,
 } from '../components/ui'
 import { PageHeader } from '../components/shell/Shell'
 import {
@@ -59,8 +60,12 @@ import {
 import { ProfitabilityChart } from '../components/charts/ProfitabilityChart'
 import { DateRangePopover } from '../components/ui/DateRangePopover'
 import { GoalModal, type Goal, type Projection } from '../components/ui/GoalModal'
-import { AposentadoriaTab } from './Aposentadoria'
-import { ProventosTab } from './Proventos'
+// Abas carregadas sob demanda (revisão de 07/10/2026): quem abre só a
+// Carteira não baixa Aposentadoria, Proventos, Calculadoras e o plano de imóvel.
+const AposentadoriaTab = lazy(() => import('./Aposentadoria').then((m) => ({ default: m.AposentadoriaTab })))
+const ProventosTab = lazy(() => import('./Proventos').then((m) => ({ default: m.ProventosTab })))
+const CalculatorsTab = lazy(() => import('./calculators/CalculatorsTab').then((m) => ({ default: m.CalculatorsTab })))
+const PropertyPlanView = lazy(() => import('./property/PropertyPlanView').then((m) => ({ default: m.PropertyPlanView })))
 
 /** Only these classes trade on B3 the way BRAPI understands — mirrors the server's set. */
 const QUOTABLE_CLASSES = new Set(['stocks', 'fii'])
@@ -104,7 +109,7 @@ type PortfolioResponse = {
   goalPurposes: Array<{ value: string; label: string }>
 }
 
-type InvestmentsTab = 'portfolio' | 'contribute' | 'goals' | 'profitability' | 'ledger' | 'proventos' | 'retirement'
+type InvestmentsTab = 'portfolio' | 'contribute' | 'goals' | 'profitability' | 'ledger' | 'proventos' | 'retirement' | 'calculators'
 
 /**
  * A aba vive no endereço (`?aba=metas`): antes ela era só estado da tela,
@@ -119,7 +124,10 @@ const TAB_SLUG: Record<InvestmentsTab, string> = {
   goals: 'metas',
   profitability: 'rentabilidade',
   retirement: 'aposentadoria',
+  calculators: 'calculadoras',
 }
+/** Abas que funcionam sem nenhum ativo: carteira vazia não pode esconder a simulação de quem está começando. */
+const PORTFOLIO_FREE_TABS = new Set<InvestmentsTab>(['goals', 'retirement', 'calculators'])
 const SLUG_TAB = Object.fromEntries(Object.entries(TAB_SLUG).map(([tab, slug]) => [slug, tab])) as Record<
   string,
   InvestmentsTab
@@ -183,6 +191,7 @@ export function InvestmentsPage() {
               { value: 'goals', label: data ? `Metas (${data.goals.length})` : 'Metas' },
               { value: 'profitability', label: 'Rentabilidade' },
               { value: 'retirement', label: 'Aposentadoria' },
+              { value: 'calculators', label: 'Calculadoras' },
             ]}
           />
         }
@@ -212,9 +221,14 @@ export function InvestmentsPage() {
       {/* `key={tab}`: cada troca de seção remonta o painel e a entrada
           (`.tab-panel`) roda de novo, um único movimento curto. */}
       <div className="page stack stack--loose tab-panel" key={tab}>
-        {!data ? (
+        <Suspense fallback={<PageSkeleton cards={INVESTMENTS_SKELETON_CARDS} />}>
+        {!data && portfolio.isError ? (
+          <Card>
+            <LoadError onRetry={() => portfolio.refetch()} retrying={portfolio.isFetching} />
+          </Card>
+        ) : !data ? (
           <PageSkeleton cards={INVESTMENTS_SKELETON_CARDS} />
-        ) : data.assetCount === 0 ? (
+        ) : data.assetCount === 0 && !PORTFOLIO_FREE_TABS.has(tab) ? (
           <Bento>
             <Slab span={12} accent>
               <div className="stack" style={{ maxWidth: '62ch' }}>
@@ -257,9 +271,12 @@ export function InvestmentsPage() {
           <ProfitabilityTab />
         ) : tab === 'retirement' ? (
           <AposentadoriaTab />
+        ) : tab === 'calculators' ? (
+          <CalculatorsTab portfolioValueCents={data.marketValueCents} goalPurposes={data.goalPurposes} />
         ) : (
           <GoalsEnvironment goals={data.goals} goalPurposes={data.goalPurposes} />
         )}
+        </Suspense>
       </div>
 
       {assetModal && <AssetModal classes={data?.assetClasses ?? []} onClose={() => setAssetModal(false)} />}
@@ -2128,15 +2145,25 @@ function GoalsEnvironment({
   goals: Goal[]
   goalPurposes: Array<{ value: string; label: string }>
 }) {
-  const [selectedId, setSelectedId] = useState<number | null>(goals[0]?.id ?? null)
+  // `&meta=<id>` abre direto numa meta (ex.: depois de "Criar plano de imóvel" nas Calculadoras).
+  const [searchParams] = useSearchParams()
+  const linkedId = Number(searchParams.get('meta'))
+  const [selectedId, setSelectedId] = useState<number | null>(null)
   const [editing, setEditing] = useState<Goal | 'new' | null>(null)
 
-  const activeId = selectedId ?? goals[0]?.id ?? null
+  // Derivado, não só estado inicial: a meta recém-criada pode chegar na lista um instante depois da navegação.
+  const activeId = goals.some((g) => g.id === selectedId)
+    ? selectedId
+    : goals.some((g) => g.id === linkedId)
+      ? linkedId
+      : (goals[0]?.id ?? null)
+  const activeGoal = goals.find((g) => g.id === activeId) ?? null
+  const isPropertyPlan = Boolean(activeGoal?.propertyPlan)
 
   const projection = useQuery({
     queryKey: ['investment-goal', activeId],
     queryFn: () => api.get<Projection>(`/investments/goals/${activeId}/projection`),
-    enabled: activeId !== null,
+    enabled: activeId !== null && !isPropertyPlan,
   })
 
   if (goals.length === 0) {
@@ -2189,7 +2216,7 @@ function GoalsEnvironment({
           ))}
         </div>
         <div className="row" style={{ gap: 'var(--sp-2)' }}>
-          {goal && (
+          {goal && !isPropertyPlan && (
             <Button variant="quiet" size="sm" icon="pencil" onClick={() => setEditing(goal)}>
               Editar
             </Button>
@@ -2200,7 +2227,9 @@ function GoalsEnvironment({
         </div>
       </div>
 
-      {!data || !goal ? (
+      {isPropertyPlan && activeId !== null ? (
+        <PropertyPlanView key={activeId} goalId={activeId} />
+      ) : !data || !goal ? (
         <PageSkeleton
           cards={[
             { span: 12, variant: 'stats', height: 120 },

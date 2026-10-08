@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { useUserProfile, type AccountType, type UserProfile } from '../lib/store'
 import { Button, Card, Icon, Segmented, TextInput, useToast } from '../components/ui'
 import { PageHeader } from '../components/shell/Shell'
+import { Link } from 'react-router-dom'
 
 export function ProfilePage() {
   const profile = useUserProfile()
@@ -66,6 +67,14 @@ export function ProfilePage() {
               <Icon name="info" size={12} /> Precificação e Receita de parceiros saem do menu lateral.
             </p>
           )}
+        </Card>
+
+        {/* Os % do orçamento e as TAGs dos grupos moram em Orçamento › Ajustar; daqui é só o atalho. */}
+        <Card title="Metas financeiras" subtitle="Quanto da renda vai para cada grupo do orçamento">
+          <Link to="/metas/ajustar" className="btn btn--ghost btn--sm">
+            <Icon name="target" size={13} />
+            Ajustar orçamento
+          </Link>
         </Card>
 
         <div className="row">

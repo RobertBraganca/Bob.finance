@@ -65,7 +65,14 @@ export function ChartFrame<T>({
       })
     }
     apply()
-    const observer = new MutationObserver(apply)
+    // Só reage quando entra um <svg> novo: hover e tooltip mexem no subtree
+    // o tempo todo, e varrer o DOM a cada um era trabalho à toa.
+    const observer = new MutationObserver((mutations) => {
+      const addedSvg = mutations.some((m) =>
+        Array.from(m.addedNodes).some((node) => node instanceof Element && (node.matches('svg') || node.querySelector('svg') !== null)),
+      )
+      if (addedSvg) apply()
+    })
     observer.observe(body, { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [label, showTable])

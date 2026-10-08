@@ -1,4 +1,5 @@
 import { Fragment, useId, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import {
@@ -37,6 +38,8 @@ import {
   type AssumptionBag,
 } from '../components/ui'
 import { PageHeader } from '../components/shell/Shell'
+import { ProposalsTab } from './proposals/ProposalsTab'
+import { IssuerCard } from './proposals/IssuerCard'
 
 const QUOTE_STATUSES = ['draft', 'sent', 'in_review', 'needs_changes', 'paused', 'rejected', 'approved'] as const
 type QuoteStatus = (typeof QUOTE_STATUSES)[number]
@@ -131,33 +134,64 @@ type PricingSettings = { availableHoursPerMonth: number; billablePercentageBps: 
 
 type DirectCostDraft = { label: string; value: string }
 
+type PricingTab = 'orcamentos' | 'cotacoes' | 'parametros'
+const PRICING_TABS: PricingTab[] = ['orcamentos', 'cotacoes', 'parametros']
+
 export function PricingPage() {
-  const [tab, setTab] = useState<'negocios' | 'parametros'>('negocios')
+  const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  // A aba vive no endereço (`?aba=cotacoes`), como em Investimentos.
+  // Orçamentos é a padrão (decisions/0040); a antiga "Negócios" virou Cotações.
+  const raw = params.get('aba')
+  const tab: PricingTab = raw === 'negocios' ? 'cotacoes' : PRICING_TABS.includes(raw as PricingTab) ? (raw as PricingTab) : 'orcamentos'
+  const setTab = (next: PricingTab) =>
+    setParams(
+      () => {
+        const fresh = new URLSearchParams()
+        if (next !== 'orcamentos') fresh.set('aba', next)
+        return fresh
+      },
+      { replace: true },
+    )
   const [simulating, setSimulating] = useState(false)
 
   return (
     <>
       <PageHeader
         title="Precificação"
-        subtitle="Quanto cobrar por um projeto, a partir do seu próprio custo de operar"
+        subtitle={
+          tab === 'orcamentos'
+            ? 'Orçamentos para clientes: serviços, desconto, condições e o PDF'
+            : 'Quanto cobrar por um projeto, a partir do seu próprio custo de operar'
+        }
+        filters={
+          <Segmented
+            ariaLabel="Seção"
+            className="segmented--nav"
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: 'orcamentos', label: 'Orçamentos' },
+              { value: 'cotacoes', label: 'Cotações' },
+              { value: 'parametros', label: 'Parâmetros' },
+            ]}
+          />
+        }
         actions={
-          <div className="row" style={{ gap: 'var(--sp-2)' }}>
-            <Segmented
-              ariaLabel="Seção"
-              value={tab}
-              onChange={setTab}
-              options={[
-                { value: 'negocios', label: 'Negócios' },
-                { value: 'parametros', label: 'Parâmetros' },
-              ]}
-            />
+          tab === 'orcamentos' ? (
+            <Button variant="primary" icon="plus" onClick={() => navigate('/precificacao/orcamentos/novo')}>
+              Novo orçamento
+            </Button>
+          ) : tab === 'cotacoes' ? (
             <Button variant="primary" icon="plus" onClick={() => setSimulating(true)}>
               Nova cotação
             </Button>
-          </div>
+          ) : undefined
         }
       />
-      <div className="page">{tab === 'negocios' ? <QuotesTab /> : <ParamsTab />}</div>
+      <div className="page tab-panel" key={tab}>
+        {tab === 'orcamentos' ? <ProposalsTab /> : tab === 'cotacoes' ? <QuotesTab /> : <ParamsTab />}
+      </div>
       {simulating && <SimulateModal onClose={() => setSimulating(false)} />}
     </>
   )
@@ -1261,6 +1295,7 @@ function ParamsTab() {
 
   return (
     <Bento>
+      <IssuerCard />
       <Card span={5} title="Sua capacidade no mês" subtitle="A base que transforma custo mensal em valor-hora">
         {!current ? (
           <SkeletonLines lines={5} />

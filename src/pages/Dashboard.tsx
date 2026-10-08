@@ -49,6 +49,7 @@ import {
   type AssumptionBag,
   type MeterState,
   type PendingDeleteScope,
+  LoadError,
 } from '../components/ui'
 import { PageHeader, RangeFilter } from '../components/shell/Shell'
 import { IncomeExpenseChart } from '../components/charts/IncomeExpenseChart'
@@ -213,7 +214,13 @@ export function Dashboard() {
       <>
         <PageHeader title={`${greetingWord(profile.data?.profile.displayName)}!`} filters={<RangeFilter hideAccountFilter />} />
         <div className="page">
-          <PageSkeleton cards={DASHBOARD_SKELETON_CARDS} />
+          {dashboard.isError ? (
+            <Card>
+              <LoadError onRetry={() => dashboard.refetch()} retrying={dashboard.isFetching} />
+            </Card>
+          ) : (
+            <PageSkeleton cards={DASHBOARD_SKELETON_CARDS} />
+          )}
         </div>
       </>
     )
@@ -2182,15 +2189,14 @@ function FirstRun() {
                 marca duplicatas e sugere TAGs antes de gravar qualquer coisa.
               </p>
               <div className="row" style={{ marginTop: 'var(--sp-2)' }}>
-                <Link to="/importar">
-                  <Button variant="primary" icon="upload">
-                    Importar CSV
-                  </Button>
+                {/* Link com cara de botão, não um <button> dentro de um <a>: dois controles aninhados confundem teclado e leitor de tela. */}
+                <Link to="/importar" className="btn btn--primary">
+                  <Icon name="upload" size={15} />
+                  Importar CSV
                 </Link>
-                <Link to="/diario">
-                  <Button variant="slab" icon="plus">
-                    Ou lançar um gasto à mão
-                  </Button>
+                <Link to="/diario" className="btn btn--slab">
+                  <Icon name="plus" size={15} />
+                  Ou lançar um gasto à mão
                 </Link>
               </div>
             </div>

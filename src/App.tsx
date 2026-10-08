@@ -25,6 +25,7 @@ const TransactionsPage = lazy(() => import('./pages/Transactions').then((m) => (
 const CategoriesPage = lazy(() => import('./pages/Categories').then((m) => ({ default: m.CategoriesPage })))
 const DailyPage = lazy(() => import('./pages/Daily').then((m) => ({ default: m.DailyPage })))
 const GoalsPage = lazy(() => import('./pages/Goals').then((m) => ({ default: m.GoalsPage })))
+const BudgetSettingsPage = lazy(() => import('./pages/budget/BudgetSettingsPage').then((m) => ({ default: m.BudgetSettingsPage })))
 const DebtPage = lazy(() => import('./pages/Debt').then((m) => ({ default: m.DebtPage })))
 const CreditCardsPage = lazy(() => import('./pages/CreditCards').then((m) => ({ default: m.CreditCardsPage })))
 const InvestmentsPage = lazy(() => import('./pages/Investments').then((m) => ({ default: m.InvestmentsPage })))
@@ -33,6 +34,8 @@ const FinancialHealthPage = lazy(() =>
   import('./pages/FinancialHealth').then((m) => ({ default: m.FinancialHealthPage })),
 )
 const PricingPage = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.PricingPage })))
+const ProposalFormPage = lazy(() => import('./pages/proposals/ProposalFormPage').then((m) => ({ default: m.ProposalFormPage })))
+const ProposalDetailPage = lazy(() => import('./pages/proposals/ProposalDetailPage').then((m) => ({ default: m.ProposalDetailPage })))
 const PartnersPage = lazy(() => import('./pages/Partners').then((m) => ({ default: m.PartnersPage })))
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })))
 const ProfilePage = lazy(() => import('./pages/Profile').then((m) => ({ default: m.ProfilePage })))
@@ -97,11 +100,16 @@ const FEATURE_BY_PATH: Record<string, string> = {
   '/perfil': 'profile',
 }
 
+/** `/precificacao/orcamentos/12` → `/precificacao`: subpáginas herdam a seção nos mapas abaixo. */
+function sectionOf(pathname: string): string {
+  return `/${pathname.split('/')[1] ?? ''}`
+}
+
 /** Uma chamada por navegação cobre toda página sem precisar instrumentar cada uma. */
 function usePageViewTelemetry() {
   const location = useLocation()
   useEffect(() => {
-    const feature = FEATURE_BY_PATH[location.pathname] ?? 'unknown'
+    const feature = FEATURE_BY_PATH[location.pathname] ?? FEATURE_BY_PATH[sectionOf(location.pathname)] ?? 'unknown'
     telemetry.view(feature)
   }, [location.pathname])
 }
@@ -116,7 +124,7 @@ const PAGE_TITLE_BY_PATH: Record<string, string> = {
   '/saude': 'Saúde financeira',
   '/precificacao': 'Precificação',
   '/parceiros': 'Receita de parceiros',
-  '/metas': 'Metas do mês',
+  '/metas': 'Orçamento',
   '/dividas': 'Endividamento',
   '/investimentos': 'Investimentos',
   '/ajustes': 'Contas e bancos',
@@ -135,7 +143,7 @@ const PAGE_TITLE_BY_PATH: Record<string, string> = {
 function usePageTitle() {
   const location = useLocation()
   useEffect(() => {
-    const label = PAGE_TITLE_BY_PATH[location.pathname]
+    const label = PAGE_TITLE_BY_PATH[location.pathname] ?? PAGE_TITLE_BY_PATH[sectionOf(location.pathname)]
     document.title = label ? `${label} · Finanças` : 'Finanças'
   }, [location.pathname])
 }
@@ -183,6 +191,7 @@ function AuthedApp() {
               <Route path="/lancamentos" element={<TransactionsPage />} />
               <Route path="/dre" element={<DrePage />} />
               <Route path="/metas" element={<GoalsPage />} />
+              <Route path="/metas/ajustar" element={<BudgetSettingsPage />} />
               <Route path="/dividas" element={<DebtPage />} />
               <Route path="/cartoes" element={<CreditCardsPage />} />
               <Route path="/investimentos" element={<InvestmentsPage />} />
@@ -191,6 +200,19 @@ function AuthedApp() {
               <Route
                 path="/precificacao"
                 element={isPersonalAccount ? <Navigate to="/" replace /> : <PricingPage />}
+              />
+              {/* Orçamentos de serviço (decisions/0040): páginas próprias, com endereço. */}
+              <Route
+                path="/precificacao/orcamentos/novo"
+                element={isPersonalAccount ? <Navigate to="/" replace /> : <ProposalFormPage />}
+              />
+              <Route
+                path="/precificacao/orcamentos/:id"
+                element={isPersonalAccount ? <Navigate to="/" replace /> : <ProposalDetailPage />}
+              />
+              <Route
+                path="/precificacao/orcamentos/:id/editar"
+                element={isPersonalAccount ? <Navigate to="/" replace /> : <ProposalFormPage />}
               />
               <Route
                 path="/parceiros"

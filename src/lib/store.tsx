@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from './api'
+import { useAuth } from './auth'
 import { shiftPeriod } from './period'
 
 /* ------------------------------------------------------------------ *
@@ -217,8 +218,13 @@ export function useRange(): RangeContextValue {
  * refazia a chamada em quase toda navegação, e `useMeta` é chamado por
  * oito telas mais o shell (02/09/2026).
  */
-export const useMeta = () =>
-  useQuery({ queryKey: ['meta'], queryFn: () => api.get<Meta>('/meta'), staleTime: 60_000 })
+export const useMeta = () => {
+  // Só com sessão (revisão de 07/10/2026): o RangeProvider monta antes do
+  // login resolver, e a chamada sem token voltava 401 e esperava o retry
+  // (~1s) antes de qualquer tela que depende de `range.ready` carregar.
+  const { session } = useAuth()
+  return useQuery({ queryKey: ['meta'], queryFn: () => api.get<Meta>('/meta'), staleTime: 60_000, enabled: !!session })
+}
 
 /**
  * Nome de exibição + tipo de uso (revisão de UX de 26/09/2026) — mesmo

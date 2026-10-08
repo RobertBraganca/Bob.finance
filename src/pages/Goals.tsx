@@ -35,6 +35,8 @@ import {
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
+import { Link } from 'react-router-dom'
+import { BudgetOverview } from './budget/BudgetOverview'
 
 type CapProgress = {
   categoryId: number
@@ -132,12 +134,18 @@ export function GoalsPage() {
   return (
     <>
       <PageHeader
-        title="Metas do mês"
-        subtitle="Meta de receita e tetos de gasto, geral e por TAG"
+        title="Orçamento"
+        subtitle="A renda do mês dividida em grupos, com as metas e os tetos por TAG"
         actions={
-          <Button variant="primary" icon="target" onClick={() => setEditing(true)}>
-            Definir metas
-          </Button>
+          <div className="row" style={{ gap: 'var(--sp-2)' }}>
+            <Button icon="target" onClick={() => setEditing(true)}>
+              Definir metas
+            </Button>
+            <Link to="/metas/ajustar" className="btn btn--primary">
+              <Icon name="settings" size={15} />
+              Ajustar orçamento
+            </Link>
+          </div>
         }
         filters={
           /* Sem teto no mês corrente: definir a meta do mês que vem É o
@@ -148,7 +156,14 @@ export function GoalsPage() {
         }
       />
 
-      <div className="page">
+      <div className="page stack stack--loose">
+        <BudgetOverview period={period} />
+
+        <div className="stack stack--tight">
+          <h2 className="h3">Metas e tetos por TAG</h2>
+          <span className="field__hint">Meta de receita, teto geral e tetos por TAG do mês</span>
+        </div>
+
         {!data ? (
           <Card>
             <SkeletonLines lines={3} />
