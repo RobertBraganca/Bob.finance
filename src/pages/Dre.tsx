@@ -16,7 +16,6 @@ import {
   StatTile,
   useToast,
 } from '../components/ui'
-import { PageHeader, RangeFilter } from '../components/shell/Shell'
 
 type DreLine = {
   categoryId: number | null
@@ -89,7 +88,14 @@ type FinancialEngineSettingsLite = {
  * conta global (Shell.tsx) — essa é justamente a página que sempre mostra
  * PJ e PF juntos, então "todas as contas" ali não significaria nada aqui.
  */
-export function DrePage() {
+/**
+ * O detalhe contábil de "Minha empresa" (specs/company-mei): DRE formal da
+ * PJ, reconciliação PJ ↔ PF e as colunas por TAG. Era a página DRE inteira;
+ * desde 08/10/2026 vive recolhido dentro de `CompanyPage`, sem cabeçalho
+ * próprio, e o lado pessoal ganha uma coluna por conta pessoal (antes só a
+ * conta PF do Motor).
+ */
+export function DreDetails() {
   const range = useRange()
   const meta = useMeta()
 
@@ -148,15 +154,15 @@ export function DrePage() {
       ? computeReconciliation(pj.id, pf.id, pjDre.data, pfDre.data, flows.data.edges)
       : null
 
+  // Contas pessoais além da PF do Motor (ex.: Inter, PicPay): o gasto
+  // pessoal não mora numa conta só (revisão de 08/10/2026).
+  const otherPersonal = (meta.data?.accounts ?? []).filter(
+    (account) => account.id !== pjAccountId && account.id !== pfAccountId && account.kind !== 'investment',
+  )
+
   return (
     <>
-      <PageHeader
-        title="DRE PJ x PF"
-        subtitle="Receita e despesa por TAG, separadas por conta"
-        filters={<RangeFilter hideAccountFilter />}
-      />
-
-      <div className="page">
+      <div className="stack">
         {!meta.isSuccess || !engineSettings.isSuccess ? (
           <Card>
             <SkeletonLines lines={2} />
@@ -204,7 +210,12 @@ export function DrePage() {
           </Card>
         ) : (
           <Bento>
-            <FormalDreCard data={formalDre.data} isError={formalDre.isError} accountLabel={pj.name} />
+            <FormalDreCard
+              data={formalDre.data}
+              isError={formalDre.isError}
+              accountLabel={pj.name}
+              withdrawnToPfCents={reconciliation?.netToPfCents ?? null}
+            />
             {reconciliation && <ReconciliationSlab data={reconciliation} pjLabel={pj.name} pfLabel={pf.name} />}
             <DreColumn
               accountId={pj.id}
@@ -215,6 +226,9 @@ export function DrePage() {
               proLaboreCents={reconciliation ? Math.max(0, reconciliation.netToPfCents) : 0}
             />
             <DreColumn accountId={pf.id} accountLabel={pf.name} from={range.from} to={range.to} />
+            {otherPersonal.map((account) => (
+              <DreColumn key={account.id} accountId={account.id} accountLabel={account.name} from={range.from} to={range.to} />
+            ))}
           </Bento>
         )}
       </div>
@@ -234,10 +248,18 @@ function FormalDreCard({
   data,
   isError,
   accountLabel,
+  withdrawnToPfCents,
 }: {
   data: FormalDreResponse | undefined
   isError: boolean
   accountLabel: string
+  /**
+   * Repasse líquido PJ → PF do período (o mesmo número da reconciliação
+   * abaixo). O lucro do DRE formal não o desconta, porque é transferência;
+   * sem esta linha o card terminava num lucro que não ficou na empresa
+   * (revisão de 08/10/2026).
+   */
+  withdrawnToPfCents: number | null
 }) {
   if (isError) {
     return (
@@ -313,6 +335,26 @@ function FormalDreCard({
         <span className={`kv__v ${data.lucroLiquidoCents < 0 ? 'neg' : 'pos'}`} style={{ fontWeight: 700 }}>
           {money(data.lucroLiquidoCents)}
         </span>
+
+        {withdrawnToPfCents !== null && withdrawnToPfCents !== 0 && (
+          <>
+            <span
+              className="kv__k"
+              style={{ gridColumn: '1 / -1', textTransform: 'uppercase', fontSize: 'var(--text-2xs)', letterSpacing: '0.03em', marginTop: 'var(--sp-2)' }}
+            >
+              Depois das retiradas
+            </span>
+            <span className="kv__k">(−) Retiradas para a pessoa física</span>
+            <span className="kv__v neg">{money(withdrawnToPfCents)}</span>
+            <span className="kv__k" style={{ fontWeight: 700 }}>(=) Ficou na empresa</span>
+            <span
+              className={`kv__v ${data.lucroLiquidoCents - withdrawnToPfCents < 0 ? 'neg' : 'pos'}`}
+              style={{ fontWeight: 700 }}
+            >
+              {money(data.lucroLiquidoCents - withdrawnToPfCents)}
+            </span>
+          </>
+        )}
       </div>
     </Card>
   )

@@ -51,7 +51,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/patrimonio', label: 'Patrimônio', icon: 'layers' },
       { to: '/diario', label: 'Diário', icon: 'calendar' },
       { to: '/lancamentos', label: 'Lançamentos', icon: 'list' },
-      { to: '/dre', label: 'DRE', icon: 'scale' },
+      { to: '/dre', label: 'Minha empresa', icon: 'scale' },
     ],
   },
   {

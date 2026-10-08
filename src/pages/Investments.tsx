@@ -272,7 +272,12 @@ export function InvestmentsPage() {
         ) : tab === 'retirement' ? (
           <AposentadoriaTab />
         ) : tab === 'calculators' ? (
-          <CalculatorsTab portfolioValueCents={data.marketValueCents} goalPurposes={data.goalPurposes} />
+          <CalculatorsTab
+            portfolioValueCents={data.marketValueCents}
+            goalPurposes={data.goalPurposes}
+            allocatableClasses={data.allocatableAssetClasses}
+            allocation={data.allocation}
+          />
         ) : (
           <GoalsEnvironment goals={data.goals} goalPurposes={data.goalPurposes} />
         )}

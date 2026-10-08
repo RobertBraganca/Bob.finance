@@ -28,10 +28,13 @@ export function DebtProjectionChart({
   surface = 'paper',
   height = 260,
   extraMonthlyCents,
+  strategy = 'avalanche',
 }: {
   data: ProjectionPoint[]
   surface?: Surface
   height?: number
+  /** a nota diz para qual dívida vai o extra; antes dizia sempre "avalanche" */
+  strategy?: 'avalanche' | 'snowball'
   extraMonthlyCents: number
 }) {
   const theme = themeFor(useEffectiveSurface(surface))
@@ -86,7 +89,7 @@ export function DebtProjectionChart({
           },
         ],
       }}
-      note="Projeção com juros compostos sobre o saldo, pagamentos programados e o extra direcionado à dívida mais cara (avalanche)."
+      note={`Projeção com juros compostos sobre o saldo, pagamentos programados e o extra direcionado ${strategy === 'snowball' ? 'à dívida de menor saldo (bola de neve)' : 'à dívida mais cara (avalanche)'}.`}
     >
       <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <LineChart data={data} margin={{ top: 12, right: 12, bottom: 4, left: 0 }}>
@@ -278,16 +281,25 @@ export function PayoffSummary({
   interestCents,
   monthsSaved,
   interestSavedCents,
+  payoffPeriod,
 }: {
   months: number | null
   interestCents: number
   monthsSaved: number | null
   interestSavedCents: number
+  /** o mês em que a última dívida acaba (YYYY-MM) */
+  payoffPeriod?: string | null
 }) {
   return (
     <div className="kv">
       <span className="kv__k">Tempo até quitar</span>
       <span className="kv__v">{monthsLabel(months)}</span>
+      {payoffPeriod && (
+        <>
+          <span className="kv__k">Livre das dívidas em</span>
+          <span className="kv__v">{fmtPeriodLongLocal(payoffPeriod)}</span>
+        </>
+      )}
       <span className="kv__k">Juros totais no caminho</span>
       <span className="kv__v">{money(interestCents)}</span>
       {monthsSaved !== null && monthsSaved > 0 && (
@@ -304,4 +316,11 @@ export function PayoffSummary({
       )}
     </div>
   )
+}
+
+const MONTHS_LONG = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+/** "2028-03" → "março de 2028" (sem depender do formatador da página). */
+function fmtPeriodLongLocal(period: string): string {
+  const [y, m] = period.split('-').map(Number) as [number, number]
+  return `${MONTHS_LONG[m - 1] ?? ''} de ${y}`
 }

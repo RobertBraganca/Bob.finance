@@ -8,6 +8,7 @@ import { friendlyErrorMessage } from '../_shared/core/errors.ts'
 import * as analytics from '../_shared/services/analytics.ts'
 import * as benchmarksService from '../_shared/services/benchmarks.ts'
 import * as budgetService from '../_shared/services/budget.ts'
+import * as companyService from '../_shared/services/company.ts'
 import * as cashFlowService from '../_shared/services/cashFlow.ts'
 import * as creditCardsService from '../_shared/services/creditCards.ts'
 import * as criteriaService from '../_shared/services/criteria.ts'
@@ -120,6 +121,7 @@ app.onError((error, c) => {
   // para PricingError.
   if (error instanceof partners.PartnerError) return c.json({ error: error.message }, 422)
   // Regra de Investimentos (ativo da reserva numa meta, compra já registrada): 409/404/400.
+  if (error instanceof companyService.CompanyError) return c.json({ error: error.message }, error.statusCode as 400 | 409)
   if (error instanceof budgetService.BudgetError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
   if (error instanceof investments.InvestmentRuleError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
   console.error(error)
@@ -835,6 +837,26 @@ app.delete('/investments/goals/:id', async (c) => {
   return c.json(await investments.deleteGoal(id))
 })
 
+
+/* Minha empresa (MEI), specs/company-mei. */
+app.get('/company/overview', async (c) => {
+  const { period } = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) }).parse(c.req.query())
+  return c.json(await companyService.companyOverview(period))
+})
+
+app.get('/company/settings', async (c) => c.json(await companyService.companySettings()))
+
+app.put('/company/settings', async (c) => {
+  const body = z
+    .object({
+      dasMonthlyCents: z.number().int().nonnegative().nullable(),
+      pjCushionMonths: z.number().min(0).max(24),
+      meiAnnualLimitCents: z.number().int().positive(),
+      dasCategoryIds: z.array(z.number().int().positive()).max(50).nullable(),
+    })
+    .parse(await c.req.json())
+  return c.json(await companyService.saveCompanySettings(body))
+})
 
 /* Orçamento por grupos (specs/budget-groups). */
 app.get('/budget/settings', async (c) => c.json(await budgetService.budgetSettings()))

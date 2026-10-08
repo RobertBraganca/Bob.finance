@@ -44,7 +44,8 @@ import {
 import { DebtHistoryChart } from '../components/charts/DebtHistoryChart'
 import { CategoryRing } from '../components/charts/CategoryRing'
 import { todayIso } from '../lib/period'
-import { installmentsCents, type AmortizationSystem } from '@shared/propertyPlan'
+import { impliedMonthlyRate, installmentsCents, type AmortizationSystem } from '@shared/propertyPlan'
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
 
 const KIND_LABEL: Record<string, string> = {
   credit_card: 'Cartão de crédito',
@@ -156,9 +157,10 @@ type Overview = {
   byKind: Array<{ kind: string; amountCents: number; shareBps: number }>
 }
 
+type ScenarioPerDebt = Array<{ debtId: number; name: string; months: number | null; interestCents: number }>
 type Projection = {
-  baseline: { months: number | null; totalInterestCents: number; payoffPeriod: string | null }
-  accelerated: { months: number | null; totalInterestCents: number; payoffPeriod: string | null }
+  baseline: { months: number | null; totalInterestCents: number; payoffPeriod: string | null; perDebt: ScenarioPerDebt }
+  accelerated: { months: number | null; totalInterestCents: number; payoffPeriod: string | null; perDebt: ScenarioPerDebt }
   merged: Array<{ month: number; period: string; baselineCents: number | null; acceleratedCents: number | null }>
   savings: { monthsSaved: number | null; interestSavedCents: number }
 }
@@ -279,6 +281,12 @@ export function DebtPage() {
               span={6}
               title="Renda comprometida"
               subtitle="Parcela mensal sobre a renda mensal típica"
+              assumptions={{
+                formula: 'pagamento programado das dívidas cadastradas ÷ renda mensal típica',
+                rendaTipica: `mediana da receita dos meses com movimento, de todas as contas (inclui o faturamento da PJ), até ${fmtPeriodLong(data.period)}`,
+                faixas: 'Saudável até 20%; Atenção até 36%; Comprometido até 50%; Crítico acima de 50%',
+                foraDaConta: 'fatura e parcelamentos do cartão de crédito não entram (só as dívidas cadastradas aqui)',
+              }}
               actions={
                 <FilterSelect
                   icon="clock"
@@ -339,7 +347,32 @@ export function DebtPage() {
                     }
                     monthsSaved={projection.data.savings.monthsSaved}
                     interestSavedCents={projection.data.savings.interestSavedCents}
+                    payoffPeriod={
+                      extraMonthlyCents > 0 ? projection.data.accelerated.payoffPeriod : projection.data.baseline.payoffPeriod
+                    }
                   />
+                  {(() => {
+                    const perDebt = (extraMonthlyCents > 0 ? projection.data.accelerated : projection.data.baseline).perDebt ?? []
+                    if (perDebt.length < 2) return null
+                    return (
+                      <>
+                        <hr className="divider" />
+                        <div className="stack stack--tight">
+                          <span className="label">Quando cada uma acaba</span>
+                          {[...perDebt]
+                            .sort((a, b) => (a.months ?? Infinity) - (b.months ?? Infinity))
+                            .map((d) => (
+                              <span key={d.debtId} className="row row--between" style={{ fontSize: 'var(--text-sm)', gap: 'var(--sp-3)' }}>
+                                <span className="muted truncate">{d.name}</span>
+                                <span className="tabular">
+                                  {monthsLabel(d.months)} · juros {money(d.interestCents)}
+                                </span>
+                              </span>
+                            ))}
+                        </div>
+                      </>
+                    )
+                  })()}
                   <hr className="divider" />
                   <div className="stack stack--tight">
                     <span className="label">Sem aporte extra</span>
@@ -404,6 +437,7 @@ export function DebtPage() {
                 surface="paper"
                 height={280}
                 extraMonthlyCents={extraMonthlyCents}
+                strategy={strategy}
               />
             </Card>
 
@@ -414,6 +448,8 @@ export function DebtPage() {
             >
               <DebtHistoryChart points={data.trend} surface="paper" />
             </Card>
+
+            <RateMismatchCard debts={data.debts} onEdit={setEditing} />
 
             <ReconciliationQueueCard
               queue={reconciliation.data}
@@ -847,6 +883,51 @@ function DeleteDebtButton({ debtId, name }: { debtId: number; name: string }) {
         />
       )}
     </>
+  )
+}
+
+/**
+ * Taxa cadastrada × contrato (revisão de 08/10/2026): numa dívida de
+ * parcela fixa, saldo, parcela e parcelas restantes já determinam a taxa.
+ * Quando a cadastrada passa longe dela, juros por mês, prazo e projeção
+ * saem errados; o card mostra a diferença e abre a edição, sem mudar nada
+ * sozinho.
+ */
+function RateMismatchCard({ debts, onEdit }: { debts: DebtRow[]; onEdit: (debt: DebtRow) => void }) {
+  const rows = debts
+    .filter((d) => d.installmentCount !== null && d.amortization === null && (d.installmentsRemaining ?? 0) > 0 && d.scheduledPaymentCents > 0)
+    .map((d) => {
+      const implied = impliedMonthlyRate(d.balanceCents, d.scheduledPaymentCents, d.installmentsRemaining ?? 0)
+      const impliedBps = implied === null ? null : Math.round(implied * 10_000)
+      return { debt: d, impliedBps }
+    })
+    .filter(({ debt, impliedBps }) => impliedBps === null || Math.abs(impliedBps - debt.monthlyRateBps) >= 50)
+  if (rows.length === 0) return null
+  return (
+    <div style={{ gridColumn: '1 / -1' }}>
+      <Alert variant="warning">
+        <Icon name="alert" size={16} />
+        <AlertTitle>{rows.length === 1 ? 'A taxa de uma dívida não bate com o contrato' : `A taxa de ${rows.length} dívidas não bate com o contrato`}</AlertTitle>
+        <AlertDescription>
+          <div className="stack stack--tight" style={{ marginTop: 'var(--sp-2)' }}>
+            {rows.map(({ debt, impliedBps }) => (
+              <div key={debt.id} className="row row--between row--wrap" style={{ gap: 'var(--sp-2)' }}>
+                <span>
+                  <strong>{debt.name}</strong>:{' '}
+                  {impliedBps === null
+                    ? `as ${debt.installmentsRemaining} parcelas restantes de ${money(debt.scheduledPaymentCents)} somam menos que o saldo de ${money(debt.balanceCents)}.`
+                    : `cadastrada a ${bpsToInput(debt.monthlyRateBps)}% ao mês; com ${debt.installmentsRemaining} parcelas de ${money(debt.scheduledPaymentCents)} sobre ${money(debt.balanceCents)}, a taxa que fecha o contrato é ${bpsToInput(impliedBps)}% ao mês.`}{' '}
+                  Juros por mês, prazo e projeção usam a taxa cadastrada.
+                </span>
+                <Button size="sm" icon="pencil" onClick={() => onEdit(debt)}>
+                  Revisar dívida
+                </Button>
+              </div>
+            ))}
+          </div>
+        </AlertDescription>
+      </Alert>
+    </div>
   )
 }
 

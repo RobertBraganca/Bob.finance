@@ -1,6 +1,6 @@
 import { asc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
-import { accounts, budgetGroups, budgetPlans, categories, financialEngineSettings } from '../db/schema.ts'
+import { budgetGroups, budgetPlans, categories } from '../db/schema.ts'
 import { addMonths, periodBounds, todayIso } from '../core/dates.ts'
 import { medianCents } from '../core/money.ts'
 import {
@@ -17,6 +17,7 @@ import {
   type BudgetPlanRow,
   type CategoryNode,
 } from '../core/budget.ts'
+import { accountScope, idList, pjWithdrawals, type AccountScope } from './withdrawals.ts'
 
 /**
  * Orçamento por grupos de % da renda (specs/budget-groups, decisions/0042).
@@ -67,56 +68,31 @@ async function allPlans(): Promise<BudgetPlanRow[]> {
   return rows.map((r) => ({ effectivePeriod: r.effectivePeriod, allocations: r.allocations as Allocation[] }))
 }
 
-/** Contas pessoais: todas menos a conta PJ configurada no Motor financeiro. */
-async function accountScope(): Promise<{ personal: number[]; pjAccountId: number | null }> {
-  const [settings, rows] = await Promise.all([
-    db.select({ pj: financialEngineSettings.pjAccountId }).from(financialEngineSettings).limit(1),
-    db.select({ id: accounts.id }).from(accounts),
-  ])
-  const pjAccountId = settings[0]?.pj ?? null
-  return { personal: rows.map((r) => r.id).filter((id) => id !== pjAccountId), pjAccountId }
-}
-
-const idList = (ids: number[]) => (ids.length ? sql.join(ids.map((id) => sql`${id}`), sql`, `) : sql`null`)
-
 /**
  * Renda por mês: receitas confirmadas nas contas pessoais, mais a entrada
  * numa conta pessoal que pareia (mesmo valor, até 1 dia) com uma saída da
  * conta PJ e não está lançada como receita, ou seja, o pró-labore lançado
  * como transferência. Um repasse já lançado como receita entra só uma vez.
  */
-async function incomeByMonth(fromPeriod: string, toPeriod: string, scope: { personal: number[]; pjAccountId: number | null }) {
+async function incomeByMonth(fromPeriod: string, toPeriod: string, scope: AccountScope) {
   const from = periodBounds(fromPeriod).start
   const to = periodBounds(toPeriod).end
   const out = new Map<string, number>()
   if (scope.personal.length === 0) return out
-  const income = await db.execute<{ period: string; cents: number }>(sql`
-    select substr(t.posted_on, 1, 7) as period, coalesce(sum(t.amount_cents), 0) as cents
-    from transactions t
-    join categories c on c.id = t.category_id
-    where c.kind = 'income' and t.pending = false and t.ignored = false
-      and t.account_id in (${idList(scope.personal)})
-      and t.posted_on between ${from} and ${to}
-    group by 1`)
-  for (const row of income) out.set(row.period, Number(row.cents))
-  if (scope.pjAccountId !== null) {
-    const transfers = await db.execute<{ period: string; cents: number }>(sql`
+  const [income, transfers] = await Promise.all([
+    db.execute<{ period: string; cents: number }>(sql`
       select substr(t.posted_on, 1, 7) as period, coalesce(sum(t.amount_cents), 0) as cents
       from transactions t
-      left join categories c on c.id = t.category_id
-      where t.amount_cents > 0 and t.pending = false and t.ignored = false
-        and coalesce(c.kind::text, '') <> 'income'
+      join categories c on c.id = t.category_id
+      where c.kind = 'income' and t.pending = false and t.ignored = false
         and t.account_id in (${idList(scope.personal)})
         and t.posted_on between ${from} and ${to}
-        and exists (
-          select 1 from transactions o
-          where o.account_id = ${scope.pjAccountId} and o.amount_cents = -t.amount_cents
-            and o.pending = false and o.ignored = false
-            and abs(o.posted_on::date - t.posted_on::date) <= 1
-        )
-      group by 1`)
-    for (const row of transfers) out.set(row.period, (out.get(row.period) ?? 0) + Number(row.cents))
-  }
+      group by 1`),
+    // O repasse PJ → PF não lançado como receita: a mesma função de "Minha empresa".
+    pjWithdrawals(fromPeriod, toPeriod, scope),
+  ])
+  for (const row of income) out.set(row.period, Number(row.cents))
+  for (const [period, t] of transfers) out.set(period, (out.get(period) ?? 0) + t.toPersonalCents)
   return out
 }
 
@@ -436,4 +412,21 @@ export async function groupTransactionScope(group: number | 'none'): Promise<{ c
 /** Só para a rota de Lançamentos validar o id recebido. */
 export async function groupExists(id: number): Promise<boolean> {
   return (await db.select({ id: budgetGroups.id }).from(budgetGroups).where(inArray(budgetGroups.id, [id]))).length > 0
+}
+
+/**
+ * Gastos do Orçamento por mês (despesas confirmadas das contas pessoais,
+ * fora as TAGs "fora do orçamento"): o "gasto pessoal" que "Minha empresa"
+ * compara com as retiradas (specs/company-mei).
+ */
+export async function monthlySpending(fromPeriod: string, toPeriod: string): Promise<Map<string, number>> {
+  const scope = await accountScope()
+  const [expenses, cats] = await Promise.all([expenseRows(fromPeriod, toPeriod, scope.personal), categoryMap()])
+  const out = new Map<string, number>()
+  for (const row of expenses) {
+    if (row.pending) continue
+    if (effectiveGroupOf(row.categoryId, cats).excluded) continue
+    out.set(row.period, (out.get(row.period) ?? 0) + row.cents)
+  }
+  return out
 }

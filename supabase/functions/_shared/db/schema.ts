@@ -1100,6 +1100,15 @@ export const financialEngineSettings = pgTable(
     taxRateBps: int('tax_rate_bps').notNull().default(0),
     reservePlannedCents: int('reserve_planned_cents').notNull().default(0),
     marginCents: int('margin_cents').notNull().default(0),
+    /* Minha empresa (MEI), decisions/0043. */
+    /** DAS mensal; nulo = o último DAS pago encontrado na conta PJ */
+    dasMonthlyCents: int('das_monthly_cents'),
+    /** colchão da PJ em meses de custo fixo, antes da "retirada possível" */
+    pjCushionMonths: doublePrecision('pj_cushion_months').notNull().default(2),
+    /** teto anual de faturamento do MEI */
+    meiAnnualLimitCents: int('mei_annual_limit_cents').notNull().default(8_100_000),
+    /** TAGs de DAS; nulo = detecção pelo nome ("imposto", "das") ou dre_group 'tax' */
+    dasCategoryIds: jsonb('das_category_ids'),
   },
   (t) => [
     index('financial_engine_settings_pj_account_idx').on(t.pjAccountId),
