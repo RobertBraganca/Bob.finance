@@ -4,11 +4,14 @@ import { axisProps, gridProps, MARK, themeFor, type Surface } from '../../lib/ch
 import { useEffectiveSurface } from '../../lib/theme'
 import { ChartFrame, makeTooltip, surfaceRing } from './frame'
 
-export type NetWorthPoint = { period: string; netWorthCents: number }
+export type NetWorthPoint = { period: string; netWorthCents: number; source?: 'foto' | 'reconstruído' }
 
 const Tip = makeTooltip<NetWorthPoint>((point) => ({
   title: fmtPeriod(point.period),
-  rows: [{ label: 'Patrimônio líquido', value: money(point.netWorthCents) }],
+  rows: [
+    { label: 'Patrimônio', value: money(point.netWorthCents) },
+    ...(point.source ? [{ label: 'Origem', value: point.source === 'foto' ? 'foto do mês' : 'reconstruído' }] : []),
+  ],
 }))
 
 /**

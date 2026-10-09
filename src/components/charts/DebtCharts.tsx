@@ -1,4 +1,6 @@
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Line,
   LineChart,
@@ -323,4 +325,85 @@ const MONTHS_LONG = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
 function fmtPeriodLongLocal(period: string): string {
   const [y, m] = period.split('-').map(Number) as [number, number]
   return `${MONTHS_LONG[m - 1] ?? ''} de ${y}`
+}
+
+/* ================================================================== *
+ * Calendário de saída (specs/debt-v2): 6 meses, barras empilhadas por
+ * origem (cada dívida e cada cartão), com a renda típica na tabela.
+ * ================================================================== */
+export type ExitMonth = {
+  period: string
+  debtCents: number
+  cardCents: number
+  totalCents: number
+  incomeShareBps: number | null
+  bySource: Record<string, number>
+  ends: string[]
+}
+
+export function ExitCalendarChart({
+  months,
+  sources,
+  incomeCents,
+  surface = 'paper',
+  height = 260,
+}: {
+  months: ExitMonth[]
+  sources: Array<{ key: string; label: string; kind: 'debt' | 'card' }>
+  incomeCents: number
+  surface?: Surface
+  height?: number
+}) {
+  const theme = themeFor(useEffectiveSurface(surface))
+  const used = sources.filter((s) => months.some((m) => (m.bySource[s.key] ?? 0) > 0))
+  const colorOf = (i: number) => theme.series[i % theme.series.length]!
+  const rows = months.map((m) => ({ ...m, ...Object.fromEntries(used.map((s) => [s.key, m.bySource[s.key] ?? 0])) }))
+  const Tip = makeTooltip<(typeof rows)[number]>((m) => ({
+    title: fmtPeriod(m.period),
+    rows: [
+      ...used.filter((s) => (m.bySource[s.key] ?? 0) > 0).map((s) => ({ label: s.label, value: money(m.bySource[s.key] ?? 0), color: colorOf(used.indexOf(s)) })),
+      { label: 'Total', value: money(m.totalCents) },
+      { label: 'Da renda típica', value: m.incomeShareBps === null ? '-' : bps(m.incomeShareBps, 0) },
+    ],
+  }))
+  return (
+    <ChartFrame
+      legend={used.map((s, i) => ({ label: s.label, color: colorOf(i), shape: 'block' as const }))}
+      isEmpty={used.length === 0}
+      emptyTitle="Nada a pagar nos próximos meses"
+      emptyBody="Sem parcelas de dívida nem fatura de cartão ligado nos próximos 6 meses."
+      table={{
+        caption: 'Calendário de saída, mês a mês',
+        rows: months,
+        columns: [
+          { header: 'Mês', value: (m) => fmtPeriod(m.period) + (m.ends.length ? ` (termina: ${m.ends.join(', ')})` : '') },
+          { header: 'Dívidas', value: (m) => money(m.debtCents), align: 'right' },
+          { header: 'Cartões', value: (m) => money(m.cardCents), align: 'right' },
+          { header: 'Total', value: (m) => money(m.totalCents), align: 'right' },
+          { header: incomeCents > 0 ? `de ${money(incomeCents)}` : 'Da renda', value: (m) => (m.incomeShareBps === null ? '-' : bps(m.incomeShareBps, 0)), align: 'right' },
+        ],
+      }}
+      note="Dívidas pelo cronograma; cartões ligados ao Open Finance pela fatura aberta e pelas parcelas já lançadas. Compras novas no cartão ainda não aparecem."
+    >
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
+        <BarChart data={rows} margin={{ top: 16, right: 12, bottom: 4, left: 0 }}>
+          <CartesianGrid {...gridProps(theme)} />
+          <XAxis dataKey="period" tickFormatter={(v: string) => fmtPeriod(v)} {...axisProps(theme)} />
+          <YAxis tickFormatter={(v: number) => axisMoney(v)} width={52} {...axisProps(theme)} />
+          <Tooltip content={<Tip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
+          {used.map((s, i) => (
+            <Bar
+              key={s.key}
+              dataKey={s.key}
+              stackId="out"
+              fill={colorOf(i)}
+              maxBarSize={MARK.barMaxWidth * 2}
+              radius={i === used.length - 1 ? MARK.barRadius : undefined}
+              isAnimationActive={false}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartFrame>
+  )
 }

@@ -8,6 +8,8 @@ import * as categoriesService from '../services/categories'
 import * as categorization from '../services/categorization'
 import * as importsService from '../services/imports'
 import * as bankConnections from '../services/bankConnections'
+import { writeMonthlySnapshot } from '../services/financialHealth'
+import * as cardSync from '../services/cardSync'
 import * as txnService from '../services/transactions'
 import * as budgetService from '../services/budget'
 
@@ -209,12 +211,39 @@ export async function ledgerRoutes(app: FastifyInstance) {
 
   app.post('/bank-connections/sync-all', async () => bankConnections.syncAll())
 
+  /* Resumo dos cartões pelo Meu Pluggy (specs/card-summary-sync). */
+  app.get('/card-connections', async () => ({ connections: await cardSync.listCardConnections() }))
+
+  app.post('/card-connections', async (req, reply) => {
+    const body = z
+      .object({
+        creditCardId: z.number().int().positive(),
+        providerItemId: z.string().uuid(),
+        providerAccountId: z.string().uuid(),
+      })
+      .parse(req.body)
+    return withError(reply, () => cardSync.createCardConnection(body))
+  })
+
+  app.delete('/card-connections/:id', async (req) => {
+    const { id } = idParam.parse(req.params)
+    return cardSync.deleteCardConnection(id)
+  })
+
+  app.post('/card-connections/:id/sync', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    return withError(reply, () => cardSync.syncCard(id))
+  })
+
   // Rotina diária (decisions/0039). Na Edge Function ela entra sem sessão de
   // usuário, só com o segredo; aqui, no servidor local, vale o mesmo segredo.
   app.post('/cron/bank-sync', async (req, reply) => {
     const secret = process.env.BANK_SYNC_CRON_SECRET
     if (!secret || req.headers['x-cron-secret'] !== secret) return reply.code(401).send({ error: 'não autorizado' })
-    return bankConnections.syncAll()
+    const sync = await bankConnections.syncAll()
+    // Depois da sincronização, a foto do mês (decisions/0045); falhar aqui não desfaz a sincronização.
+    const snapshot = await writeMonthlySnapshot().catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+    return { ...sync, snapshot }
   })
 
   app.get('/imports', async () => ({ batches: await importsService.listBatches() }))

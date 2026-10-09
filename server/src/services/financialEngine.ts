@@ -4,6 +4,7 @@ import { financialEngineSettings } from '../db/schema'
 import { addMonths, periodBounds, periodRange, todayIso } from '../core/dates'
 import { accountBalances, monthlyTotals, totals } from './analytics'
 import { listPending } from './cashFlow'
+import { companyOverview } from './company'
 import { listCards } from './creditCards'
 import { debtOverview } from './debt'
 import { targetState, type GoalState } from './goals'
@@ -613,6 +614,14 @@ export async function breakEven(
     reserveStatus(),
   ])
   const proLabore = await proLaboreFor(period, params, origins.proLaboreCents)
+  // Custo fixo da PJ pela Minha empresa (decisions/0045): mediana dos meses com
+  // movimento, DAS incluso, em vez do gasto parcial do mês corrente.
+  let companyFixedCents: number | null = null
+  try {
+    companyFixedCents = (await companyOverview(period)).withdrawable?.fixedMonthlyCents ?? null
+  } catch {
+    companyFixedCents = null
+  }
   const investmentGoalsTargetCents = investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0)
   const plannedInvestmentCents = params.investmentPlannedCents ?? investmentGoalsTargetCents
 
@@ -620,17 +629,25 @@ export async function breakEven(
     {
       key: 'pj_costs',
       label: 'Custos PJ',
-      amountCents: pjTotals.expenseCents,
-      assumptions: {
-        formula: 'despesa realizada no período na conta PJ',
-        contaPJ: params.pjAccountId,
-        escopo: params.pjAccountId === null ? 'ledger inteiro, nenhuma conta PJ informada' : 'apenas a conta PJ informada',
-        origem: 'specs/dre',
-      },
+      amountCents: companyFixedCents ?? pjTotals.expenseCents,
+      assumptions:
+        companyFixedCents !== null
+          ? {
+              formula: 'custo fixo mensal da PJ: mediana dos meses com movimento, DAS incluso',
+              contaPJ: params.pjAccountId,
+              gastoRealizadoNoPeriodoCents: pjTotals.expenseCents,
+              origem: 'Minha empresa (mesmo número do retirável)',
+            }
+          : {
+              formula: 'despesa realizada no período na conta PJ',
+              contaPJ: params.pjAccountId,
+              escopo: params.pjAccountId === null ? 'ledger inteiro, nenhuma conta PJ informada' : 'apenas a conta PJ informada',
+              origem: 'specs/dre',
+            },
     },
     {
       key: 'pro_labore',
-      label: 'Pró-labore',
+      label: 'Retirada planejada',
       amountCents: proLabore.cents,
       assumptions: { formula: 'repasse PJ para PF do período', origem: proLabore.origin },
     },

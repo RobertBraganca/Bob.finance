@@ -4,7 +4,7 @@ import { api } from '../lib/api'
 import { invalidateInvestmentData } from '../lib/invalidate'
 import { useMeta } from '../lib/store'
 import type { IconName } from '../components/ui/Icon'
-import { bps, centsToInput, date as fmtDate, money, parseMoneyInput } from '../lib/format'
+import { bps, centsToInput, date as fmtDate, money, parseMoneyInput, period as fmtPeriod } from '../lib/format'
 import {
   Assumptions,
   Bento,
@@ -42,9 +42,22 @@ type NetWorth = {
   investmentsCents: number
   illiquidCents: number
   financialCents: number
+  /** "Quanto você deve" pessoal: dívidas + cartões pessoais (decisions/0045) */
   debtCents: number
+  debtBreakdown: { debtsCents: number; cardsCents: number }
+  /** patrimônio PESSOAL: contas pessoais + investimentos − dívida */
   liquidityCents: number
+  company: { accountName: string | null; balanceCents: number; cardsCents: number; withdrawableCents: number | null } | null
   assumptions: AssumptionBag
+}
+
+/** Quais meses do histórico são foto gravada e quais são reconstruídos (decisions/0045). */
+function historyNote(points: Array<{ period: string; source?: 'foto' | 'reconstruído' }> | undefined): string {
+  if (!points || points.length === 0) return ''
+  const firstPhoto = points.find((p) => p.source === 'foto')
+  if (!firstPhoto) return 'Ainda sem foto mensal: todos os meses são reconstruídos com os dados de hoje.'
+  const before = points.filter((p) => p.period < firstPhoto.period).length
+  return before > 0 ? `Foto mensal desde ${fmtPeriod(firstPhoto.period)}; os ${before} meses antes dela são reconstruídos.` : 'Todos os meses são fotos gravadas no fim do mês.'
 }
 
 type IlliquidItem = {
@@ -81,13 +94,14 @@ export function PatrimonioPage() {
   })
 
   const nw = netWorth.data
-  const netWorthCents = nw ? nw.balanceCents + nw.investmentsCents - nw.debtCents : 0
+  // Uma fonte só: o servidor já entrega o patrimônio pessoal.
+  const netWorthCents = nw?.liquidityCents ?? 0
 
   return (
     <>
       <PageHeader
         title="Patrimônio"
-        subtitle="O que você tem, o que você deve e o que sobra"
+        subtitle="O seu patrimônio pessoal: o que você tem e o que você deve, com a empresa à parte"
         actions={
           <Button variant="primary" icon="plus" onClick={() => setAdding(true)}>
             Adicionar bem
@@ -102,13 +116,16 @@ export function PatrimonioPage() {
           </Card>
         )}
         <Bento>
-          <Slab span={6} accent>
-            <HeroFigure label="Patrimônio líquido" value={nw ? money(netWorthCents) : '-'}>
+          <Slab span={6} accent assumptions={nw?.assumptions}>
+            <HeroFigure label="Patrimônio pessoal hoje" value={nw ? money(netWorthCents) : '-'}>
               <div className="stack stack--tight" style={{ marginTop: 'var(--sp-4)' }}>
                 <HeroLine label="Financeiro" value={nw ? money(nw.financialCents) : '-'} />
                 <HeroLine label="Imobilizado" value={nw ? money(nw.illiquidCents) : '-'} />
                 <HeroLine label="Dívida" value={nw ? `- ${money(nw.debtCents)}` : '-'} />
               </div>
+              <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-xs)', marginTop: 'var(--sp-3)' }}>
+                A dívida é a mesma do Endividamento, sem os cartões da empresa; a conta PJ fica à parte.
+              </p>
             </HeroFigure>
           </Slab>
 
@@ -131,26 +148,42 @@ export function PatrimonioPage() {
                   de valores na mesma página com tratamentos diferentes
                   (02/09/2026).
                 */}
-                <CompositionRow icon="wallet" label="Saldo em conta" value={money(nw.balanceCents)} />
+                <CompositionRow icon="wallet" label="Saldo das contas pessoais" value={money(nw.balanceCents)} />
                 <CompositionRow
                   icon="trending"
                   label="Investimentos negociáveis"
                   value={money(nw.financialCents - nw.balanceCents)}
                 />
                 <CompositionRow icon="landmark" label="Imobilizado" value={money(nw.illiquidCents)} />
-                <CompositionRow
-                  icon="alert"
-                  label="Dívida total"
-                  value={`- ${money(nw.debtCents)}`}
-                  negative
-                />
+                <CompositionRow icon="alert" label="Dívidas e acordos" value={`- ${money(nw.debtBreakdown.debtsCents)}`} negative />
+                <CompositionRow icon="wallet" label="Cartões pessoais (limite usado)" value={`- ${money(nw.debtBreakdown.cardsCents)}`} negative />
                 <p className="chart__note">
-                  Financeiro e Imobilizado somam o que existe; a dívida é subtraída no patrimônio
-                  líquido ao lado. Um bem imobilizado conta como patrimônio, mas não paga uma conta.
+                  Financeiro e Imobilizado somam o que existe; dívidas e cartões são subtraídos no
+                  patrimônio ao lado. Um bem imobilizado conta como patrimônio, mas não paga uma conta.
                 </p>
               </div>
             )}
           </Card>
+
+          {nw?.company && (
+            <Card
+              span={12}
+              title={`Empresa${nw.company.accountName ? ` (${nw.company.accountName})` : ''}`}
+              subtitle="Fora do patrimônio pessoal: o dinheiro da PJ tem DAS, contas e colchão antes de ser seu"
+            >
+              <div className="card__fill card__fill--spread">
+                <CompositionRow icon="bank" label="Saldo da conta PJ" value={money(nw.company.balanceCents)} />
+                {nw.company.cardsCents > 0 && (
+                  <CompositionRow icon="wallet" label="Cartão da empresa (limite usado)" value={`- ${money(nw.company.cardsCents)}`} negative />
+                )}
+                <CompositionRow
+                  icon="trending"
+                  label="Retirável hoje (Minha empresa)"
+                  value={nw.company.withdrawableCents === null ? '-' : money(nw.company.withdrawableCents)}
+                />
+              </div>
+            </Card>
+          )}
 
           <Card
             span={12}
@@ -159,11 +192,7 @@ export function PatrimonioPage() {
             subtitle="Bens que entram no patrimônio mas não se rebalanceiam: imóvel, veículo, joia"
           >
             {illiquid.isError ? (
-              <EmptyState
-                icon="alert"
-                title="Falha ao carregar"
-                body="Não foi possível carregar os bens agora. Tente novamente em instantes."
-              />
+              <LoadError onRetry={() => illiquid.refetch()} retrying={illiquid.isFetching} />
             ) : !illiquid.data ? (
               <SkeletonLines lines={4} />
             ) : illiquid.data.items.length === 0 ? (
@@ -211,6 +240,7 @@ export function PatrimonioPage() {
                           size="sm"
                           icon="pencil"
                           title="Atualizar o valor deste bem"
+                          aria-label={`Atualizar o valor de ${item.name}`}
                           onClick={() => setRevaluing(item)}
                         />
                       </span>
@@ -222,8 +252,18 @@ export function PatrimonioPage() {
           </Card>
 
 
-          <Card span={12} title="Evolução do patrimônio" subtitle="Últimos 12 meses, recalculado a cada mês">
-            <NetWorthHistoryChart points={history.data?.history ?? []} surface="paper" />
+          <Card
+            span={12}
+            title="Evolução do patrimônio"
+            subtitle={`Patrimônio pessoal, últimos 12 meses. ${historyNote(history.data?.history) || 'Reconstruído com os lançamentos e saldos registrados.'} Um bem entra na data de aquisição.`}
+          >
+            {history.isError ? (
+              <LoadError onRetry={() => history.refetch()} retrying={history.isFetching} />
+            ) : !history.data ? (
+              <SkeletonLines lines={4} />
+            ) : (
+              <NetWorthHistoryChart points={history.data.history} surface="paper" />
+            )}
           </Card>
         </Bento>
       </div>
@@ -297,8 +337,12 @@ function AddAssetModal({ onClose }: { onClose: () => void }) {
   const meta = useMeta()
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
+  // Data de aquisição: o degrau do bem no gráfico cai no mês certo (specs/personal-picture).
+  const today = meta.data?.today ?? new Date().toISOString().slice(0, 10)
+  const [acquiredOn, setAcquiredOn] = useState(today)
   const nameFieldId = useId()
   const valueFieldId = useId()
+  const dateFieldId = useId()
 
   const create = useMutation({
     mutationFn: async () => {
@@ -310,7 +354,7 @@ function AddAssetModal({ onClose }: { onClose: () => void }) {
       await api.post('/investments/trades', {
         assetId: asset.id,
         kind: 'buy',
-        tradedOn: meta.data?.today ?? new Date().toISOString().slice(0, 10),
+        tradedOn: acquiredOn || today,
         quantity: 1,
         unitPriceCents: valueCents,
       })
@@ -350,8 +394,13 @@ function AddAssetModal({ onClose }: { onClose: () => void }) {
             />
             <span className="field__hint">
               Bem físico não tem cotação de mercado: este valor é o que você informa, e fica assim
-              até você reavaliar.
+              até você reavaliar. Se o bem tem financiamento, cadastre a dívida em Endividamento.
             </span>
+          </div>
+          <div className="field">
+            <label className="field__label" htmlFor={dateFieldId}>Data de aquisição</label>
+            <Input id={dateFieldId} type="date" value={acquiredOn} max={today} onChange={(e) => setAcquiredOn(e.target.value)} />
+            <span className="field__hint">O bem entra no patrimônio a partir desta data, também no gráfico de evolução.</span>
           </div>
         </div>
         <DialogFooter>

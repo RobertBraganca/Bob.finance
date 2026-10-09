@@ -125,6 +125,9 @@ export const investmentGoalPurposeEnum = pgEnum('investment_goal_purpose', [
 ])
 /** Sistema de amortização de um contrato (decisions/0041). */
 export const amortizationSystemEnum = pgEnum('amortization_system', ['sac', 'price'])
+
+/** Por que a dívida saiu da lista (specs/debt-v2): quitada, virou um acordo ou encerrada à mão. */
+export const debtClosedReasonEnum = pgEnum('debt_closed_reason', ['paid', 'renegotiated', 'manual'])
 export const propertyPlanStatusEnum = pgEnum('property_plan_status', ['planning', 'purchased'])
 /** De onde vem o realizado de um grupo do orçamento (decisions/0042). */
 export const budgetGroupSourceEnum = pgEnum('budget_group_source', ['categories', 'goal_contributions', 'other_contributions'])
@@ -561,11 +564,60 @@ export const debts = pgTable(
     amortization: amortizationSystemEnum('amortization'),
     /** Seguros e taxas somados a cada parcela de um contrato amortizado; não entram em juros nem amortização. */
     monthlyFeesCents: int('monthly_fees_cents').notNull().default(0),
+    /** TAG padrão das parcelas pendentes que a dívida materializa (specs/debt-v2), para o grupo do Orçamento */
+    categoryId: int('category_id').references(() => categories.id, { onDelete: 'set null' }),
+    /**
+     * Paga dentro da fatura deste cartão (specs/personal-picture): conta uma
+     * vez no Endividamento e não gera pendência na conta.
+     */
+    paidViaCardId: int('paid_via_card_id').references((): AnyPgColumn => creditCards.id, { onDelete: 'set null' }),
     closedOn: text('closed_on'),
+    /** nulo nas ativas e nas encerradas antes desta coluna */
+    closedReason: debtClosedReasonEnum('closed_reason'),
     active: boolean('active').notNull().default(true),
     createdAt: text('created_at').notNull().default(now),
   },
   (t) => [index('debts_account_idx').on(t.accountId)],
+)
+
+/**
+ * Acordo que substituiu dívidas (specs/debt-v2): `debtId` é o acordo,
+ * `originDebtId` cada dívida que ele encerrou, com o saldo dela no dia.
+ */
+export const debtRenegotiations = pgTable(
+  'debt_renegotiations',
+  {
+    id: id(),
+    debtId: int('debt_id')
+      .notNull()
+      .references(() => debts.id, { onDelete: 'cascade' }),
+    originDebtId: int('origin_debt_id')
+      .notNull()
+      .references(() => debts.id, { onDelete: 'cascade' }),
+    originBalanceCents: int('origin_balance_cents').notNull(),
+    agreedOn: text('agreed_on').notNull(),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('debt_renegotiation_origin_uq').on(t.originDebtId), index('debt_renegotiation_debt_idx').on(t.debtId)],
+)
+
+/**
+ * A foto do mês (specs/personal-picture): score e patrimônio pessoal,
+ * gravados pela rotina diária; a última gravação do mês é a foto dele.
+ */
+export const monthlySnapshots = pgTable(
+  'monthly_snapshots',
+  {
+    id: id(),
+    period: text('period').notNull(),
+    scoreBps: int('score_bps'),
+    netWorthCents: int('net_worth_cents').notNull(),
+    companyCents: int('company_cents').notNull().default(0),
+    debtCents: int('debt_cents').notNull().default(0),
+    details: jsonb('details').notNull().default({}),
+    takenAt: text('taken_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('monthly_snapshot_period_uq').on(t.period)],
 )
 
 /** Balance history, so the debt trend is measured rather than guessed. */
@@ -634,6 +686,74 @@ export const creditCardSnapshots = pgTable(
     availableLimitCents: int('available_limit_cents').notNull(),
   },
   (t) => [uniqueIndex('credit_card_snapshot_uq').on(t.cardId, t.asOf)],
+)
+
+/**
+ * Resumo do cartão vindo do Meu Pluggy (specs/card-summary-sync,
+ * decisions/0044). Nenhuma compra vira lançamento: só limite, saldo,
+ * faturas fechadas e o resumo por mês.
+ */
+export const cardConnections = pgTable(
+  'card_connections',
+  {
+    id: id(),
+    creditCardId: int('credit_card_id')
+      .notNull()
+      .references(() => creditCards.id, { onDelete: 'cascade' }),
+    providerItemId: text('provider_item_id').notNull(),
+    providerAccountId: text('provider_account_id').notNull(),
+    providerAccountLabel: text('provider_account_label').notNull().default(''),
+    /** saldo atual da fatura (`balance` da conta de cartão) */
+    balanceCents: int('balance_cents'),
+    /** disponível informado pelo banco; nulo quando vem 0 sem fazer sentido */
+    availableCents: int('available_cents'),
+    minimumPaymentCents: int('minimum_payment_cents'),
+    dueDate: text('due_date'),
+    lastSyncedAt: text('last_synced_at'),
+    lastError: text('last_error'),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex('card_connections_provider_account_uq').on(t.providerAccountId),
+    uniqueIndex('card_connections_card_uq').on(t.creditCardId),
+  ],
+)
+
+export const cardBills = pgTable(
+  'card_bills',
+  {
+    id: id(),
+    creditCardId: int('credit_card_id')
+      .notNull()
+      .references(() => creditCards.id, { onDelete: 'cascade' }),
+    providerBillId: text('provider_bill_id').notNull(),
+    dueDate: text('due_date').notNull(),
+    closingDate: text('closing_date'),
+    totalCents: int('total_cents').notNull(),
+    minimumCents: int('minimum_cents'),
+    /** encargos da fatura, fora `OTHER` (saldo levado) */
+    financeChargesCents: int('finance_charges_cents').notNull().default(0),
+    financeCharges: jsonb('finance_charges'),
+    syncedAt: text('synced_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('card_bills_provider_uq').on(t.providerBillId), index('card_bills_card_idx').on(t.creditCardId)],
+)
+
+/** Por cartão e mês de fatura: o já lançado, as parcelas projetadas e os encargos. Refeita a cada sincronização. */
+export const cardMonths = pgTable(
+  'card_months',
+  {
+    id: id(),
+    creditCardId: int('credit_card_id')
+      .notNull()
+      .references(() => creditCards.id, { onDelete: 'cascade' }),
+    period: text('period').notNull(),
+    postedCents: int('posted_cents').notNull().default(0),
+    projectedCents: int('projected_cents').notNull().default(0),
+    chargesCents: int('charges_cents').notNull().default(0),
+    installmentPurchases: int('installment_purchases').notNull().default(0),
+  },
+  (t) => [uniqueIndex('card_months_uq').on(t.creditCardId, t.period)],
 )
 
 /* ------------------------------------------------------------------ *

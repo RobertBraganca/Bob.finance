@@ -11,6 +11,8 @@ import * as categoriesService from '../_shared/services/categories.ts'
 import * as categorization from '../_shared/services/categorization.ts'
 import * as importsService from '../_shared/services/imports.ts'
 import * as bankConnections from '../_shared/services/bankConnections.ts'
+import { writeMonthlySnapshot } from '../_shared/services/financialHealth.ts'
+import * as cardSync from '../_shared/services/cardSync.ts'
 import * as txnService from '../_shared/services/transactions.ts'
 import * as budgetService from '../_shared/services/budget.ts'
 import { friendlyErrorMessage } from '../_shared/core/errors.ts'
@@ -245,7 +247,44 @@ app.post('/bank-connections/:id/sync', async (c) => {
 
 app.post('/bank-connections/sync-all', async (c) => c.json(await bankConnections.syncAll()))
 
-app.post('/cron/bank-sync', async (c) => c.json(await bankConnections.syncAll()))
+/* Resumo dos cartões pelo Meu Pluggy (specs/card-summary-sync). */
+app.get('/card-connections', async (c) => c.json({ connections: await cardSync.listCardConnections() }))
+
+app.post('/card-connections', async (c) => {
+  const body = z
+    .object({
+      creditCardId: z.number().int().positive(),
+      providerItemId: z.string().uuid(),
+      providerAccountId: z.string().uuid(),
+    })
+    .parse(await c.req.json())
+  try {
+    return c.json(await cardSync.createCardConnection(body))
+  } catch (error) {
+    return c.json(asBadRequest(error), 400)
+  }
+})
+
+app.delete('/card-connections/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  return c.json(await cardSync.deleteCardConnection(id))
+})
+
+app.post('/card-connections/:id/sync', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  try {
+    return c.json(await cardSync.syncCard(id))
+  } catch (error) {
+    return c.json(asBadRequest(error), 400)
+  }
+})
+
+app.post('/cron/bank-sync', async (c) => {
+  const sync = await bankConnections.syncAll()
+  // Depois da sincronização, a foto do mês (decisions/0045); falhar aqui não desfaz a sincronização.
+  const snapshot = await writeMonthlySnapshot().catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+  return c.json({ ...sync, snapshot })
+})
 
 app.get('/imports', async (c) => c.json({ batches: await importsService.listBatches() }))
 

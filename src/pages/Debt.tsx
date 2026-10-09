@@ -14,7 +14,6 @@ import {
   parseMoneyInput,
   parsePercentInput,
   date as fmtDate,
-  period as fmtPeriod,
   periodLong as fmtPeriodLong,
 } from '../lib/format'
 import {
@@ -23,29 +22,25 @@ import {
   Card,
   ConfirmDeleteModal,
   EmptyState,
-  FilterSelect,
-  HeroFigure,
   Icon,
   Modal,
   Select,
   SkeletonLines,
   Slab,
-  StatTile,
   TextInput,
   useToast,
 } from '../components/ui'
-import { SimulatorModal } from '../components/ui/SimulatorModal'
 import { PageHeader } from '../components/shell/Shell'
 import {
   DebtProjectionChart,
-  DebtServiceGauge,
   PayoffSummary,
 } from '../components/charts/DebtCharts'
 import { DebtHistoryChart } from '../components/charts/DebtHistoryChart'
 import { CategoryRing } from '../components/charts/CategoryRing'
 import { todayIso } from '../lib/period'
-import { impliedMonthlyRate, installmentsCents, type AmortizationSystem } from '@shared/propertyPlan'
-import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
+import { installmentsCents, type AmortizationSystem } from '@shared/propertyPlan'
+import { CategorySelect } from '../components/ui/CategorySelect'
+import { CreditCostCard, ExitCalendarCard, FreedomCard, OweToday, RenegotiationCard, type AgreementPrefill, type DebtV2 } from './debt/DebtV2'
 
 const KIND_LABEL: Record<string, string> = {
   credit_card: 'Cartão de crédito',
@@ -94,6 +89,11 @@ type DebtRow = {
   amortization: AmortizationSystem | null
   monthlyFeesCents: number
   principalCents: number
+  /** TAG das parcelas (specs/debt-v2) */
+  categoryId: number | null
+  openedOn: string | null
+  /** paga dentro da fatura deste cartão (specs/personal-picture) */
+  paidViaCardId: number | null
 }
 
 type PaymentRow = {
@@ -109,7 +109,10 @@ type PaymentRow = {
 type ClosedDebtRow = DebtRow & {
   closedOn: string | null
   totalPaidCents: number
+  closedReason: 'paid' | 'renegotiated' | 'manual' | null
 }
+
+const CLOSED_REASON_LABEL: Record<string, string> = { paid: 'quitada', renegotiated: 'renegociada', manual: 'encerrada à mão' }
 
 type SuggestedMatch = {
   pending: { id: number; postedOn: string; description: string; amountCents: number }
@@ -167,24 +170,11 @@ type Projection = {
 
 const EXTRA_STEPS = [0, 10_000, 25_000, 50_000, 100_000, 200_000, 500_000]
 
-/** Last 24 calendar months (oldest first), skipping the current one — it's still accruing and would understate "renda comprometida" if picked. */
-function recentClosedMonths(count: number): string[] {
-  const now = new Date()
-  const months: string[] = []
-  for (let i = 1; i <= count; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
-  }
-  return months.reverse()
-}
-
 export function DebtPage() {
   const [extraIndex, setExtraIndex] = useState(0)
   const [editing, setEditing] = useState<DebtRow | 'new' | null>(null)
-  const [simulating, setSimulating] = useState(false)
+  const [prefill, setPrefill] = useState<AgreementPrefill | null>(null)
   const [strategy, setStrategy] = useState<'avalanche' | 'snowball'>('avalanche')
-  const monthOptions = useState(() => recentClosedMonths(24))[0]
-  const [period, setPeriod] = useState(() => monthOptions[monthOptions.length - 1]!)
   const [paymentModal, setPaymentModal] = useState<DebtRow | null>(null)
   const [paymentHistory, setPaymentHistory] = useState<DebtRow | null>(null)
   const [mismatchDetail, setMismatchDetail] = useState<ValueMismatch | null>(null)
@@ -193,8 +183,14 @@ export function DebtPage() {
   const extraMonthlyCents = EXTRA_STEPS[extraIndex] ?? 0
 
   const overview = useQuery({
-    queryKey: ['debts', period],
-    queryFn: () => api.get<Overview>('/debts', { period }),
+    queryKey: ['debts'],
+    queryFn: () => api.get<Overview>('/debts'),
+  })
+
+  // Endividamento v2 (specs/debt-v2): total com cartões, calendário, custo, datas e acordos.
+  const v2 = useQuery({
+    queryKey: ['debts', 'v2'],
+    queryFn: () => api.get<DebtV2>('/debts/overview-v2'),
   })
 
   const projection = useQuery({
@@ -215,16 +211,11 @@ export function DebtPage() {
     <>
       <PageHeader
         title="Endividamento"
-        subtitle="Composição, custo dos juros e trajetória até a quitação"
+        subtitle="Quanto você deve, o que sai por mês, quanto custa e quando acaba"
         actions={
-          <div className="row">
-            <Button size="sm" icon="sparkle" onClick={() => setSimulating(true)}>
-              Simular quitação
-            </Button>
-            <Button variant="primary" icon="plus" onClick={() => setEditing('new')}>
-              Cadastrar dívida
-            </Button>
-          </div>
+          <Button variant="primary" icon="plus" onClick={() => setEditing('new')}>
+            Cadastrar dívida
+          </Button>
         }
       />
 
@@ -264,49 +255,24 @@ export function DebtPage() {
           </Bento>
         ) : (
           <Bento>
-            <Slab span={6} accent>
-              <HeroFigure label="Dívida total" value={money(data.totalCents)}>
-                <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
-                  <span className="kv__k">Juros por mês</span>
-                  <span className="kv__v">{money(data.monthlyInterestCents)}</span>
-                  <span className="kv__k">Taxa média ponderada</span>
-                  <span className="kv__v">{bps(data.weightedAprBps)} a.a.</span>
-                  <span className="kv__k">Pagamento programado</span>
-                  <span className="kv__v">{money(data.scheduledCents)}</span>
-                </div>
-              </HeroFigure>
-            </Slab>
+            {v2.data ? (
+              <>
+                <OweToday v2={v2.data} />
+                <ExitCalendarCard v2={v2.data} />
+                <CreditCostCard v2={v2.data} />
+                <FreedomCard v2={v2.data} debts={data.debts} onEdit={(id) => setEditing(data.debts.find((d) => d.id === id) ?? null)} />
+              </>
+            ) : v2.isError ? (
+              <Card span={12}>
+                <EmptyState icon="alert" title="Falha ao carregar o resumo" body="Não foi possível montar o total com os cartões agora. Tente novamente em instantes." />
+              </Card>
+            ) : (
+              <Card span={12}>
+                <SkeletonLines lines={3} />
+              </Card>
+            )}
 
-            <Slab
-              span={6}
-              title="Renda comprometida"
-              subtitle="Parcela mensal sobre a renda mensal típica"
-              assumptions={{
-                formula: 'pagamento programado das dívidas cadastradas ÷ renda mensal típica',
-                rendaTipica: `mediana da receita dos meses com movimento, de todas as contas (inclui o faturamento da PJ), até ${fmtPeriodLong(data.period)}`,
-                faixas: 'Saudável até 20%; Atenção até 36%; Comprometido até 50%; Crítico acima de 50%',
-                foraDaConta: 'fatura e parcelamentos do cartão de crédito não entram (só as dívidas cadastradas aqui)',
-              }}
-              actions={
-                <FilterSelect
-                  icon="clock"
-                  value={period}
-                  onChange={(value) => setPeriod(value ?? period)}
-                  options={monthOptions.map((m) => ({ value: m, label: fmtPeriod(m) }))}
-                />
-              }
-            >
-              <DebtServiceGauge
-                ratioBps={data.debtToIncomeBps}
-                surface="paper"
-                caption={
-                  data.typicalMonthlyIncomeCents > 0
-                    ? `${money(data.scheduledCents)} de ${money(data.typicalMonthlyIncomeCents)} de renda mensal típica, mediana de ${data.incomeSampleMonths} ${data.incomeSampleMonths === 1 ? 'mês' : 'meses'} com movimento até ${fmtPeriodLong(data.period)}`
-                    : `Sem receita registrada nos ${data.incomeWindowMonths} meses até ${fmtPeriodLong(data.period)}`
-                }
-              />
-            </Slab>
-
+            {data.byKind.length > 1 && (
             <Slab span={6} title="Composição" subtitle="Saldo por tipo de dívida">
               <CategoryRing
                 surface="paper"
@@ -324,8 +290,9 @@ export function DebtPage() {
                 }))}
               />
             </Slab>
+            )}
 
-            <Card span={6} title="O que muda com o aporte">
+            <Card span={data.byKind.length > 1 ? 6 : 12} title="O que muda com o aporte">
               {projection.isError ? (
                 <EmptyState
                   icon="alert"
@@ -351,6 +318,12 @@ export function DebtPage() {
                       extraMonthlyCents > 0 ? projection.data.accelerated.payoffPeriod : projection.data.baseline.payoffPeriod
                     }
                   />
+                  {v2.data && extraMonthlyCents === 0 && v2.data.freeOn !== projection.data.baseline.payoffPeriod && (
+                    <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                      <Icon name="info" size={12} /> Esta projeção usa a taxa cadastrada de cada dívida. Pelo cronograma dos contratos, você fica livre em{' '}
+                      {v2.data.freeOn ? fmtPeriodLong(v2.data.freeOn) : 'data nenhuma'} (veja "Quando fico livre"); a diferença some quando a taxa bate com o contrato.
+                    </p>
+                  )}
                   {(() => {
                     const perDebt = (extraMonthlyCents > 0 ? projection.data.accelerated : projection.data.baseline).perDebt ?? []
                     if (perDebt.length < 2) return null
@@ -441,6 +414,17 @@ export function DebtPage() {
               />
             </Card>
 
+            {v2.data && (
+              <RenegotiationCard
+                v2={v2.data}
+                debts={data.debts}
+                onRegister={(next) => {
+                  setPrefill(next)
+                  setEditing('new')
+                }}
+              />
+            )}
+
             <Card
               span={12}
               title="Evolução da dívida"
@@ -448,8 +432,6 @@ export function DebtPage() {
             >
               <DebtHistoryChart points={data.trend} surface="paper" />
             </Card>
-
-            <RateMismatchCard debts={data.debts} onEdit={setEditing} />
 
             <ReconciliationQueueCard
               queue={reconciliation.data}
@@ -546,8 +528,8 @@ export function DebtPage() {
               <Card
                 span={12}
                 flush
-                title="Quitadas"
-                subtitle="Dívidas cujas parcelas foram todas pagas, saindo da lista ativa automaticamente"
+                title="Encerradas"
+                subtitle="Quitadas, renegociadas num acordo ou encerradas à mão"
               >
                 <div className="table-wrap">
                   <table className="table table--stack-mobile">
@@ -557,7 +539,7 @@ export function DebtPage() {
                         <th scope="col">Tipo</th>
                         <th scope="col" className="table__center">Parcelas</th>
                         <th scope="col" className="table__num">Total pago</th>
-                        <th scope="col">Quitada em</th>
+                        <th scope="col">Encerrada em</th>
                         <th scope="col" />
                       </tr>
                     </thead>
@@ -583,7 +565,10 @@ export function DebtPage() {
                             </button>
                           </td>
                           <td className="table__num" data-label="Total pago">{money(debt.totalPaidCents)}</td>
-                          <td className="muted" data-label="Quitada em">{debt.closedOn ? fmtDate(debt.closedOn) : '-'}</td>
+                          <td className="muted" data-label="Encerrada em">
+                            {debt.closedOn ? fmtDate(debt.closedOn) : '-'}
+                            {debt.closedReason && <span className="badge" style={{ marginLeft: 6 }}>{CLOSED_REASON_LABEL[debt.closedReason]}</span>}
+                          </td>
                           <td data-label="__trail">
                             <div className="row" style={{ gap: 2 }}>
                               <Button
@@ -607,9 +592,16 @@ export function DebtPage() {
         )}
       </div>
 
-      {simulating && <SimulatorModal initialKind="payoff" onClose={() => setSimulating(false)} />}
       {editing !== null && (
-        <DebtModal debt={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
+        <DebtModal
+          debt={editing === 'new' ? null : editing}
+          prefill={editing === 'new' ? prefill : null}
+          activeDebts={data?.debts ?? []}
+          onClose={() => {
+            setEditing(null)
+            setPrefill(null)
+          }}
+        />
       )}
       {paymentModal && <DebtPaymentModal debt={paymentModal} onClose={() => setPaymentModal(null)} />}
       {paymentHistory && (
@@ -893,49 +885,34 @@ function DeleteDebtButton({ debtId, name }: { debtId: number; name: string }) {
  * saem errados; o card mostra a diferença e abre a edição, sem mudar nada
  * sozinho.
  */
-function RateMismatchCard({ debts, onEdit }: { debts: DebtRow[]; onEdit: (debt: DebtRow) => void }) {
-  const rows = debts
-    .filter((d) => d.installmentCount !== null && d.amortization === null && (d.installmentsRemaining ?? 0) > 0 && d.scheduledPaymentCents > 0)
-    .map((d) => {
-      const implied = impliedMonthlyRate(d.balanceCents, d.scheduledPaymentCents, d.installmentsRemaining ?? 0)
-      const impliedBps = implied === null ? null : Math.round(implied * 10_000)
-      return { debt: d, impliedBps }
-    })
-    .filter(({ debt, impliedBps }) => impliedBps === null || Math.abs(impliedBps - debt.monthlyRateBps) >= 50)
-  if (rows.length === 0) return null
-  return (
-    <div style={{ gridColumn: '1 / -1' }}>
-      <Alert variant="warning">
-        <Icon name="alert" size={16} />
-        <AlertTitle>{rows.length === 1 ? 'A taxa de uma dívida não bate com o contrato' : `A taxa de ${rows.length} dívidas não bate com o contrato`}</AlertTitle>
-        <AlertDescription>
-          <div className="stack stack--tight" style={{ marginTop: 'var(--sp-2)' }}>
-            {rows.map(({ debt, impliedBps }) => (
-              <div key={debt.id} className="row row--between row--wrap" style={{ gap: 'var(--sp-2)' }}>
-                <span>
-                  <strong>{debt.name}</strong>:{' '}
-                  {impliedBps === null
-                    ? `as ${debt.installmentsRemaining} parcelas restantes de ${money(debt.scheduledPaymentCents)} somam menos que o saldo de ${money(debt.balanceCents)}.`
-                    : `cadastrada a ${bpsToInput(debt.monthlyRateBps)}% ao mês; com ${debt.installmentsRemaining} parcelas de ${money(debt.scheduledPaymentCents)} sobre ${money(debt.balanceCents)}, a taxa que fecha o contrato é ${bpsToInput(impliedBps)}% ao mês.`}{' '}
-                  Juros por mês, prazo e projeção usam a taxa cadastrada.
-                </span>
-                <Button size="sm" icon="pencil" onClick={() => onEdit(debt)}>
-                  Revisar dívida
-                </Button>
-              </div>
-            ))}
-          </div>
-        </AlertDescription>
-      </Alert>
-    </div>
-  )
-}
-
-function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => void }) {
+function DebtModal({
+  debt,
+  prefill,
+  activeDebts,
+  onClose,
+}: {
+  debt: DebtRow | null
+  /** acordo vindo do simulador de proposta (specs/debt-v2) */
+  prefill?: AgreementPrefill | null
+  activeDebts: DebtRow[]
+  onClose: () => void
+}) {
   const toast = useToast()
   const queryClient = useQueryClient()
-  const [name, setName] = useState(debt?.name ?? '')
-  const [kind, setKind] = useState(debt?.kind ?? 'credit_card')
+  const [name, setName] = useState(debt?.name ?? prefill?.name ?? '')
+  const [kind, setKind] = useState(debt?.kind ?? (prefill ? 'personal_loan' : 'credit_card'))
+  /** TAG das parcelas; na dívida nova, vazio = o servidor usa "Financeiro › Empréstimos" */
+  const [categoryId, setCategoryId] = useState<number | null>(debt?.categoryId ?? null)
+  /** "Este acordo renegocia": dívidas de origem que o acordo encerra como renegociadas */
+  const [origins, setOrigins] = useState<Set<number>>(() => new Set(prefill?.originDebtIds ?? []))
+  const categoryFieldId = useId()
+  /** Paga na fatura do cartão: não lança pendência na conta e conta uma vez no Endividamento */
+  const [paidViaCardId, setPaidViaCardId] = useState<number | null>(debt?.paidViaCardId ?? null)
+  const cardFieldId = useId()
+  const cardOptions = useQuery({
+    queryKey: ['credit-cards'],
+    queryFn: () => api.get<{ cards: Array<{ id: number; name: string }> }>('/credit-cards'),
+  })
   const [institution, setInstitution] = useState(debt?.institution ?? '')
   /**
    * Contrato amortizado (SAC ou Price, só em Financiamento): o campo de
@@ -946,7 +923,7 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
   const [amortization, setAmortization] = useState<AmortizationSystem | null>(debt?.amortization ?? null)
   const [fees, setFees] = useState(centsToInput(debt?.monthlyFeesCents || null))
   const amortized = kind === 'financing' && amortization !== null
-  const [balance, setBalance] = useState(centsToInput((debt?.amortization ? debt.principalCents : debt?.balanceCents) ?? null))
+  const [balance, setBalance] = useState(centsToInput((debt?.amortization ? debt.principalCents : debt?.balanceCents) ?? prefill?.principalCents ?? null))
   /**
    * A taxa é GRAVADA sempre como efetiva anual, mas pode ser DIGITADA ao
    * mês, que é como cartão rotativo e cheque especial são publicados no
@@ -957,12 +934,16 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
    * o real, com a projeção de quitação errando por anos.
    */
   const [rateBasis, setRateBasis] = useState<'annual' | 'monthly'>('annual')
-  const [apr, setApr] = useState(bpsToInput(debt?.aprBps ?? null))
+  const [apr, setApr] = useState(bpsToInput(debt?.aprBps ?? prefill?.aprBps ?? null))
   const [minimum, setMinimum] = useState(centsToInput(debt?.minimumPaymentCents ?? null))
-  const [scheduled, setScheduled] = useState(centsToInput(debt?.scheduledPaymentCents ?? null))
+  const [scheduled, setScheduled] = useState(centsToInput(debt?.scheduledPaymentCents ?? prefill?.scheduledPaymentCents ?? null))
   const [dueDay, setDueDay] = useState(String(debt?.dueDay ?? 10))
   const [installments, setInstallments] = useState(
-    debt?.installmentCount !== null && debt?.installmentCount !== undefined ? String(debt.installmentCount) : '',
+    debt?.installmentCount !== null && debt?.installmentCount !== undefined
+      ? String(debt.installmentCount)
+      : prefill?.installmentCount
+        ? String(prefill.installmentCount)
+        : '',
   )
   const [accountId, setAccountId] = useState<number | null>(debt?.accountId ?? null)
   const accounts = useAccounts()
@@ -980,7 +961,7 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
   const feesFieldId = useId()
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const principalCents = parseMoneyInput(balance)
       const typedBps = parsePercentInput(apr)
       if (principalCents === null) throw new Error('informe o saldo')
@@ -1002,12 +983,17 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
         accountId,
         amortization: amortized ? amortization : null,
         monthlyFeesCents: amortized ? Math.abs(parseMoneyInput(fees) ?? 0) : 0,
+        // Na edição, vazio = sem TAG; na dívida nova, vazio deixa o servidor escolher a padrão.
+        ...(debt || categoryId !== null ? { categoryId } : {}),
+        paidViaCardId,
       }
-      return debt ? api.patch(`/debts/${debt.id}`, body) : api.post('/debts', body)
+      const saved = debt ? await api.patch<{ id: number }>(`/debts/${debt.id}`, body) : await api.post<{ id: number }>('/debts', body)
+      if (origins.size > 0) await api.post(`/debts/${saved.id}/renegotiation`, { originDebtIds: [...origins] })
+      return saved
     },
     onSuccess: async () => {
       if (!debt) telemetry.action('debt', 'debt_created')
-      toast(debt ? 'Dívida atualizada' : 'Dívida cadastrada')
+      toast(origins.size > 0 ? 'Acordo registrado; as dívidas de origem saíram da lista como renegociadas' : debt ? 'Dívida atualizada' : 'Dívida cadastrada')
       // Awaited: se o modal reabrir antes do refetch, ele reidrata do cache
       // (ainda com o dado pré-edição) e a próxima edição sobrescreve esta.
       await queryClient.invalidateQueries()
@@ -1046,6 +1032,8 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
    * um rotativo, enquanto "180" sozinho não diz nada.
    */
   const typedRateBps = parsePercentInput(apr)
+  // Só na dívida nova: um acordo existente já encerrou as origens dele.
+  const renegotiable = debt ? [] : activeDebts
   // Prévia do cronograma: 1ª e última parcela do contrato como está digitado.
   const preview = (() => {
     if (!amortized) return null
@@ -1258,6 +1246,60 @@ function DebtModal({ debt, onClose }: { debt: DebtRow | null; onClose: () => voi
             Lança as parcelas restantes como despesa pendente nessa conta, no dia de vencimento de cada mês.
           </span>
         </div>
+
+        <div className="field">
+          <label className="field__label" htmlFor={cardFieldId}>Paga na fatura do cartão</label>
+          <Select
+            id={cardFieldId}
+            value={paidViaCardId}
+            options={(cardOptions.data?.cards ?? []).map((c) => ({ value: c.id, label: c.name }))}
+            placeholder="Não, paga por uma conta"
+            onChange={setPaidViaCardId}
+          />
+          <span className="field__hint">
+            {paidViaCardId
+              ? 'A parcela vem dentro da fatura: não vira pendência na conta, e o saldo dela sai do limite usado do cartão para contar uma vez.'
+              : 'Para parcelamento ou acordo cobrado na fatura de um cartão.'}
+          </span>
+        </div>
+
+        <div className="field">
+          <label className="field__label" htmlFor={categoryFieldId}>TAG das parcelas</label>
+          <CategorySelect id={categoryFieldId} value={categoryId} onChange={setCategoryId} direction="out" placeholder={debt ? 'Sem TAG' : 'Financeiro › Empréstimos (padrão)'} />
+          <span className="field__hint">As parcelas pendentes entram com esta TAG, e com ela no grupo dela no Orçamento.</span>
+        </div>
+
+        {renegotiable.length > 0 && (
+          <div className="field">
+            <span className="field__label">Este acordo renegocia</span>
+            <ul className="asset-pick">
+              {renegotiable.map((d) => (
+                <li key={d.id}>
+                  <label className="asset-pick__row">
+                    <input
+                      type="checkbox"
+                      className="checkbox"
+                      checked={origins.has(d.id)}
+                      onChange={() =>
+                        setOrigins((current) => {
+                          const next = new Set(current)
+                          if (next.has(d.id)) next.delete(d.id)
+                          else next.add(d.id)
+                          return next
+                        })
+                      }
+                    />
+                    <span className="asset-pick__name">{d.name}</span>
+                    <span className="tabular muted">{money(d.balanceCents)}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <span className="field__hint">
+              As marcadas saem da lista como renegociadas (não quitadas), com o saldo de hoje guardado para medir o desconto e o custo do acordo.
+            </span>
+          </div>
+        )}
       </div>
     </Modal>
   )

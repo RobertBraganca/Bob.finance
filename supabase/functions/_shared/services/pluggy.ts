@@ -20,6 +20,24 @@ export type PluggyAccount = {
   owner: string | null
   taxNumber: string | null
   balance: number
+  /** só nas contas de cartão (`type = CREDIT`) */
+  creditData?: {
+    creditLimit?: number | null
+    availableCreditLimit?: number | null
+    balanceCloseDate?: string | null
+    balanceDueDate?: string | null
+    minimumPayment?: number | null
+  } | null
+}
+
+/** Fatura fechada de um cartão (`GET /bills`). A aberta e as futuras não vêm aqui. */
+export type PluggyBill = {
+  id: string
+  dueDate: string
+  billClosingDate: string | null
+  totalAmount: number
+  minimumPaymentAmount: number | null
+  financeCharges: Array<{ type?: string | null; amount?: number | null; additionalInfo?: string | null }> | null
 }
 
 export type PluggyTransaction = {
@@ -32,6 +50,15 @@ export type PluggyTransaction = {
   status: 'POSTED' | 'PENDING'
   category: string | null
   operationType: string | null
+  /** só nos lançamentos de cartão; ver specs/card-summary-sync, "Desvios" */
+  creditCardMetadata?: {
+    billForecastDate?: string | null
+    purchaseDate?: string | null
+    installmentNumber?: number | null
+    totalInstallments?: number | null
+    feeTypeAdditionalInfo?: string | null
+    billId?: string | null
+  } | null
 }
 
 let cached: { key: string; expiresAt: number } | null = null
@@ -79,4 +106,9 @@ export async function listTransactions(accountId: string, dateFrom: string, date
     next = page.next
   }
   return out
+}
+
+export async function listBills(accountId: string): Promise<PluggyBill[]> {
+  const { results } = await get<{ results: PluggyBill[] }>(`/bills?accountId=${encodeURIComponent(accountId)}`)
+  return results
 }

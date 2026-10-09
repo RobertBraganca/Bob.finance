@@ -12,6 +12,7 @@ import * as companyService from '../_shared/services/company.ts'
 import * as cashFlowService from '../_shared/services/cashFlow.ts'
 import * as creditCardsService from '../_shared/services/creditCards.ts'
 import * as criteriaService from '../_shared/services/criteria.ts'
+import * as dailyService from '../_shared/services/daily.ts'
 import * as debtService from '../_shared/services/debt.ts'
 import { ensureMaterialized } from '../_shared/services/materialization.ts'
 import * as dreService from '../_shared/services/dre.ts'
@@ -124,6 +125,7 @@ app.onError((error, c) => {
   if (error instanceof companyService.CompanyError) return c.json({ error: error.message }, error.statusCode as 400 | 409)
   if (error instanceof budgetService.BudgetError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
   if (error instanceof investments.InvestmentRuleError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
+  if (error instanceof debtService.DebtError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
   console.error(error)
   return c.json({ error: friendlyErrorMessage(error) }, 500)
 })
@@ -207,43 +209,9 @@ app.get('/analytics/categories', async (c) => {
  * Daily tracker
  * ---------------------------------------------------------------- */
 app.get('/analytics/daily', async (c) => {
-  const query = rangeQuery.extend({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(c.req.query())
-  const range: analytics.Range = query.period
-    ? {
-        from: periodBounds(query.period).start,
-        to: periodBounds(query.period).end,
-        accountId: query.accountId ?? null,
-      }
-    : await resolveRange(query)
-
-  const days = await analytics.dailySeries(range)
-  const period = range.from.slice(0, 7)
-  const progress = await goalsService.getPeriodProgress(period, range.accountId)
-
-  const spentSoFar = days.filter((d) => d.day <= todayIso()).reduce((sum, d) => sum + d.expenseCents, 0)
-  const cap = progress.goal.spendCapCents
-  const paceCents = cap !== null ? Math.round(cap * (progress.daysElapsed / progress.daysTotal)) : null
-
-  return c.json({
-    range,
-    period,
-    days,
-    pace: {
-      daysElapsed: progress.daysElapsed,
-      daysTotal: progress.daysTotal,
-      spentCents: spentSoFar,
-      capCents: cap,
-      paceCents,
-      aheadOfPaceCents: paceCents === null ? null : spentSoFar - paceCents,
-      projectedMonthCents: progress.daysElapsed > 0 ? Math.round((spentSoFar / progress.daysElapsed) * progress.daysTotal) : 0,
-      dailyAllowanceCents:
-        cap !== null && progress.daysTotal - progress.daysElapsed > 0
-          ? Math.max(0, Math.round((cap - spentSoFar) / (progress.daysTotal - progress.daysElapsed)))
-          : null,
-    },
-    receivableCents: await analytics.receivable(range),
-    streak: await analytics.dailyStreak(),
-  })
+  const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(c.req.query())
+  // Diário pessoal (specs/personal-picture): próximos dias, saldo projetado, gasto contra o Orçamento.
+  return c.json(await dailyService.dailyView(query.period ?? todayIso().slice(0, 7)))
 })
 
 /* ---------------------------------------------------------------- *
@@ -349,6 +317,9 @@ app.post('/debts', async (c) => {
       // Contrato amortizado (decisions/0041): só vale com installmentCount.
       amortization: z.enum(['sac', 'price']).nullable().optional(),
       monthlyFeesCents: z.number().int().nonnegative().default(0),
+      // TAG das parcelas (specs/debt-v2); ausente = "Financeiro › Empréstimos".
+      categoryId: z.number().int().positive().nullable().optional(),
+      paidViaCardId: z.number().int().positive().nullable().optional(),
     })
     .parse(await c.req.json())
   const debt = await debtService.createDebt(body)
@@ -372,6 +343,8 @@ app.patch('/debts/:id', async (c) => {
       accountId: z.number().int().positive().nullable().optional(),
       amortization: z.enum(['sac', 'price']).nullable().optional(),
       monthlyFeesCents: z.number().int().nonnegative().optional(),
+      categoryId: z.number().int().positive().nullable().optional(),
+      paidViaCardId: z.number().int().positive().nullable().optional(),
       active: z.boolean().optional(),
     })
     .parse(await c.req.json())
@@ -436,6 +409,28 @@ app.get('/debts/projection', async (c) => {
  * para o card "Possiveis conciliacoes" do Painel -- nenhuma escrita nova.
  */
 app.get('/debts/reconciliation', async (c) => c.json(await cashFlowService.debtReconciliationQueue()))
+
+/* Endividamento v2 (specs/debt-v2): leitura única e as duas gravações novas. */
+app.get('/debts/overview-v2', async (c) => c.json(await debtService.debtOverviewV2()))
+
+app.post('/debts/:id/use-implied-rate', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const result = await debtService.useImpliedRate(id)
+  await debtService.materializeDebtInstallments(id)
+  return c.json(result)
+})
+
+app.post('/debts/:id/renegotiation', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const body = z
+    .object({
+      originDebtIds: z.array(z.number().int().positive()).min(1).max(20),
+      agreedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    })
+    .parse(await c.req.json())
+  return c.json(await debtService.registerRenegotiation(id, body.originDebtIds, body.agreedOn))
+})
+
 
 /* ---------------------------------------------------------------- *
  * Credit cards

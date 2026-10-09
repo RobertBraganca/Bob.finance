@@ -1466,3 +1466,57 @@ enxugar telas repetidas, textos técnicos e menu.
 - Próximo: spec do novo Endividamento (cartão junto, calendário de saída,
   custo em reais, data livre coerente, renegociação). Publicar `insights` e
   `ledger`.
+
+## 08/10/2026 — Endividamento v2 e o resumo dos cartões (decisions/0044)
+
+- Parte 1 (`specs/card-summary-sync`): cartão do app ligado a uma conta de
+  cartão do Meu Pluggy (Ajustes → Open Finance), só o resumo: limite,
+  disponível (só quando > 0), saldo da fatura, 12 faturas fechadas e
+  `card_months` (lançado + parcelas projetadas + encargos). Nenhuma compra
+  vira lançamento. Achados da primeira sincronização real: pagamento de
+  fatura precisa ficar fora da soma; `billForecastDate` não é confiável (o
+  mês vem do fechamento real das faturas); total de fatura fechada vem do
+  banco, não da soma. Os quatro cartões ligados em 09/10/2026; dois achados a
+  mais: em alguns bancos o `balance` é o total usado (não a fatura), e
+  antecipação de parcelas vem com outra descrição (a compra termina na maior
+  parcela lançada). Em aberto: encargos de 12 meses pelas faturas são brutos
+  (não descontam o crédito de juros de uma antecipação).
+- Parte 2 (`specs/debt-v2`): `GET /debts/overview-v2` com total (dívidas +
+  cartões), comprometimento sobre a renda típica pessoal do Orçamento,
+  calendário de 6 meses, custo em reais (mês e 12 meses), data livre pelo
+  cronograma, acordos. "Usar a taxa do contrato" e "Registrar acordo"
+  (`debt_renegotiations`, `closed_reason`). Dívida ganha TAG
+  (`debts.category_id`) herdada pelas parcelas pendentes. Contas puras em
+  `shared/debt.ts` (espelho `_shared/core/debtPlan.ts`).
+- Migrações aplicadas: `20261009120000_card_summary`, `20261010120000_debt_v2`.
+- Dado observado: a dívida ativa tem 1 pagamento gravado e 2 parcelas
+  confirmadas (o fix da outra sessão, `add_settled_transaction_to_debt_payments`,
+  ainda não está no main); a taxa cadastrada (4,86% a.m.) não fecha o
+  contrato. A TAG da dívida foi trocada para "Financeiro › Empréstimos"
+  (Custos Fixos no Orçamento); "Financeiro" sozinha não tem grupo.
+- Testado com dado [teste] e apagado: registrar acordo (desconto, custo, 409
+  na repetição, 400 no próprio), "Usar a taxa do contrato" (e 409 quando
+  nenhuma taxa fecha).
+- Publicar `ledger` e `insights`.
+
+## 09/10/2026 — Saúde, Diário e Patrimônio leem as telas donas (decisions/0045)
+
+- Revisão beta das três telas (relatório local em docs/beta-reviews): três
+  comprometimentos de renda, dois tetos, três custos de vida, patrimônio sem
+  cartões e com a PJ, Diário abrindo em agosto ao recarregar (Orçamento
+  também; data fixa "2026-08-19" trocada pela do aparelho).
+- Achado de dado: a renegociação do PicPay é o TPARC da fatura do cartão;
+  estava contada duas vezes. Agora `debts.paid_via_card_id`: não gera
+  pendência na conta, sai do limite usado do cartão e do calendário, e entra
+  no Orçamento pela TAG. A carteira PicPay negativa (−R$ 1.258,75) é real,
+  confirmada pelo usuário.
+- Fontes: renda e custo de vida pessoais e teto (`budget.typicalPersonalSpending`,
+  `monthSpendingVsCap`), dívida e comprometimento (`debtOverviewV2`),
+  retirável (`companyOverview`). Liquidez saiu do score. Patrimônio pessoal,
+  empresa à parte (cartão da PJ vai para a empresa). Diário: `services/daily.ts`.
+- Fotos mensais em `monthly_snapshots`, gravadas pela rotina das 22:00
+  (`/ledger/cron/bank-sync`); outubro/2026 já tem a primeira.
+- Migração aplicada: `20261011120000_personal_picture`.
+- Motor: Custos PJ da Minha empresa subiu o ponto de equilíbrio da
+  Precificação em R$ 163,07.
+- Publicar `ledger`, `insights` e `pricing` (o Motor está no `_shared`).

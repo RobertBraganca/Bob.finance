@@ -79,7 +79,7 @@ export async function closingChecklist(period: string): Promise<ClosingChecklist
     },
     {
       key: 'dre-review',
-      label: 'DRE do mês revisada',
+      label: 'Minha empresa do mês revisada',
       kind: 'manual',
       done: reviewedAt !== null,
       detail: reviewedAt !== null ? `Revisada em ${reviewedAt.slice(0, 10)}` : 'Ainda não revisada',

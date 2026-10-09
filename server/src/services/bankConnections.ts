@@ -1,10 +1,11 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { accounts, bankConnections, categories, importBatches, stagedTransactions, transactions } from '../db/schema'
+import { accounts, bankConnections, cardConnections, categories, importBatches, stagedTransactions, transactions } from '../db/schema'
 import { dedupeHash, merchantSignature, normalizeDescription } from '../core/normalize'
 import * as pluggy from './pluggy'
 import { autoCommitClearRows, stageRows, type StageRow } from './imports'
 
+import { syncAllCards } from './cardSync'
 /**
  * Open Finance via Meu Pluggy (docs/specs/open-finance-sync, decisions/0038).
  * Fase 1: só contas correntes. Cada sincronização vira um lote de
@@ -72,11 +73,17 @@ export async function discover(itemId: string) {
     .select({ providerAccountId: bankConnections.providerAccountId, accountId: bankConnections.accountId })
     .from(bankConnections)
   const linkedBy = new Map(linked.map((l) => [l.providerAccountId, l.accountId]))
+  const cardLinks = await db
+    .select({ providerAccountId: cardConnections.providerAccountId, creditCardId: cardConnections.creditCardId })
+    .from(cardConnections)
+  const cardBy = new Map(cardLinks.map((l) => [l.providerAccountId, l.creditCardId]))
   return found.map((account) => ({
     providerAccountId: account.id,
     label: labelOf(account),
     kind: account.type === 'CREDIT' ? ('credit_card' as const) : ('checking' as const),
     linkedAccountId: linkedBy.get(account.id) ?? null,
+    /** cartão do app ligado a esta conta de cartão (specs/card-summary-sync) */
+    linkedCreditCardId: cardBy.get(account.id) ?? null,
   }))
 }
 
@@ -93,7 +100,7 @@ export async function createConnection(input: { accountId: number; providerItemI
   const providerAccount = (await pluggy.listAccounts(input.providerItemId)).find((a) => a.id === input.providerAccountId)
   if (!providerAccount) throw new Error('essa conta não pertence à conexão informada na Pluggy')
   if (providerAccount.type === 'CREDIT') {
-    throw new Error('cartões de crédito entram numa fase seguinte; por enquanto, só contas correntes')
+    throw new Error('conta de cartão: ligue a um cartão do app (resumo do cartão), não a uma conta corrente')
   }
 
   const lastCsv = (
@@ -271,5 +278,7 @@ export async function syncAll() {
       results.push({ connectionId: conn.id, ok: false, error: error instanceof Error ? error.message : String(error) })
     }
   }
-  return { results }
+  // Cartões ligados: só o resumo (decisions/0044), depois das contas correntes.
+  const cards = await syncAllCards()
+  return { results, cards: cards.results }
 }

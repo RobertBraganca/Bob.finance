@@ -38,6 +38,42 @@ export type CardRow = {
   nextClosingOn: string
   nextDueOn: string
   lastMeasuredOn: string | null
+  /** 'pluggy' quando ligado ao Meu Pluggy (specs/card-summary-sync); senão medido à mão */
+  source: 'pluggy' | 'manual'
+  lastSyncedAt: string | null
+  syncError: string | null
+  balanceCents: number | null
+  openBillCents: number | null
+  minimumPaymentCents: number | null
+  availableUnreported: boolean
+  upcoming: Array<{ period: string; postedCents: number; projectedCents: number }>
+  charges12mCents: number
+  lastBills: Array<{ dueDate: string; totalCents: number; financeChargesCents: number }>
+}
+
+/** De onde vem o disponível: banco (com a data da última leitura) ou registro à mão. */
+function SourceNote({ card }: { card: CardRow }) {
+  const style = { display: 'block', fontSize: 'var(--text-2xs)' } as const
+  if (card.source === 'manual') {
+    return (
+      <span className="muted" style={style}>
+        medido à mão{card.lastMeasuredOn ? ` em ${fmtDate(card.lastMeasuredOn)}` : ''}
+      </span>
+    )
+  }
+  if (card.syncError) {
+    return (
+      <span className="neg" style={style} title={card.syncError}>
+        Open Finance: falhou na última leitura
+      </span>
+    )
+  }
+  return (
+    <span className="muted" style={style}>
+      Open Finance{card.lastSyncedAt ? ` · lido em ${fmtDate(card.lastSyncedAt.slice(0, 10))}` : ' · ainda não lido'}
+      {card.availableUnreported && ' · banco não informa o disponível, vale a última medição'}
+    </span>
+  )
 }
 
 export function CreditCardsPage() {
@@ -136,6 +172,7 @@ export function CreditCardsPage() {
                               · {card.institution}
                             </span>
                           )}
+                          <SourceNote card={card} />
                         </td>
                         <td className="muted" data-label="Conta">{card.accountName ?? '-'}</td>
                         <td className="table__center" data-label="Fechamento">{fmtDate(card.nextClosingOn)}</td>
@@ -146,6 +183,11 @@ export function CreditCardsPage() {
                           <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
                             de {money(card.creditLimitCents)} · {bps(Math.max(0, 10_000 - card.usedBps), 0)} livre
                           </span>
+                          {card.openBillCents !== null && (
+                            <span className="muted" style={{ display: 'block', fontSize: 'var(--text-2xs)' }}>
+                              fatura aberta {money(card.openBillCents)}
+                            </span>
+                          )}
                         </td>
                         <td data-label="__trail">
                           <div className="row" style={{ gap: 2 }}>

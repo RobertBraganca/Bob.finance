@@ -3,6 +3,7 @@ import { db } from '../db/client'
 import { accounts, creditCardSnapshots, creditCards } from '../db/schema'
 import { addDays, daysInMonth, todayIso } from '../core/dates'
 
+import { cardSummaries } from './cardSync'
 /**
  * Cards are registered metadata (limit, cycle, linked account) plus a
  * measured available-limit history — the same "measured, not derived"
@@ -42,6 +43,26 @@ export type CardRow = {
   nextClosingOn: string
   nextDueOn: string
   lastMeasuredOn: string | null
+  /** 'pluggy' quando ligado ao Meu Pluggy (specs/card-summary-sync); senão medido à mão */
+  source: 'pluggy' | 'manual'
+  lastSyncedAt: string | null
+  syncError: string | null
+  /** saldo informado pelo banco (em alguns bancos é a fatura, em outros o total usado) */
+  balanceCents: number | null
+  /**
+   * Fatura aberta: o saldo do banco quando ele é a fatura; quando o banco
+   * manda o total usado do cartão como saldo (Nubank PJ, PicPay), a soma dos
+   * lançamentos e parcelas do ciclo aberto. Nulo no cartão medido à mão.
+   */
+  openBillCents: number | null
+  minimumPaymentCents: number | null
+  /** o banco mandou disponível 0 com limite livre: o usado segue a última medição do app */
+  availableUnreported: boolean
+  /** fatura do mês corrente e próximas: lançado + parcelas projetadas, por mês */
+  upcoming: Array<{ period: string; postedCents: number; projectedCents: number }>
+  /** encargos (juros, IOF, multa) por mês de fatura nos últimos 12 meses */
+  charges12mCents: number
+  lastBills: Array<{ dueDate: string; totalCents: number; financeChargesCents: number }>
 }
 
 async function latestAvailable(cardId: number, creditLimitCents: number): Promise<{ cents: number; asOf: string | null }> {
@@ -90,7 +111,41 @@ export async function listCards(): Promise<CardRow[]> {
     }),
   )
 
-  return withAvailable.sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn))
+  const summaries = await cardSummaries(withAvailable.map((r) => r.id))
+  const openBillOf = (balance: number | null, used: number, open: { postedCents: number; projectedCents: number } | null, linked: boolean) => {
+    if (!linked) return null
+    const cycle = open ? Math.max(0, open.postedCents + open.projectedCents) : 0
+    if (balance === null) return cycle
+    // Saldo igual ao limite usado (até R$ 1): é o total do cartão, não a fatura.
+    return used > 0 && Math.abs(balance - used) <= 100 && cycle < balance ? cycle : Math.max(0, balance)
+  }
+  const currentPeriod = today.slice(0, 7)
+  const yearAgo = `${Number(currentPeriod.slice(0, 4)) - 1}${currentPeriod.slice(4)}`
+  const enriched: CardRow[] = withAvailable.map((r) => {
+    const s = summaries.get(r.id)
+    const conn = s?.connection ?? null
+    const months = s?.months ?? []
+    const fromBills = (s?.bills ?? []).filter((b) => b.dueDate.slice(0, 7) > yearAgo).reduce((sum, b) => sum + b.financeChargesCents, 0)
+    const fromTxns = months.filter((m) => m.period > yearAgo && m.period <= currentPeriod).reduce((sum, m) => sum + m.chargesCents, 0)
+    return {
+      ...r,
+      source: conn ? 'pluggy' : 'manual',
+      lastSyncedAt: conn?.lastSyncedAt ?? null,
+      syncError: conn?.lastError ?? null,
+      balanceCents: conn?.balanceCents ?? null,
+      openBillCents: openBillOf(conn?.balanceCents ?? null, r.usedCents, months.find((m) => m.period === currentPeriod) ?? null, !!conn),
+      minimumPaymentCents: conn?.minimumPaymentCents ?? null,
+      availableUnreported: !!conn && conn.availableCents === null,
+      upcoming: months
+        .filter((m) => m.period >= currentPeriod)
+        .slice(0, 12)
+        .map((m) => ({ period: m.period, postedCents: m.postedCents, projectedCents: m.projectedCents })),
+      // Faturas fechadas e lançamentos medem o mesmo encargo por caminhos diferentes: vale o maior, nunca a soma.
+      charges12mCents: Math.max(fromBills, fromTxns),
+      lastBills: (s?.bills ?? []).slice(0, 3),
+    }
+  })
+  return enriched.sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn))
 }
 
 export type CreditCardInput = {
