@@ -5,7 +5,7 @@ import { useEffectiveSurface } from '../../lib/theme'
 import { ChartFrame } from './frame'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '../ui/chart'
 
-export type ScorePoint = { period: string; scoreBps: number | null }
+export type ScorePoint = { period: string; scoreBps: number | null; source?: 'foto' | 'reconstruído' }
 
 const chartConfig = {
   scoreBps: { label: 'Health Score' },

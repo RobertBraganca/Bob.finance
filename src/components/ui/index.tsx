@@ -419,7 +419,8 @@ export function Meter({
 }) {
   const width = Math.max(0, Math.min(100, usedBps / 100))
   return (
-    <div className="meter">
+    // Leitor de tela: o valor vem junto, não só a cor (revisão de 09/10/2026).
+    <div className="meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(usedBps / 100)}>
       <div className="meter__track">
         {/* Recorte, não largura: animar `width` refaz o layout a cada quadro. */}
         <div

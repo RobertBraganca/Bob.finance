@@ -1,7 +1,7 @@
 import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { currentPeriod, shiftPeriod } from '../lib/period'
+import { currentPeriod, shiftPeriod, todayIso } from '../lib/period'
 import { telemetry } from '../lib/telemetry'
 import { useMeta } from '../lib/store'
 import {
@@ -100,7 +100,9 @@ type History = {
 
 export function GoalsPage() {
   const meta = useMeta()
-  const today = meta.data?.today ?? '2026-08-19'
+  // Sem a data do servidor ainda, a do aparelho: uma data fixa abria a tela
+  // em agosto de 2026 ao recarregar (revisão de 09/10/2026).
+  const today = meta.data?.today ?? todayIso()
   const [period, setPeriod] = useState(() => today.slice(0, 7))
   const [editing, setEditing] = useState(false)
   const [capModal, setCapModal] = useState(false)

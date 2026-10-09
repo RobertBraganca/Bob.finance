@@ -285,7 +285,7 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
                         }
                         foot={
                           <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                            custos, pró-labore e impostos
+                            custos da PJ, retirada planejada e impostos
                           </span>
                         }
                       />
@@ -365,7 +365,7 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
                   {/* The closing sentence stays conditional, per the
                       instrumental-language table in decisions/0010. */}
                   <p className="chart__note">
-                    Se os custos, o pró-labore e as metas configuradas se mantiverem, os valores
+                    Se os custos, a retirada planejada e as metas configuradas se mantiverem, os valores
                     acima seriam os necessários para cobrir o mês.
                   </p>
 
@@ -469,7 +469,7 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
                   options={accountOptions}
                   onChange={setPf}
                 />
-                <span className="field__hint">Destino do repasse que vira pró-labore</span>
+                <span className="field__hint">Destino do repasse que vira retirada</span>
               </div>
             </div>
           </div>
@@ -478,7 +478,7 @@ export function ParamsEditor({ onClose }: { onClose: () => void }) {
             <span className="label">Valores do mês</span>
             <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
               <div className="field" style={{ width: 190 }}>
-                <label className="field__label" htmlFor={proLaboreFieldId}>Pró-labore (R$)</label>
+                <label className="field__label" htmlFor={proLaboreFieldId}>Retirada planejada (R$)</label>
                 <Input
                   id={proLaboreFieldId}
                   value={proLabore === undefined ? centsToInput(current.proLaboreCents) : proLabore}

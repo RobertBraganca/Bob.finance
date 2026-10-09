@@ -13,6 +13,7 @@ import {
 import { addDays, addMonths, periodBounds, periodOf, periodRange, todayIso } from '../core/dates.ts'
 import { medianCents } from '../core/money.ts'
 import { monthlyTotals, totals } from './analytics.ts'
+import { typicalPersonalSpending } from './budget.ts'
 import { notesForAssets } from './criteria.ts'
 import type { GoalState } from './goals.ts'
 
@@ -447,32 +448,16 @@ export async function reserveStatus(): Promise<ReserveStatus> {
     monthlyLivingCostCents = 0
   } else {
     /**
-     * MEDIANA da despesa mensal da janela, não a média.
-     *
-     * Este é o número mais reaproveitado do sistema: além do alvo da
-     * reserva, ele é o divisor do Runway e do indicador de liquidez da
-     * Saúde financeira. Com média e janela curta, um único gasto atípico
-     * (IPVA, um equipamento, uma viagem) deslocava a base em uma fração
-     * direta do seu valor e contaminava os três ao mesmo tempo, por toda a
-     * janela. A mediana descarta o mês excepcional por construção, sem
-     * exigir que alguém classifique o que é excepcional.
-     *
-     * Só entram meses com movimento registrado, pelo mesmo motivo de
-     * `debtOverview`: um mês sem nenhum lançamento é ledger que não cobre
-     * aquele período, não um mês sem despesa.
-     *
-     * A janela continua misturando toda conta (PF pessoal E PJ), o que é
-     * um valor real mas pode superestimar o custo de vida PESSOAL. É
-     * exatamente por isso que a sobrescrita manual acima existe.
+     * Custo de vida PESSOAL do Orçamento (specs/personal-picture,
+     * decisions/0045): mediana dos meses fechados das despesas das contas
+     * pessoais, sem a PJ e sem as TAGs fora do orçamento. Antes a janela
+     * misturava toda conta e superestimava o custo de vida. A mediana
+     * continua descartando o mês excepcional; a sobrescrita manual acima
+     * continua valendo.
      */
-    const currentPeriod = todayIso().slice(0, 7)
-    const window = await monthlyTotals({
-      endPeriod: addMonths(currentPeriod, -1),
-      months: lookbackMonths,
-    })
-    const covered = window.filter((m) => m.transactionCount > 0)
-    sampleMonths = covered.length
-    monthlyLivingCostCents = medianCents(covered.map((m) => m.expenseCents))
+    const personal = await typicalPersonalSpending()
+    sampleMonths = personal.sampleMonths
+    monthlyLivingCostCents = personal.typicalCents
   }
 
   const targetCents = monthlyLivingCostCents * multiple

@@ -586,7 +586,7 @@ export async function deletePending(id: number, scope: PendingDeleteScope = 'onl
     const debt = (await db.select().from(debts).where(eq(debts.id, row.debtId)))[0]
     if (debt) {
       if (scope === 'all') {
-        await db.update(debts).set({ active: false, closedOn: todayIso() }).where(eq(debts.id, debt.id))
+        await db.update(debts).set({ active: false, closedOn: todayIso(), closedReason: 'manual' }).where(eq(debts.id, debt.id))
       } else if (debt.installmentCount === null) {
         await db.update(debts).set({ endPeriod: addMonths(period, -1) }).where(eq(debts.id, debt.id))
       } else {

@@ -1,12 +1,13 @@
 import { eq, sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
-import { financialHealthSettings } from '../db/schema.ts'
+import { financialHealthSettings, monthlySnapshots } from '../db/schema.ts'
 import { addDays, addMonths, periodBounds, periodRange, todayIso } from '../core/dates.ts'
-import { accountBalances, totals } from './analytics.ts'
-import { listCards } from './creditCards.ts'
-import { debtOverview, debtTrend, listDebts } from './debt.ts'
-import { getPeriodProgress } from './goals.ts'
+import { accountBalances } from './analytics.ts'
+import { monthSpendingVsCap, typicalPersonalSpending } from './budget.ts'
+import { companyOverview } from './company.ts'
+import { debtOverviewV2, debtTrend } from './debt.ts'
 import { ILLIQUID_ASSET_CLASS, allocation, positions, reserveStatus } from './investments.ts'
+import { accountScope } from './withdrawals.ts'
 
 /**
  * The financial-health layer: Health Score, Runway, Radar de risco.
@@ -166,7 +167,7 @@ export function debtIndicator(input: {
   period: string
 }): IndicatorResult {
   const assumptions: Assumptions = {
-    formula: '100 menos o comprometimento de renda, chegando a 0 quando metade da renda está comprometida',
+    formula: '100 menos o comprometimento do Endividamento (parcelas + faturas do mês ÷ renda típica pessoal), chegando a 0 quando metade da renda está comprometida',
     comprometimentoBps: input.debtToIncomeBps,
     parcelasDoMesCents: input.scheduledCents,
     // A renda que aparece aqui é a que REPRODUZ o comprometimento acima.
@@ -175,12 +176,13 @@ export function debtIndicator(input: {
     rendaMensalTipicaCents: input.typicalMonthlyIncomeCents,
     janelaDaRendaMeses: input.incomeWindowMonths,
     mesesComMovimentoNaJanela: input.incomeSampleMonths,
-    baseDaRenda: 'mediana da receita dos meses com movimento na janela, não a receita de um único mês',
+    baseDaRenda: 'renda típica pessoal do Orçamento: mediana de 6 meses fechados, contas pessoais + repasse da PJ',
+    origem: 'Endividamento (mesmo número da tela)',
     mesDeReferencia: input.period,
     dividasAtivas: input.debtCount,
   }
   if (input.debtCount === 0) {
-    return { scoreBps: null, assumptions: { ...assumptions, semDado: 'nenhuma dívida cadastrada' } }
+    return { scoreBps: null, assumptions: { ...assumptions, semDado: 'nenhuma dívida nem limite de cartão usado' } }
   }
   if (input.debtToIncomeBps === null) {
     return { scoreBps: null, assumptions: { ...assumptions, semDado: 'sem receita registrada na janela de referência' } }
@@ -199,13 +201,14 @@ const SPENDING_FLOOR_MULTIPLE = 1.5
  */
 export function spendingIndicator(input: { spentCents: number; capCents: number | null }): IndicatorResult {
   const assumptions: Assumptions = {
-    formula: '100 dentro do teto do mês, caindo a 0 quando o gasto chega a 150% do teto',
+    formula: '100 dentro do teto do Orçamento (previsto dos grupos de gasto do plano), caindo a 0 quando o gasto chega a 150% do teto',
+    origem: 'Orçamento: gasto do mês nas contas pessoais',
     gastoCents: input.spentCents,
     tetoCents: input.capCents,
     limiteInferiorDoTeto: SPENDING_FLOOR_MULTIPLE,
   }
   if (input.capCents === null || input.capCents <= 0) {
-    return { scoreBps: null, assumptions: { ...assumptions, semDado: 'nenhum teto de gasto definido para o período' } }
+    return { scoreBps: null, assumptions: { ...assumptions, semDado: 'sem plano no Orçamento para o mês' } }
   }
   const usedRatio = input.spentCents / input.capCents
   const scoreRatio = (SPENDING_FLOOR_MULTIPLE - usedRatio) / (SPENDING_FLOOR_MULTIPLE - 1)
@@ -347,34 +350,58 @@ export type ScoreInputs = {
   allocation: Parameters<typeof allocationIndicator>[0]
 }
 
-export async function gatherScoreInputs(period: string, accountId: number | null = null): Promise<ScoreInputs> {
-  const settings = await getSettings()
+/**
+ * O que não muda de mês para mês dentro de uma leitura (dívida de hoje,
+ * reserva, alocação, saldos, custo de vida). O histórico calcula uma vez e
+ * reaproveita em cada mês, em vez de refazer tudo 12 vezes.
+ */
+export type SharedInputs = {
+  v2: Awaited<ReturnType<typeof debtOverviewV2>>
+  reserve: Awaited<ReturnType<typeof reserveStatus>>
+  allocationSlices: Awaited<ReturnType<typeof allocation>>
+  personalCashCents: number
+  personalCost: { typicalCents: number; sampleMonths: number }
+}
 
-  // Custo mensal médio over the configured window, ending at the month
-  // before `period`: the period itself is the thing being measured, so
-  // folding it into its own baseline would flatten exactly the variation
-  // this indicator exists to show.
-  const costFrom = periodBounds(addMonths(period, -settings.costLookbackMonths)).start
-  const costTo = periodBounds(addMonths(period, -1)).end
-  // Sequencial, não Promise.all: sob o pooler de transação desta Edge
-  // Function, fan-out concorrente demais numa mesma conexão trava a
-  // requisição para sempre (sem erro nenhum) em vez de só ficar lenta —
-  // mesmo achado e mesmo fix de goals.ts#goalHistory. `debtOverview` e
-  // `getPeriodProgress` já fazem seu próprio fan-out interno, então rodar
-  // as outras 4 chamadas ao mesmo tempo empilhava concorrência suficiente
-  // para travar.
-  const costWindow = await totals({ from: costFrom, to: costTo, accountId })
-  const balances = await accountBalances()
-  const debt = await debtOverview({ period })
-  const goals = await getPeriodProgress(period, accountId)
+/** Saldo das contas pessoais (sem a PJ e sem conta de investimento, que é carteira e não saldo). */
+async function personalCash(asOfDate?: string) {
+  const scope = await accountScope()
+  const balances = await accountBalances(asOfDate)
+  const cash = balances.filter((a) => a.kind !== 'investment')
+  return {
+    scope,
+    personal: cash.filter((a) => scope.personal.includes(Number(a.id))),
+    company: cash.filter((a) => scope.pjAccountId !== null && Number(a.id) === scope.pjAccountId),
+  }
+}
+
+// Sequencial, não Promise.all: sob o pooler de transação das Edge Functions,
+// fan-out concorrente demais numa conexão trava a requisição (goals.ts#goalHistory).
+export async function sharedInputs(): Promise<SharedInputs> {
+  const v2 = await debtOverviewV2()
   const reserve = await reserveStatus()
   const allocationSlices = await allocation()
-  const monthlyCostCents =
-    settings.costLookbackMonths > 0 ? Math.round(costWindow.expenseCents / settings.costLookbackMonths) : 0
+  const cash = await personalCash()
+  const personalCost = await typicalPersonalSpending()
+  return {
+    v2,
+    reserve,
+    allocationSlices,
+    personalCashCents: cash.personal.reduce((sum, a) => sum + Number(a.balanceCents), 0),
+    personalCost,
+  }
+}
 
-  const availableBalanceCents = balances
-    .filter((a) => (accountId ? a.id === accountId : true))
-    .reduce((sum, a) => sum + a.balanceCents, 0)
+/**
+ * Os insumos dos indicadores (decisions/0045): cada número vem da tela dona.
+ * `accountId` fica na assinatura por compatibilidade; o escopo agora é o
+ * pessoal do Orçamento.
+ */
+export async function gatherScoreInputs(period: string, _accountId: number | null = null, shared?: SharedInputs): Promise<ScoreInputs> {
+  const settings = await getSettings()
+  const base = shared ?? (await sharedInputs())
+  const spend = await monthSpendingVsCap(period)
+  const { v2, reserve, allocationSlices } = base
 
   const drifts = allocationSlices
     .filter((slice) => slice.driftBps !== null)
@@ -382,23 +409,24 @@ export async function gatherScoreInputs(period: string, accountId: number | null
 
   return {
     settings,
+    // Fora do score desde 10/2026 (o Runway responde); continua aqui para o simulador.
     liquidity: {
-      availableBalanceCents,
-      monthlyCostCents,
-      lookbackMonths: settings.costLookbackMonths,
+      availableBalanceCents: base.personalCashCents,
+      monthlyCostCents: base.personalCost.typicalCents,
+      lookbackMonths: 6,
     },
     debt: {
-      debtToIncomeBps: debt.debtToIncomeBps,
-      debtCount: debt.debts.length,
-      scheduledCents: debt.scheduledCents,
-      typicalMonthlyIncomeCents: debt.typicalMonthlyIncomeCents,
-      incomeWindowMonths: debt.incomeWindowMonths,
-      incomeSampleMonths: debt.incomeSampleMonths,
-      period: debt.period,
+      debtToIncomeBps: v2.commitment.shareBps,
+      debtCount: v2.debts.length + v2.cards.filter((c) => c.usedCents > 0).length,
+      scheduledCents: v2.commitment.debtCents + v2.commitment.cardCents,
+      typicalMonthlyIncomeCents: v2.income.typicalCents,
+      incomeWindowMonths: 6,
+      incomeSampleMonths: v2.income.sampleMonths,
+      period: v2.startPeriod,
     },
     spending: {
-      spentCents: goals.actual.expenseCents,
-      capCents: goals.goal.spendCapCents,
+      spentCents: spend.spentCents,
+      capCents: spend.capCents,
     },
     reserve: {
       currentCents: reserve.currentCents,
@@ -414,8 +442,8 @@ export async function gatherScoreInputs(period: string, accountId: number | null
 /** Compõe o score a partir de insumos já coletados. O simulador chama esta. */
 export function composeScoreFromInputs(inputs: ScoreInputs) {
   const { settings } = inputs
+  // Liquidez saiu do score (decisions/0045): o Runway responde a mesma pergunta melhor.
   return composeScore([
-    { key: 'liquidity', weight: settings.weightLiquidity, result: liquidityIndicator(inputs.liquidity) },
     { key: 'debt', weight: settings.weightDebt, result: debtIndicator(inputs.debt) },
     { key: 'spending', weight: settings.weightSpending, result: spendingIndicator(inputs.spending) },
     { key: 'reserve', weight: settings.weightReserve, result: reserveIndicator(inputs.reserve) },
@@ -423,9 +451,9 @@ export function composeScoreFromInputs(inputs: ScoreInputs) {
   ])
 }
 
-export async function healthScore(period: string, accountId: number | null = null): Promise<HealthScore> {
+export async function healthScore(period: string, accountId: number | null = null, shared?: SharedInputs): Promise<HealthScore> {
   const { start, end } = periodBounds(period)
-  const inputs = await gatherScoreInputs(period, accountId)
+  const inputs = await gatherScoreInputs(period, accountId, shared)
   const settings = inputs.settings
 
   const { scoreBps, indicators, activeWeight } = composeScoreFromInputs(inputs)
@@ -440,13 +468,14 @@ export async function healthScore(period: string, accountId: number | null = nul
       periodo: period,
       intervalo: { from: start, to: end },
       pesosConfigurados: {
-        liquidity: settings.weightLiquidity,
         debt: settings.weightDebt,
         spending: settings.weightSpending,
         reserve: settings.weightReserve,
         allocation: settings.weightAllocation,
       },
       pesoTotalAtivo: activeWeight,
+      liquidez: 'fora do score desde 10/2026: o Runway responde a mesma pergunta',
+      fontes: 'Endividamento (comprometimento), Orçamento (gasto e teto), Investimentos (reserva e alocação)',
       indicadoresComDado: indicators.filter((i) => i.scoreBps !== null).map((i) => i.key),
       indicadoresSemDado: indicators.filter((i) => i.scoreBps === null).map((i) => i.key),
       ...(scoreBps === null ? { semDado: 'nenhum indicador tem dado suficiente no período' } : {}),
@@ -471,14 +500,20 @@ export async function healthScore(period: string, accountId: number | null = nul
 export async function healthScoreHistory(
   months = 12,
   accountId: number | null = null,
-): Promise<Array<{ period: string; scoreBps: number | null }>> {
+): Promise<Array<{ period: string; scoreBps: number | null; source: 'foto' | 'reconstruído' }>> {
   const currentPeriod = todayIso().slice(0, 7)
   const periods = periodRange(addMonths(currentPeriod, -(months - 1)), currentPeriod)
+  // A foto do mês vale quando existe (decisions/0045); antes dela, reconstrói
+  // com a dívida, a reserva e a alocação de hoje (marcado como tal).
+  const snaps = new Map((await db.select().from(monthlySnapshots)).map((r) => [r.period, r]))
+  const missing = periods.filter((p) => !snaps.has(p))
+  const shared = missing.length > 0 ? await sharedInputs() : undefined
 
-  const out: Array<{ period: string; scoreBps: number | null }> = []
+  const out: Array<{ period: string; scoreBps: number | null; source: 'foto' | 'reconstruído' }> = []
   for (const period of periods) {
-    const { scoreBps } = await healthScore(period, accountId)
-    out.push({ period, scoreBps })
+    const snap = snaps.get(period)
+    if (snap) out.push({ period, scoreBps: snap.scoreBps, source: 'foto' })
+    else out.push({ period, scoreBps: (await healthScore(period, accountId, shared)).scoreBps, source: 'reconstruído' })
   }
   return out
 }
@@ -526,53 +561,40 @@ async function liquidInvestmentsCents(liquidClasses: readonly string[]): Promise
 /** Ajustes hipotéticos do simulador. Ausentes em toda chamada de produção. */
 export type RunwayOverrides = { balanceDeltaCents?: number; investmentsDeltaCents?: number }
 
-async function runwayFor(
-  accountId: number | null,
-  label: string,
-  settings: HealthSettings,
-  liquidClasses: readonly string[],
-  overrides: RunwayOverrides = {},
-): Promise<RunwayScope> {
-  const currentPeriod = todayIso().slice(0, 7)
-  const costFrom = periodBounds(addMonths(currentPeriod, -settings.costLookbackMonths)).start
-  const costTo = periodBounds(addMonths(currentPeriod, -1)).end
-  const [costWindow, balances] = await Promise.all([
-    totals({ from: costFrom, to: costTo, accountId }),
-    accountBalances(),
-  ])
-  const monthlyCostCents =
-    settings.costLookbackMonths > 0 ? Math.round(costWindow.expenseCents / settings.costLookbackMonths) : 0
+async function runwayPersonal(liquidClasses: readonly string[], overrides: RunwayOverrides = {}): Promise<RunwayScope> {
+  const today = todayIso()
+  const horizon = addDays(today, SHORT_TERM_DEBT_DAYS)
+  const cash = await personalCash()
+  const personalCost = await typicalPersonalSpending()
+  const v2 = await debtOverviewV2()
 
   const balanceDeltaCents = overrides.balanceDeltaCents ?? 0
   const investmentsDeltaCents = overrides.investmentsDeltaCents ?? 0
-
-  const balanceCents =
-    balances
-      .filter((a) => (accountId ? a.id === accountId : true))
-      .reduce((sum, a) => sum + a.balanceCents, 0) + balanceDeltaCents
-
-  // Investments are only folded into the consolidated row: `assets` are not
-  // reliably tied to a checking account, so attributing a position to PF or
-  // PJ would be a guess, and a guess is exactly what the memory of
-  // calculation is supposed to make impossible.
-  const investmentsCents =
-    accountId === null ? (await liquidInvestmentsCents(liquidClasses)) + investmentsDeltaCents : 0
-  const shortTermCents = await shortTermDebtCents(accountId)
+  const balanceCents = cash.personal.reduce((sum, a) => sum + Number(a.balanceCents), 0) + balanceDeltaCents
+  const investmentsCents = (await liquidInvestmentsCents(liquidClasses)) + investmentsDeltaCents
+  const pendingDebtCents = await shortTermDebtCents(null)
+  // Faturas abertas que vencem na janela (as dívidas pagas no cartão já saíram
+  // delas); cartão pago pela conta PJ é da empresa e fica fora.
+  const cardBillsCents = v2.cards
+    .filter((c) => c.accountId !== cash.scope.pjAccountId && c.openBillCents !== null && c.dueOn >= today && c.dueOn <= horizon)
+    .reduce((sum, c) => sum + (c.byPeriod[v2.startPeriod] ?? 0), 0)
+  const shortTermCents = pendingDebtCents + cardBillsCents
   const netWorthCents = balanceCents + investmentsCents - shortTermCents
+  const monthlyCostCents = personalCost.typicalCents
 
   const assumptions: Assumptions = {
     formula:
-      'patrimônio considerado ÷ custo mensal médio, onde patrimônio = saldo em conta + investimentos líquidos, menos a dívida de curto prazo',
-    saldoEmContaCents: balanceCents,
+      'patrimônio pessoal considerado ÷ custo de vida pessoal, onde patrimônio = saldo das contas pessoais + investimentos líquidos − o que vence em 30 dias (parcelas e faturas)',
+    saldoContasPessoaisCents: balanceCents,
     investimentosLiquidosCents: investmentsCents,
-    dividaCurtoPrazoCents: shortTermCents,
+    parcelasEm30DiasCents: pendingDebtCents,
+    faturasEm30DiasCents: cardBillsCents,
     patrimonioConsideradoCents: netWorthCents,
-    custoMensalMedioCents: monthlyCostCents,
-    janelaCustoMeses: settings.costLookbackMonths,
-    janelaCusto: { from: costFrom, to: costTo },
-    diasDividaCurtoPrazo: SHORT_TERM_DEBT_DAYS,
+    custoDeVidaPessoalCents: monthlyCostCents,
+    custoDeVida: `mediana de ${personalCost.sampleMonths} meses fechados das despesas das contas pessoais (Orçamento)`,
+    diasCurtoPrazo: SHORT_TERM_DEBT_DAYS,
     classesLiquidas: [...liquidClasses],
-    investimentosIncluidos: accountId === null,
+    escopo: 'pessoal: a conta PJ fica de fora; a linha da empresa mostra o retirável da Minha empresa',
     ...(balanceDeltaCents !== 0 || investmentsDeltaCents !== 0
       ? {
           ajusteHipoteticoSaldoCents: balanceDeltaCents,
@@ -581,27 +603,15 @@ async function runwayFor(
             'estes números incluem um ajuste hipotético pedido pelo simulador, não o estado real do ledger',
         }
       : {}),
-    ...(accountId !== null
-      ? { notaDeEscopo: 'investimentos entram apenas na visão consolidada, porque um ativo não pertence a uma conta corrente específica' }
-      : {}),
   }
 
   if (monthlyCostCents <= 0) {
-    return {
-      accountId,
-      label,
-      months: null,
-      netWorthCents,
-      monthlyCostCents,
-      assumptions: { ...assumptions, semDado: 'nenhuma despesa registrada para calcular o custo mensal' },
-    }
+    return { accountId: null, label: 'Pessoal', months: null, netWorthCents, monthlyCostCents, assumptions: { ...assumptions, semDado: 'nenhuma despesa nas contas pessoais para calcular o custo de vida' } }
   }
-
   return {
-    accountId,
-    label,
-    // One decimal is enough: "4,2 meses" is a projection, and more digits
-    // would suggest a precision the inputs do not have.
+    accountId: null,
+    label: 'Pessoal',
+    // Uma casa decimal: "4,2 meses" é projeção, mais dígitos sugeririam uma precisão que não existe.
     months: Math.round((netWorthCents / monthlyCostCents) * 10) / 10,
     netWorthCents,
     monthlyCostCents,
@@ -610,11 +620,9 @@ async function runwayFor(
 }
 
 /**
- * One row per active account plus a consolidated row. The PF/PJ split the
- * spec asks for is exactly this, with the labelling left to whoever knows
- * which account is which: `specs/dre` already resolves those two by name
- * at the page level, and repeating that guess in a service would bake
- * account naming into the calculation layer.
+ * Runway pessoal (decisions/0045) e, à parte, quanto ele cresce se o
+ * retirável da Minha empresa for retirado. A empresa não entra no número
+ * principal: o caixa da PJ tem DAS, contas e o colchão dela.
  */
 export async function runway(
   liquidClasses: readonly string[] = DEFAULT_LIQUID_ASSET_CLASSES,
@@ -623,21 +631,29 @@ export async function runway(
   scopes: RunwayScope[]
   consolidated: RunwayScope
 }> {
-  const settings = await getSettings()
-  // Os deltas valem só na linha consolidada: investimentos não são
-  // atribuíveis a uma conta corrente (ver `runwayFor`), então um ajuste de
-  // investimento numa linha por conta não teria onde ser aplicado.
-  const consolidated = await runwayFor(null, 'Consolidado', settings, liquidClasses, overrides)
-  const balances = await accountBalances()
-  // Sequencial, não Promise.all: sob o pooler de transação desta Edge
-  // Function, fan-out concorrente demais numa mesma conexão trava a
-  // requisição para sempre (sem erro nenhum) em vez de só ficar lenta —
-  // mesmo achado e mesmo fix de goals.ts#goalHistory.
-  const perAccount: RunwayScope[] = []
-  for (const a of balances) {
-    perAccount.push(await runwayFor(a.id, a.name, settings, liquidClasses))
+  const personal = await runwayPersonal(liquidClasses, overrides)
+  const scopes: RunwayScope[] = [personal]
+  try {
+    const company = await companyOverview(todayIso().slice(0, 7))
+    const w = company.withdrawable?.withdrawableCents ?? null
+    if (w !== null && company.pjAccount?.id) {
+      scopes.push({
+        accountId: Number(company.pjAccount.id),
+        label: 'Com o retirável da empresa',
+        months: personal.monthlyCostCents > 0 ? Math.round(((personal.netWorthCents + w) / personal.monthlyCostCents) * 10) / 10 : null,
+        netWorthCents: w,
+        monthlyCostCents: personal.monthlyCostCents,
+        assumptions: {
+          formula: '(patrimônio pessoal considerado + retirável da Minha empresa) ÷ custo de vida pessoal',
+          retiravelCents: w,
+          origem: 'Minha empresa: caixa da PJ menos DAS, pendências e o colchão configurado',
+        },
+      })
+    }
+  } catch {
+    // Sem conta PJ configurada: só a linha pessoal.
   }
-  return { scopes: [consolidated, ...perAccount], consolidated }
+  return { scopes, consolidated: personal }
 }
 
 /* ------------------------------------------------------------------ *
@@ -700,39 +716,12 @@ export async function riskRadar(period: string, accountId: number | null = null)
       : valueBps >= thresholdBps + margin
   }
 
-  /* Limite de cartão comprometido contra a receita do período. Ver ADR 0015:
-     este número é uma medição de limite usado, nunca a fatura de um ciclo.
-     Sequencial, não Promise.all: mesmo achado e mesmo fix de
-     goals.ts#goalHistory — `debtOverview`/`getPeriodProgress` já fazem seu
-     próprio fan-out interno, e o pooler de transação desta Edge Function
-     trava a requisição (sem erro, para sempre) quando concorrência demais
-     se empilha numa mesma conexão. */
-  const cards = await listCards()
-  const goals = await getPeriodProgress(period, accountId)
+  // Uma fonte para cada número (decisions/0045); em sequência pelo pooler.
+  void accountId
+  const spend = await monthSpendingVsCap(period)
   const reserve = await reserveStatus()
   const allocationSlices = await allocation()
-  const debt = await debtOverview({ period })
-  const billCents = cards.reduce((sum, c) => sum + c.usedCents, 0)
-  if (cards.length > 0 && goals.actual.incomeCents > 0) {
-    const valueBps = Math.round((billCents / goals.actual.incomeCents) * 10_000)
-    rules.push({
-      key: 'card_share',
-      label: 'Comprometimento da receita com limite de cartão',
-      valueBps,
-      thresholdBps: settings.riskCardShareBps,
-      unit: 'share',
-      direction: 'above',
-      outsideRange: flagged(valueBps, settings.riskCardShareBps, 'above'),
-      exceedsPositively: positive(valueBps, settings.riskCardShareBps, 'above'),
-      assumptions: {
-        formula: 'soma do limite usado de todos os cartões ativos; inclui parcelamento em andamento e saldo revolvente, não separável do que vence neste ciclo sem o gasto por lançamento de cartão, que este app não rastreia separado da conta vinculada, dividido pela receita realizada do período',
-        limiteCartaoComprometidoCents: billCents,
-        receitaDoPeriodoCents: goals.actual.incomeCents,
-        cartoesConsiderados: cards.length,
-        periodo: period,
-      },
-    })
-  }
+  const v2 = await debtOverviewV2()
 
   /* Cobertura da reserva de emergência. */
   if (reserve.targetCents > 0) {
@@ -780,9 +769,9 @@ export async function riskRadar(period: string, accountId: number | null = null)
     })
   }
 
-  /* Gasto do mês contra o teto configurado. */
-  if (goals.goal.spendCapCents !== null && goals.goal.spendCapCents > 0) {
-    const valueBps = Math.round((goals.actual.expenseCents / goals.goal.spendCapCents) * 10_000)
+  /* Gasto do mês contra o teto do Orçamento. */
+  if (spend.capCents !== null && spend.capCents > 0) {
+    const valueBps = Math.round((spend.spentCents / spend.capCents) * 10_000)
     rules.push({
       key: 'spending_cap',
       label: 'Uso do teto de gasto do mês',
@@ -793,33 +782,34 @@ export async function riskRadar(period: string, accountId: number | null = null)
       outsideRange: flagged(valueBps, settings.riskSpendingCapBps, 'above'),
       exceedsPositively: positive(valueBps, settings.riskSpendingCapBps, 'above'),
       assumptions: {
-        formula: 'gasto realizado no período ÷ teto de gasto configurado',
-        gastoCents: goals.actual.expenseCents,
-        tetoCents: goals.goal.spendCapCents,
+        formula: 'gasto do mês nas contas pessoais ÷ previsto dos grupos de gasto do plano do Orçamento',
+        gastoCents: spend.spentCents,
+        tetoCents: spend.capCents,
         periodo: period,
+        origem: 'Orçamento',
       },
     })
   }
 
-  /* Comprometimento de renda com dívida. */
-  if (debt.debts.length > 0 && debt.debtToIncomeBps !== null) {
+  /* Comprometimento da renda, o mesmo do Endividamento (dívidas e faturas). */
+  const commitmentBps = v2.commitment.shareBps
+  if (commitmentBps !== null && (v2.commitment.debtCents > 0 || v2.commitment.cardCents > 0)) {
     rules.push({
       key: 'debt_to_income',
-      label: 'Comprometimento da renda com dívida',
-      valueBps: debt.debtToIncomeBps,
+      label: 'Renda comprometida com dívidas e cartões',
+      valueBps: commitmentBps,
       thresholdBps: settings.riskDebtToIncomeBps,
       unit: 'share',
       direction: 'above',
-      outsideRange: flagged(debt.debtToIncomeBps, settings.riskDebtToIncomeBps, 'above'),
-      exceedsPositively: positive(debt.debtToIncomeBps, settings.riskDebtToIncomeBps, 'above'),
+      outsideRange: flagged(commitmentBps, settings.riskDebtToIncomeBps, 'above'),
+      exceedsPositively: positive(commitmentBps, settings.riskDebtToIncomeBps, 'above'),
       assumptions: {
-        formula: 'parcelas programadas do mês ÷ renda mensal típica da janela',
-        parcelasDoMesCents: debt.scheduledCents,
-        rendaMensalTipicaCents: debt.typicalMonthlyIncomeCents,
-        janelaDaRendaMeses: debt.incomeWindowMonths,
-        mesesComMovimentoNaJanela: debt.incomeSampleMonths,
-        mesDeReferencia: debt.period,
-        dividasAtivas: debt.debts.length,
+        formula: '(parcelas das dívidas do mês + faturas abertas dos cartões ligados) ÷ renda típica pessoal',
+        parcelasDoMesCents: v2.commitment.debtCents,
+        faturasDoMesCents: v2.commitment.cardCents,
+        rendaTipicaPessoalCents: v2.income.typicalCents,
+        mesDeReferencia: v2.startPeriod,
+        origem: 'Endividamento (mesmo número da tela)',
       },
     })
   }
@@ -831,7 +821,6 @@ export async function riskRadar(period: string, accountId: number | null = null)
       formula: 'cada regra compara um indicador derivado com o limite configurado pelo usuário',
       periodo: period,
       thresholdsConfigurados: {
-        card_share: settings.riskCardShareBps,
         reserve_coverage: settings.riskReserveCoverageBps,
         allocation_drift: settings.riskAllocationDriftBps,
         spending_cap: settings.riskSpendingCapBps,
@@ -842,7 +831,6 @@ export async function riskRadar(period: string, accountId: number | null = null)
       regrasForaDaFaixa: rules.filter((r) => r.outsideRange).map((r) => r.key),
       regrasAcimaDaFolga: rules.filter((r) => r.exceedsPositively).map((r) => r.key),
       regrasSemDado: [
-        'card_share',
         'reserve_coverage',
         'allocation_drift',
         'spending_cap',
@@ -875,35 +863,55 @@ export type NetWorth = {
   illiquidCents: number
   /** saldo em conta + investimentos LÍQUIDOS (tudo menos o imobilizado) */
   financialCents: number
+  /** "Quanto você deve" do Endividamento: dívidas + limite usado dos cartões */
   debtCents: number
-  /** saldo + investimentos − dívida total */
+  debtBreakdown: { debtsCents: number; cardsCents: number }
+  /** saldo pessoal + investimentos − dívida: o patrimônio PESSOAL */
   liquidityCents: number
+  /** a empresa à parte, fora do número principal (decisions/0045) */
+  company: { accountName: string | null; balanceCents: number; cardsCents: number; withdrawableCents: number | null } | null
   assumptions: Assumptions
 }
 
 export async function netWorth(): Promise<NetWorth> {
-  const [balances, holdings, debts] = await Promise.all([accountBalances(), positions(), listDebts()])
-  const balanceCents = balances.reduce((sum, a) => sum + a.balanceCents, 0)
+  // Em sequência pelo pooler das Edge Functions.
+  const cash = await personalCash()
+  const holdings = await positions()
+  const v2 = await debtOverviewV2()
+  const balanceCents = cash.personal.reduce((sum, a) => sum + Number(a.balanceCents), 0)
 
   // TODOS os investimentos, não só os que contam para a reserva: aqui a
   // pergunta é patrimônio, não liquidez de emergência.
   const investmentsCents = holdings.reduce((sum, p) => sum + p.marketValueCents, 0)
-
-  /**
-   * Financeiro x Imobilizado é a divisão que a tela de Patrimônio mostra
-   * (01/09/2026): as duas metades respondem a perguntas diferentes ("de
-   * quanto eu disponho" contra "quanto eu possuo"), e somá-las num número
-   * só esconde que um carro não paga uma conta. O patrimônio líquido
-   * continua sendo a soma dos dois menos a dívida, sem mudança de fórmula.
-   */
+  // Financeiro x Imobilizado (01/09/2026): um carro não paga uma conta.
   const illiquidCents = holdings
     .filter((p) => p.assetClass === ILLIQUID_ASSET_CLASS)
     .reduce((sum, p) => sum + p.marketValueCents, 0)
   const financialCents = balanceCents + investmentsCents - illiquidCents
 
-  // Dívida TOTAL (saldo corrente de toda dívida ativa), a mesma soma que
-  // `debtOverview` publica, lida da mesma origem em vez de recalculada.
-  const debtCents = debts.reduce((sum, d) => sum + d.balanceCents, 0)
+  // A dívida do Endividamento (dívidas + limite usado, sem a parte que é
+  // dívida paga na fatura), menos os cartões pagos pela conta PJ: esses são
+  // da empresa e vão para a linha dela (decisions/0045).
+  const isCompanyCard = (c: { accountId: number | null }) => cash.scope.pjAccountId !== null && c.accountId === cash.scope.pjAccountId
+  const companyCardsCents = v2.cards.filter(isCompanyCard).reduce((sum, c) => sum + c.usedCents, 0)
+  const personalCardsCents = v2.total.cardsUsedCents - companyCardsCents
+  const debtCents = v2.total.debtsCents + personalCardsCents
+
+  let company: NetWorth['company'] = null
+  if (cash.scope.pjAccountId !== null) {
+    let withdrawableCents: number | null = null
+    try {
+      withdrawableCents = (await companyOverview(todayIso().slice(0, 7))).withdrawable?.withdrawableCents ?? null
+    } catch {
+      withdrawableCents = null
+    }
+    company = {
+      accountName: cash.company[0]?.name ?? null,
+      balanceCents: cash.company.reduce((sum, a) => sum + Number(a.balanceCents), 0),
+      cardsCents: companyCardsCents,
+      withdrawableCents,
+    }
+  }
 
   return {
     balanceCents,
@@ -911,25 +919,25 @@ export async function netWorth(): Promise<NetWorth> {
     illiquidCents,
     financialCents,
     debtCents,
+    debtBreakdown: { debtsCents: v2.total.debtsCents, cardsCents: personalCardsCents },
     liquidityCents: balanceCents + investmentsCents - debtCents,
+    company,
     assumptions: {
-      formula: 'saldo em conta mais investimentos a valor de mercado, menos a dívida total',
-      saldoEmContaCents: balanceCents,
-      contasSomadas: balances.length,
+      formula: 'saldo das contas pessoais + investimentos a valor de mercado − quanto você deve (Endividamento)',
+      saldoContasPessoaisCents: balanceCents,
+      contasSomadas: cash.personal.length,
       investimentosCents: investmentsCents,
       ativosSomados: holdings.length,
       investimentosEscopo: 'todos os ativos da carteira, não apenas os marcados como reserva',
       financeiroCents: financialCents,
       imobilizadoCents: illiquidCents,
-      divisaoEscopo:
-        'Financeiro é saldo em conta mais os investimentos negociáveis; Imobilizado é a classe de bens físicos, que entra no patrimônio mas fica fora da política de alocação da carteira',
-      dividaTotalCents: debtCents,
-      dividasAtivas: debts.length,
-      dividaEscopo:
-        'saldo corrente de toda dívida ativa, diferente da dívida de curto prazo (30 dias) que o Runway usa',
-      notaDeEscopo:
-        'visão consolidada: um ativo não pertence a uma conta corrente específica, então este card não se divide por PF e PJ, mesma ressalva que o Runway já documenta',
-      origem: 'services/analytics (saldos), services/investments (posições), services/debt (dívidas)',
+      dividaCents: debtCents,
+      dividasCents: v2.total.debtsCents,
+      cartoesPessoaisCents: personalCardsCents,
+      cartoesDaEmpresaCents: companyCardsCents,
+      dividaEscopo: '"Quanto você deve" do Endividamento (dívidas + limite usado dos cartões), sem os cartões pagos pela conta PJ, que vão para a linha da empresa',
+      escopo: 'pessoal: a conta PJ e conta de investimento ficam fora do saldo; a empresa aparece à parte',
+      ...(company ? { empresaSaldoCents: company.balanceCents, empresaCartoesCents: company.cardsCents, empresaRetiravelCents: company.withdrawableCents } : {}),
     },
   }
 }
@@ -947,21 +955,60 @@ export async function netWorth(): Promise<NetWorth> {
  * Sequencial de propósito (mesmo risco de pooler já documentado em
  * `goalHistory`/`healthScoreHistory`).
  */
-export async function netWorthHistory(months = 12): Promise<Array<{ period: string; netWorthCents: number }>> {
+export async function netWorthHistory(months = 12): Promise<Array<{ period: string; netWorthCents: number; source: 'foto' | 'reconstruído' }>> {
   const currentPeriod = todayIso().slice(0, 7)
   const periods = periodRange(addMonths(currentPeriod, -(months - 1)), currentPeriod)
+  const snaps = new Map((await db.select().from(monthlySnapshots)).map((r) => [r.period, r]))
   const debtSeries = await debtTrend()
+  const scope = await accountScope()
 
-  const out: Array<{ period: string; netWorthCents: number }> = []
+  const out: Array<{ period: string; netWorthCents: number; source: 'foto' | 'reconstruído' }> = []
   for (const period of periods) {
+    const snap = snaps.get(period)
+    if (snap) {
+      out.push({ period, netWorthCents: Number(snap.netWorthCents), source: 'foto' })
+      continue
+    }
+    // Reconstrução: contas pessoais e dívidas medidas até o fim do mês (os
+    // cartões não têm série; as fotos mensais resolvem isso daqui em diante).
     const asOfDate = periodBounds(period).end
     const balances = await accountBalances(asOfDate)
     const holdings = await positions(asOfDate)
-    const balanceCents = balances.reduce((sum, a) => sum + a.balanceCents, 0)
+    const balanceCents = balances
+      .filter((a) => a.kind !== 'investment' && scope.personal.includes(Number(a.id)))
+      .reduce((sum, a) => sum + Number(a.balanceCents), 0)
     const investmentsCents = holdings.reduce((sum, p) => sum + p.marketValueCents, 0)
     const debtPoint = [...debtSeries].reverse().find((p) => p.asOf <= asOfDate)
-    const debtCents = debtPoint?.balanceCents ?? 0
-    out.push({ period, netWorthCents: balanceCents + investmentsCents - debtCents })
+    const debtCents = Number(debtPoint?.balanceCents ?? 0)
+    out.push({ period, netWorthCents: balanceCents + investmentsCents - debtCents, source: 'reconstruído' })
   }
   return out
+}
+
+/**
+ * A foto do mês (decisions/0045): score e patrimônio pessoal de hoje,
+ * gravados no mês corrente. A rotina diária chama todo dia; a última
+ * gravação do mês fica como a foto dele.
+ */
+export async function writeMonthlySnapshot(): Promise<{ period: string; scoreBps: number | null; netWorthCents: number }> {
+  const period = todayIso().slice(0, 7)
+  const score = await healthScore(period)
+  const nw = await netWorth()
+  const values = {
+    period,
+    scoreBps: score.scoreBps,
+    netWorthCents: nw.liquidityCents,
+    companyCents: nw.company?.balanceCents ?? 0,
+    debtCents: nw.debtCents,
+    details: {
+      indicadores: Object.fromEntries(score.indicators.map((i) => [i.key, i.scoreBps])),
+      saldoPessoalCents: nw.balanceCents,
+      investimentosCents: nw.investmentsCents,
+      imobilizadoCents: nw.illiquidCents,
+      retiravelEmpresaCents: nw.company?.withdrawableCents ?? null,
+    },
+    takenAt: new Date().toISOString(),
+  }
+  await db.insert(monthlySnapshots).values(values).onConflictDoUpdate({ target: monthlySnapshots.period, set: values })
+  return { period, scoreBps: score.scoreBps, netWorthCents: nw.liquidityCents }
 }

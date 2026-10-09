@@ -1,6 +1,8 @@
 import { useId, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { todayIso } from '../lib/period'
 import { useAccounts, useMeta } from '../lib/store'
 import {
   centsToInput,
@@ -17,6 +19,7 @@ import {
   EmptyState,
   HeroFigure,
   Icon,
+  LoadError,
   Meter,
   Select,
   Slab,
@@ -43,14 +46,34 @@ type DailyResponse = {
     paceCents: number | null
     aheadOfPaceCents: number | null
     projectedMonthCents: number
+    pendingRestOfMonthCents: number
+    dailyMedianCents: number
     dailyAllowanceCents: number | null
+    state: MeterState
   }
+  /** só no mês corrente: o que vence nos próximos dias e o saldo pessoal projetado */
+  upcoming: {
+    days: Array<{
+      day: string
+      items: Array<{ kind: 'expense' | 'income' | 'card'; label: string; amountCents: number; overdue?: boolean }>
+      outCents: number
+      inCents: number
+      balanceCents: number
+    }>
+    startBalanceCents: number
+    nextIncome: { day: string; amountCents: number; label: string } | null
+    firstNegativeDay: string | null
+  } | null
   receivableCents: number
+  assumptions: Record<string, string>
 }
 
 export function DailyPage() {
   const meta = useMeta()
-  const today = meta.data?.today ?? '2026-08-19'
+  // Sem a data do servidor ainda, a do aparelho: uma data fixa abria a tela
+  // em agosto de 2026 ao recarregar, com o lançamento rápido em 19/08
+  // (revisão de 09/10/2026).
+  const today = meta.data?.today ?? todayIso()
   const [period, setPeriod] = useState(() => today.slice(0, 7))
 
   const daily = useQuery({
@@ -61,38 +84,40 @@ export function DailyPage() {
   })
 
   const pace = daily.data?.pace
-  const paceState: MeterState = useMemo(() => {
-    if (!pace || pace.capCents === null) return 'no_target'
-    if (pace.spentCents > pace.capCents) return 'exceeded'
-    if (pace.aheadOfPaceCents !== null && pace.aheadOfPaceCents > 0) return 'at_risk'
-    return 'on_track'
-  }, [pace])
+  // O estado vem do servidor: gasto acima do teto, ou a projeção do mês acima dele.
+  const paceState: MeterState = pace?.state ?? 'no_target'
 
   const daysWithSpend = (daily.data?.days ?? []).filter((d) => d.expenseCents > 0)
   const busiest = daysWithSpend.reduce<{ day: string; expenseCents: number } | null>(
     (max, day) => (max === null || day.expenseCents > max.expenseCents ? day : max),
     null,
   )
-  const avgPerActiveDay =
-    daysWithSpend.length > 0
-      ? Math.round(daysWithSpend.reduce((sum, d) => sum + d.expenseCents, 0) / daysWithSpend.length)
-      : 0
 
   return (
     <>
       <PageHeader
         title="Diário"
-        subtitle="Lançamento rápido e o ritmo de gasto do mês"
+        subtitle="O que vence nos próximos dias, o gasto do mês contra o Orçamento e o lançamento rápido"
         filters={<PeriodNav period={period} onChange={setPeriod} max={today.slice(0, 7)} />}
       />
 
       <div className="page">
         <Bento>
-          <QuickAdd today={today} />
+          {daily.data?.upcoming && <UpcomingCard upcoming={daily.data.upcoming} assumptions={daily.data.assumptions} />}
 
-          <Slab span={6} accent>
+          {daily.isError && (
+            <Card span={12}>
+              <LoadError onRetry={() => daily.refetch()} retrying={daily.isFetching} />
+            </Card>
+          )}
+
+          <Slab
+            span={6}
+            accent
+            assumptions={daily.data ? { gasto: daily.data.assumptions.gasto ?? '', teto: daily.data.assumptions.teto ?? '' } : undefined}
+          >
             <HeroFigure
-              label={`Gasto em ${periodLong(period)}`}
+              label={`Gasto pessoal em ${periodLong(period)}`}
               value={pace ? money(pace.spentCents) : '-'}
             >
               <div className="stack stack--tight" style={{ marginTop: 'var(--sp-3)' }}>
@@ -115,11 +140,11 @@ export function DailyPage() {
                 />
                 {pace?.capCents ? (
                   <span style={{ fontSize: 'var(--text-xs)', color: 'var(--on-slab-2)' }}>
-                    Teto do mês {money(pace.capCents)} · marca branca = ritmo esperado hoje
+                    Teto do Orçamento {money(pace.capCents)} · marca branca = ritmo esperado hoje
                   </span>
                 ) : (
                   <span style={{ fontSize: 'var(--text-xs)', color: 'var(--on-slab-3)' }}>
-                    Defina um teto de gastos em Metas do mês para acompanhar o ritmo.
+                    Sem plano no Orçamento para este mês. <Link to="/metas/ajustar">Definir o plano</Link>
                   </span>
                 )}
               </div>
@@ -140,15 +165,23 @@ export function DailyPage() {
             <StatTile
               label="A receber"
               value={daily.data ? money(daily.data.receivableCents) : '-'}
-              foot="entradas pendentes de confirmação no período"
+              foot="entradas pendentes no mês, em todas as contas (a PJ inclusa)"
             />
           </Card>
 
-          <Slab span={12} title="Intensidade por dia" subtitle="Gasto de cada dia do mês selecionado">
+          <Slab span={12} title="Intensidade por dia" subtitle="Gasto das contas pessoais em cada dia do mês selecionado">
             <SpendAreaChart days={daily.data?.days ?? []} surface="paper" />
           </Slab>
 
-          <Card span={6}>
+          <Card
+            span={6}
+            assumptions={{
+              formula: daily.data?.assumptions.projecao ?? '',
+              pendenciasDoMes: pace ? money(pace.pendingRestOfMonthCents) : '-',
+              ritmoPorDia: pace ? money(pace.dailyMedianCents) : '-',
+              cuidado: 'a mediana por dia não repete um gasto único grande, como o aluguel',
+            }}
+          >
             <StatTile
               label="Ritmo projetado para o mês"
               value={pace ? money(pace.projectedMonthCents) : '-'}
@@ -163,23 +196,16 @@ export function DailyPage() {
           </Card>
           <Card span={6}>
             <StatTile
-              label="Pode gastar por dia"
+              label="Sobra por dia até o teto"
               value={pace?.dailyAllowanceCents !== null && pace?.dailyAllowanceCents !== undefined ? money(pace.dailyAllowanceCents) : '-'}
               foot={
                 pace && pace.daysTotal - pace.daysElapsed > 0
-                  ? `nos ${pace.daysTotal - pace.daysElapsed} dias restantes`
+                  ? `nos ${pace.daysTotal - pace.daysElapsed} dias restantes, já tirando ${money(pace.pendingRestOfMonthCents)} que vence no mês`
                   : 'mês encerrado'
               }
             />
           </Card>
-          <Card span={6}>
-            <StatTile
-              label="Média por dia com gasto"
-              value={money(avgPerActiveDay)}
-              foot={`${daysWithSpend.length} dias com movimento`}
-            />
-          </Card>
-          <Card span={6}>
+          <Card span={12}>
             <StatTile
               label="Maior dia"
               value={busiest ? money(busiest.expenseCents) : '-'}
@@ -206,6 +232,8 @@ export function DailyPage() {
             </div>
           </Card>
 
+          <QuickAdd today={today} />
+
           <RecentDaily period={period} />
         </Bento>
       </div>
@@ -227,7 +255,23 @@ function QuickAdd({ today }: { today: string }) {
   const [categoryId, setCategoryId] = useState<number | null>(null)
   const [note, setNote] = useState('')
   const [day, setDay] = useState(today)
-  const [accountId, setAccountId] = useState<number | null>(null)
+  // Última conta usada no lançamento rápido, por aparelho (a primeira da lista podia ser a PJ).
+  const [accountId, setAccountIdState] = useState<number | null>(() => {
+    try {
+      const saved = Number(localStorage.getItem('daily.accountId'))
+      return Number.isFinite(saved) && saved > 0 ? saved : null
+    } catch {
+      return null
+    }
+  })
+  const setAccountId = (id: number | null) => {
+    setAccountIdState(id)
+    try {
+      if (id) localStorage.setItem('daily.accountId', String(id))
+    } catch {
+      /* armazenamento indisponível: só não lembra */
+    }
+  }
 
   const amountFieldId = useId()
   const categoryFieldId = useId()
@@ -235,7 +279,8 @@ function QuickAdd({ today }: { today: string }) {
   const dayFieldId = useId()
   const accountFieldId = useId()
 
-  const defaultAccount = accountId ?? accounts.data?.accounts[0]?.id ?? null
+  const list = accounts.data?.accounts ?? []
+  const defaultAccount = (accountId !== null && list.some((a) => a.id === accountId) ? accountId : null) ?? list[0]?.id ?? null
 
   const add = useMutation({
     mutationFn: () => {
@@ -279,6 +324,7 @@ function QuickAdd({ today }: { today: string }) {
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="0,00"
+            inputMode="decimal"
             className="text-right tabular-nums"
           />
         </div>
@@ -352,7 +398,7 @@ function RecentDaily({ period }: { period: string }) {
         />
       ) : (
         <div className="table-wrap" style={{ maxHeight: 360, overflowY: 'auto' }}>
-          <table className="table">
+          <table className="table table--stack-mobile">
             <thead>
               <tr>
                 <th scope="col" style={{ width: 110 }}>Data</th>
@@ -364,21 +410,104 @@ function RecentDaily({ period }: { period: string }) {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id}>
-                  <td className="tabular">{fmtDate(row.postedOn)}</td>
-                  <td className="truncate">{row.description}</td>
-                  <td>
+                  <td className="tabular" data-label="Data">{fmtDate(row.postedOn)}</td>
+                  <td className="truncate" data-label="Nota">{row.description}</td>
+                  <td data-label="TAG">
                     <span className="row" style={{ gap: 'var(--sp-2)' }}>
                       {row.categoryColor && <span className="swatch" style={{ background: row.categoryColor }} />}
                       <span className="truncate">{row.categoryName ?? 'Sem TAG'}</span>
                     </span>
                   </td>
-                  <td className="table__num neg">{money(row.amountCents)}</td>
+                  <td className="table__num neg" data-label="Valor">{money(row.amountCents)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+    </Card>
+  )
+}
+
+/**
+ * Próximos dias (specs/personal-picture): o que vence, dia a dia, e o saldo
+ * das contas pessoais depois de cada dia. Só informa; nunca diz o que fazer.
+ */
+function UpcomingCard({ upcoming, assumptions }: { upcoming: NonNullable<DailyResponse['upcoming']>; assumptions: Record<string, string> }) {
+  const withItems = upcoming.days.filter((d) => d.items.length > 0)
+  const last = upcoming.days.at(-1)
+  const outCents = upcoming.days.reduce((sum, d) => sum + d.outCents, 0)
+  const negativeNow = upcoming.startBalanceCents < 0
+  return (
+    <Card
+      span={12}
+      title={upcoming.nextIncome ? `Até o próximo recebimento (${fmtDate(upcoming.nextIncome.day)})` : 'Próximos 7 dias'}
+      subtitle="O que vence nas contas pessoais e nos cartões pessoais, e o saldo pessoal depois de cada dia"
+      assumptions={{ proximosDias: assumptions.proximosDias ?? '', saldoProjetado: assumptions.saldoProjetado ?? '' }}
+    >
+      <div className="stack">
+        <div className="row row--wrap" style={{ gap: 'var(--sp-5)' }}>
+          <div className="stack stack--tight">
+            <span className="stat__label">Saldo pessoal hoje</span>
+            <span className={`numeral ${upcoming.startBalanceCents < 0 ? 'neg' : ''}`} style={{ fontSize: 'var(--text-lg)' }}>
+              {money(upcoming.startBalanceCents)}
+            </span>
+          </div>
+          <div className="stack stack--tight">
+            <span className="stat__label">Sai no período</span>
+            <span className="numeral" style={{ fontSize: 'var(--text-lg)' }}>{money(outCents)}</span>
+          </div>
+          <div className="stack stack--tight">
+            <span className="stat__label">Saldo no fim do período</span>
+            <span className={`numeral ${last && last.balanceCents < 0 ? 'neg' : ''}`} style={{ fontSize: 'var(--text-lg)' }}>
+              {last ? money(last.balanceCents) : '-'}
+            </span>
+          </div>
+        </div>
+        {upcoming.firstNegativeDay && (
+          <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
+            <Icon name="alert" size={14} />{' '}
+            {negativeNow
+              ? 'O saldo das contas pessoais já está abaixo de zero hoje.'
+              : `O saldo das contas pessoais fica abaixo de zero em ${fmtDate(upcoming.firstNegativeDay)}.`}
+            {!upcoming.nextIncome && ' Nenhuma entrada prevista nas contas pessoais no período (a retirada da empresa não é prevista).'}
+          </p>
+        )}
+        {withItems.length === 0 ? (
+          <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>Nada vence nas contas pessoais neste período.</span>
+        ) : (
+          <div className="table-wrap">
+            <table className="table table--stack-mobile">
+              <thead>
+                <tr>
+                  <th scope="col" style={{ width: 110 }}>Dia</th>
+                  <th scope="col">O que vence</th>
+                  <th scope="col" className="table__num" style={{ width: 130 }}>Valor</th>
+                  <th scope="col" className="table__num" style={{ width: 150 }}>Saldo depois</th>
+                </tr>
+              </thead>
+              <tbody>
+                {withItems.flatMap((d) =>
+                  d.items.map((item, i) => (
+                    <tr key={`${d.day}-${i}`}>
+                      <td className="tabular" data-label="Dia">{i === 0 ? fmtDate(d.day) : ''}</td>
+                      <td data-label="O que vence">
+                        {item.label}
+                        {item.overdue && <span className="badge" style={{ marginLeft: 6 }}>atrasada</span>}
+                        {item.kind === 'card' && <span className="badge" style={{ marginLeft: 6 }}>fatura</span>}
+                      </td>
+                      <td className={`table__num ${item.amountCents < 0 ? 'neg' : 'pos'}`} data-label="Valor">{money(item.amountCents)}</td>
+                      <td className={`table__num ${d.balanceCents < 0 ? 'neg' : ''}`} data-label="Saldo depois">
+                        {i === d.items.length - 1 ? money(d.balanceCents) : ''}
+                      </td>
+                    </tr>
+                  )),
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </Card>
   )
 }

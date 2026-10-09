@@ -1,9 +1,10 @@
 import { useId, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { currentPeriod } from '../lib/period'
 import { useMeta, useRange } from '../lib/store'
-import { bps, bpsToInput, money, parsePercentInput, points } from '../lib/format'
+import { bps, bpsToInput, money, parsePercentInput, period as fmtPeriod, points } from '../lib/format'
 import {
   Assumptions,
   Bento,
@@ -146,6 +147,23 @@ const monthsLabel = (months: number | null) =>
     : months <= 0
       ? 'sem saldo positivo'
       : `${months.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${months === 1 ? 'mês' : 'meses'}`
+
+/** Quais meses do histórico são foto gravada e quais são reconstruídos (decisions/0045). */
+function historyNote(points: Array<{ period: string; source?: 'foto' | 'reconstruído' }> | undefined): string {
+  if (!points || points.length === 0) return ''
+  const firstPhoto = points.find((p) => p.source === 'foto')
+  if (!firstPhoto) return 'Ainda sem foto mensal: todos os meses são reconstruídos com os dados de hoje.'
+  const before = points.filter((p) => p.period < firstPhoto.period).length
+  return before > 0 ? `Foto mensal desde ${fmtPeriod(firstPhoto.period)}; os ${before} meses antes dela são reconstruídos.` : 'Todos os meses são fotos gravadas no fim do mês.'
+}
+
+/** Onde cada item do fechamento se resolve (revisão de 09/10/2026). */
+const CHECKLIST_LINK: Record<string, string> = {
+  categorization: '/lancamentos?uncategorized=1',
+  reconciliation: '/',
+  'daily-log': '/diario',
+  'dre-review': '/dre',
+}
 
 export function FinancialHealthPage() {
   const meta = useMeta()
@@ -297,12 +315,12 @@ export function FinancialHealthPage() {
             <Slab span={6} accent>
               <HeroFigure
                 label="Health Score do mês"
-                value={data.scoreBps === null ? 'sem dado' : bps(data.scoreBps, 0)}
+                value={data.scoreBps === null ? 'sem dado' : `${Math.round(data.scoreBps / 100)} de 100`}
               >
                 <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-xs)', marginTop: 'var(--sp-3)' }}>
                   {data.scoreBps === null
                     ? 'Nenhum dos cinco indicadores tem dado suficiente neste período.'
-                    : `Média de ${data.indicators.filter((i) => i.scoreBps !== null).length} de 5 indicadores, ponderada pelos pesos configurados.`}
+                    : `Média de ${data.indicators.filter((i) => i.scoreBps !== null).length} de ${data.indicators.length} indicadores, ponderada pelos pesos configurados. Cada um vem da tela dona do número.`}
                 </p>
               </HeroFigure>
             </Slab>
@@ -310,9 +328,15 @@ export function FinancialHealthPage() {
             <Card
               span={6}
               title="Evolução do Health Score"
-              subtitle="Últimos 12 meses, recalculado a cada mês. Nunca um número guardado"
+              subtitle={`Últimos 12 meses. ${historyNote(scoreHistory.data?.history) || 'Meses sem foto mensal usam a dívida, a reserva e a alocação de hoje.'}`}
             >
-              <ScoreHistoryChart points={scoreHistory.data?.history ?? []} />
+              {scoreHistory.isError ? (
+                <LoadError onRetry={() => scoreHistory.refetch()} retrying={scoreHistory.isFetching} />
+              ) : !scoreHistory.data ? (
+                <SkeletonLines lines={4} />
+              ) : (
+                <ScoreHistoryChart points={scoreHistory.data.history} />
+              )}
             </Card>
 
             <Card
@@ -332,20 +356,16 @@ export function FinancialHealthPage() {
               span={6}
               title="Runway"
               assumptions={runway.data?.consolidated.assumptions}
-              subtitle="Quantos meses os recursos atuais cobrem o custo mensal médio"
+              subtitle="Hoje: quantos meses o dinheiro pessoal cobre o custo de vida pessoal (não segue o mês selecionado)"
             >
               {runway.isError ? (
-                <EmptyState
-                  icon="alert"
-                  title="Falha ao carregar"
-                  body="Não foi possível carregar o runway agora. Tente novamente em instantes."
-                />
+                <LoadError onRetry={() => runway.refetch()} retrying={runway.isFetching} />
               ) : !runway.data ? (
-                <EmptyState title="Calculando…" />
+                <SkeletonLines lines={4} />
               ) : (
                 <div className="stack stack--loose">
                   <StatTile
-                    label="Consolidado"
+                    label="Pessoal"
                     large
                     value={monthsLabel(runway.data.consolidated.months)}
                     foot={
@@ -364,8 +384,8 @@ export function FinancialHealthPage() {
                       ))}
                   </div>
                   <p className="chart__note">
-                    Investimentos entram apenas na linha consolidada, porque um ativo não pertence a
-                    uma conta corrente específica.
+                    O número principal é só o pessoal: a conta PJ fica fora. A linha da empresa soma o
+                    retirável que a Minha empresa calcula (caixa da PJ menos DAS, contas e colchão).
                   </p>
                 </div>
               )}
@@ -376,59 +396,39 @@ export function FinancialHealthPage() {
               recortes diferentes, e ver os números lado a lado é o que deixa
               a diferença explícita em vez de parecer inconsistência.
             */}
+            {/* O patrimônio mora em /patrimonio (decisions/0045): aqui só o número, com o link. */}
             <Card
               span={6}
-              title="Patrimônio consolidado"
+              title="Patrimônio pessoal"
               assumptions={netWorth.data?.assumptions}
-              subtitle="Quanto existe hoje contra quanto se deve, somando conta, carteira e dívida"
+              subtitle="Hoje: o que é seu menos o que você deve; a empresa fica à parte"
             >
               {netWorth.isError ? (
-                <EmptyState
-                  icon="alert"
-                  title="Falha ao carregar"
-                  body="Não foi possível carregar o patrimônio consolidado agora. Tente novamente em instantes."
-                />
+                <LoadError onRetry={() => netWorth.refetch()} retrying={netWorth.isFetching} />
               ) : !netWorth.data ? (
-                <EmptyState title="Calculando…" />
+                <SkeletonLines lines={2} />
               ) : (
-                <>
-                  <div className="bento" style={{ gap: 'var(--sp-4)' }}>
-                    <div className="col-3">
-                      <StatTile label="Saldo em conta" value={money(netWorth.data.balanceCents)} />
-                    </div>
-                    <div className="col-3">
-                      <StatTile label="Investimentos" value={money(netWorth.data.investmentsCents)} />
-                    </div>
-                    <div className="col-3">
-                      <StatTile label="Dívida total" value={money(netWorth.data.debtCents)} />
-                    </div>
-                    <div className="col-3">
-                      {/* Este número soma TODOS os investimentos, imobilizado incluído, menos a
-                          dívida total: é patrimônio líquido, não liquidez. O rótulo antigo
-                          dizia "Liquidez" sobre um valor que inclui um bem que não paga
-                          conta nenhuma (01/09/2026). */}
-                      <StatTile
-                        label="Patrimônio líquido"
-                        value={money(netWorth.data.liquidityCents)}
-                        large
-                      />
-                    </div>
-                  </div>
-                  <p className="chart__note">
-                    A dívida aqui é a total, e os investimentos são todos, diferente do Runway ao
-                    lado, que usa só a dívida dos próximos 30 dias e só os investimentos líquidos.
-                    As duas perguntas são diferentes, então os dois números também são.
-                  </p>
-                </>
+                <div className="stack">
+                  <StatTile label="Patrimônio pessoal" value={money(netWorth.data.liquidityCents)} large />
+                  <Link to="/patrimonio" className="row" style={{ gap: 'var(--sp-1)', fontSize: 'var(--text-sm)' }}>
+                    Ver a composição em Patrimônio <Icon name="arrowRight" size={14} />
+                  </Link>
+                </div>
               )}
             </Card>
 
             <Card
               span={12}
               title="Evolução do patrimônio líquido"
-              subtitle="Últimos 12 meses, recalculado a cada mês. Nunca um número guardado"
+              subtitle={`Patrimônio pessoal, últimos 12 meses. ${historyNote(netWorthHistory.data?.history) || 'Reconstruído com os lançamentos e saldos registrados.'}`}
             >
-              <NetWorthHistoryChart points={netWorthHistory.data?.history ?? []} />
+              {netWorthHistory.isError ? (
+                <LoadError onRetry={() => netWorthHistory.refetch()} retrying={netWorthHistory.isFetching} />
+              ) : !netWorthHistory.data ? (
+                <SkeletonLines lines={4} />
+              ) : (
+                <NetWorthHistoryChart points={netWorthHistory.data.history} />
+              )}
             </Card>
 
             <Card
@@ -438,13 +438,9 @@ export function FinancialHealthPage() {
               subtitle="Cada indicador comparado com o limite que você configurou"
             >
               {radar.isError ? (
-                <EmptyState
-                  icon="alert"
-                  title="Falha ao carregar"
-                  body="Não foi possível carregar o radar de risco agora. Tente novamente em instantes."
-                />
+                <LoadError onRetry={() => radar.refetch()} retrying={radar.isFetching} />
               ) : !radar.data ? (
-                <EmptyState title="Calculando…" />
+                <SkeletonLines lines={5} />
               ) : radar.data.rules.length === 0 ? (
                 <EmptyState
                   icon="info"
@@ -475,7 +471,11 @@ export function FinancialHealthPage() {
                         <span style={{ color: item.done ? 'var(--status-good)' : 'var(--neutral-mark)', display: 'grid' }}>
                           <Icon name={item.done ? 'check' : 'clock'} size={14} strokeWidth={2.4} />
                         </span>
-                        <span>{item.label}</span>
+                        {CHECKLIST_LINK[item.key] ? (
+                          <Link to={CHECKLIST_LINK[item.key]!}>{item.label}</Link>
+                        ) : (
+                          <span>{item.label}</span>
+                        )}
                       </span>
                       {item.kind === 'manual' ? (
                         <Button
@@ -701,23 +701,10 @@ function SettingsEditor({ onClose }: { onClose: () => void }) {
               média, e o peso dele é redistribuído entre os que sobraram.
             </p>
             <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
-              <NumberField label="Liquidez" value={value('weightLiquidity', 'int')} onChange={set('weightLiquidity')} />
               <NumberField label="Endividamento" value={value('weightDebt', 'int')} onChange={set('weightDebt')} />
               <NumberField label="Controle de gastos" value={value('weightSpending', 'int')} onChange={set('weightSpending')} />
               <NumberField label="Reserva" value={value('weightReserve', 'int')} onChange={set('weightReserve')} />
               <NumberField label="Metas de alocação" value={value('weightAllocation', 'int')} onChange={set('weightAllocation')} />
-            </div>
-          </div>
-
-          <div className="stack stack--tight">
-            <span className="label">Janela de cálculo</span>
-            <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
-              <NumberField
-                label="Meses de custo médio"
-                hint="Usada na liquidez e no runway"
-                value={value('costLookbackMonths', 'int')}
-                onChange={set('costLookbackMonths')}
-              />
             </div>
           </div>
 
@@ -728,12 +715,6 @@ function SettingsEditor({ onClose }: { onClose: () => void }) {
               Enquanto nenhum limite for alterado, valem os valores sugeridos.
             </p>
             <div className="row row--wrap" style={{ gap: 'var(--sp-3)' }}>
-              <NumberField
-                label="Limite de cartão sobre receita (%)"
-                hint="acima disso, fora da faixa"
-                value={value('riskCardShareBps', 'bps')}
-                onChange={set('riskCardShareBps')}
-              />
               <NumberField
                 label="Cobertura da reserva (%)"
                 hint="abaixo disso, fora da faixa"

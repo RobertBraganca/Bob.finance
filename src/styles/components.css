@@ -2261,6 +2261,20 @@
   }
 }
 
+/* ---- Endividamento v2 (specs/debt-v2) ----------------------------- */
+/* Da parcela, a parte de juros e a que abate o saldo: uma barra, duas cores. */
+.split-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: var(--paper-sunken);
+}
+.split-bar > span {
+  display: block;
+  height: 100%;
+}
+
 /* ---- Plano de imóvel (specs/property-plan) ------------------------ */
 /* Grupos de campos: um rótulo pequeno e um filete, sem caixa dentro do card. */
 .plan-group {
