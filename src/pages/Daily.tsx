@@ -2,10 +2,9 @@ import { useId, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { todayIso } from '../lib/period'
+import { periodBounds, todayIso } from '../lib/period'
 import { useAccounts, useMeta } from '../lib/store'
 import {
-  centsToInput,
   date as fmtDate,
   money,
   parseMoneyInput,
@@ -22,6 +21,7 @@ import {
   LoadError,
   Meter,
   Select,
+  SkeletonLines,
   Slab,
   StatTile,
   StatusBadge,
@@ -75,6 +75,9 @@ export function DailyPage() {
   // (revisão de 09/10/2026).
   const today = meta.data?.today ?? todayIso()
   const [period, setPeriod] = useState(() => today.slice(0, 7))
+  /** dia aberto pelo clique no gráfico (ou no "Maior dia") */
+  const [openDay, setOpenDay] = useState<string | null>(null)
+  const openDayFieldId = useId()
 
   const daily = useQuery({
     queryKey: ['daily', period],
@@ -98,7 +101,16 @@ export function DailyPage() {
       <PageHeader
         title="Diário"
         subtitle="O que vence nos próximos dias, o gasto do mês contra o Orçamento e o lançamento rápido"
-        filters={<PeriodNav period={period} onChange={setPeriod} max={today.slice(0, 7)} />}
+        filters={
+          <PeriodNav
+            period={period}
+            onChange={(next) => {
+              setOpenDay(null)
+              setPeriod(next)
+            }}
+            max={today.slice(0, 7)}
+          />
+        }
       />
 
       <div className="page">
@@ -128,6 +140,7 @@ export function DailyPage() {
                   <StatusBadge state={paceState} />
                 </div>
                 <Meter
+                  label="Gasto do mês contra o teto"
                   usedBps={
                     pace?.capCents ? Math.round((pace.spentCents / pace.capCents) * 10_000) : 0
                   }
@@ -169,9 +182,11 @@ export function DailyPage() {
             />
           </Card>
 
-          <Slab span={12} title="Intensidade por dia" subtitle="Gasto das contas pessoais em cada dia do mês selecionado">
-            <SpendAreaChart days={daily.data?.days ?? []} surface="paper" />
+          <Slab span={12} title="Intensidade por dia" subtitle="Gasto das contas pessoais em cada dia do mês selecionado; clique num dia para ver os lançamentos">
+            <SpendAreaChart days={daily.data?.days ?? []} surface="paper" onDayClick={setOpenDay} />
           </Slab>
+
+          {openDay && <DayEntries day={openDay} onClose={() => setOpenDay(null)} />}
 
           <Card
             span={6}
@@ -209,8 +224,28 @@ export function DailyPage() {
             <StatTile
               label="Maior dia"
               value={busiest ? money(busiest.expenseCents) : '-'}
-              foot={busiest ? fmtDate(busiest.day) : 'sem gastos'}
+              foot={
+                busiest ? (
+                  <button type="button" className="link-button" onClick={() => setOpenDay(busiest.day)}>
+                    {fmtDate(busiest.day)} · ver lançamentos
+                  </button>
+                ) : (
+                  'sem gastos'
+                )
+              }
             />
+            {/* Mesmo atalho do clique no gráfico, para quem usa teclado ou leitor de tela. */}
+            <div className="field" style={{ width: 170, marginTop: 'var(--sp-3)' }}>
+              <label className="field__label" htmlFor={openDayFieldId}>Ver lançamentos de um dia</label>
+              <Input
+                id={openDayFieldId}
+                type="date"
+                value={openDay ?? ''}
+                min={periodBounds(period).from}
+                max={periodBounds(period).to < today ? periodBounds(period).to : today}
+                onChange={(e) => setOpenDay(e.target.value || null)}
+              />
+            </div>
           </Card>
           <Card span={12}>
             <div className="row row--between" style={{ alignItems: 'center' }}>
@@ -508,6 +543,72 @@ function UpcomingCard({ upcoming, assumptions }: { upcoming: NonNullable<DailyRe
           </div>
         )}
       </div>
+    </Card>
+  )
+}
+
+const DAY_ENTRIES_LIMIT = 100
+
+/** Lançamentos de um dia (todas as fontes e contas), aberto pelo gráfico. */
+function DayEntries({ day, onClose }: { day: string; onClose: () => void }) {
+  const query = useQuery({
+    queryKey: ['day-entries', day],
+    queryFn: () =>
+      api.get<{ rows: Array<{ id: number; description: string; amountCents: number; accountName: string; categoryName: string | null; pending: boolean }> }>(
+        '/transactions',
+        { from: day, to: day, limit: DAY_ENTRIES_LIMIT },
+      ),
+  })
+  const rows = query.data?.rows ?? []
+  return (
+    <Card
+      span={12}
+      flush
+      title={`Lançamentos de ${fmtDate(day)} (todas as contas)`}
+      actions={
+        <Button variant="quiet" size="sm" icon="x" onClick={onClose} aria-label="Fechar os lançamentos do dia">
+          Fechar
+        </Button>
+      }
+    >
+      {query.isError ? (
+        <LoadError onRetry={() => query.refetch()} retrying={query.isFetching} />
+      ) : !query.data ? (
+        <SkeletonLines lines={3} />
+      ) : rows.length === 0 ? (
+        <EmptyState icon="calendar" title="Nada neste dia" body="Nenhum lançamento registrado nesta data." />
+      ) : (
+        <div className="table-wrap">
+          {rows.length >= DAY_ENTRIES_LIMIT && (
+            <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 'var(--sp-2) var(--sp-4)' }}>
+              Mostrando os {DAY_ENTRIES_LIMIT} primeiros lançamentos do dia; o restante está em Lançamentos.
+            </p>
+          )}
+          <table className="table table--stack-mobile">
+            <thead>
+              <tr>
+                <th scope="col">Descrição</th>
+                <th scope="col">Conta</th>
+                <th scope="col">TAG</th>
+                <th scope="col" className="table__num">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td data-label="Descrição">
+                    {row.description}
+                    {row.pending && <span className="badge" style={{ marginLeft: 6 }}>pendente</span>}
+                  </td>
+                  <td className="muted" data-label="Conta">{row.accountName}</td>
+                  <td data-label="TAG">{row.categoryName ?? <span className="muted">Sem TAG</span>}</td>
+                  <td className={`table__num ${row.amountCents < 0 ? 'neg' : 'pos'}`} data-label="Valor">{money(row.amountCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Card>
   )
 }

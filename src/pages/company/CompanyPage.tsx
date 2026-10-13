@@ -150,7 +150,7 @@ function CeilingBody({ data }: { data: CompanyOverview }) {
         <span className="numeral" style={{ fontSize: 'var(--text-xl)', fontWeight: 700 }}>{money(c.yearRevenueCents)}</span>
         <span className="field__hint">de {money(c.limitCents)} · {bps(c.usedBps, 0)}</span>
       </div>
-      <Meter usedBps={c.usedBps} paceBps={c.projectedShareBps} state={CEILING_STATE[c.state]} />
+      <Meter label="Uso do teto de faturamento" usedBps={c.usedBps} paceBps={c.projectedShareBps} state={CEILING_STATE[c.state]} />
       <p className="plan-evidence">
         {c.paceCents > 0
           ? `No ritmo dos últimos 3 meses (${money(c.paceCents)} por mês), o ano fecha em ${money(c.projectedYearCents)}, ${bps(c.projectedShareBps, 0)} do teto.`

@@ -8,6 +8,7 @@ import { backupRoutes } from './routes/backups'
 import { pricingRoutes } from './routes/pricing'
 import { simulateRoutes } from './routes/simulate'
 import { friendlyErrorMessage } from './core/errors'
+import { runInRequestScope } from './core/requestCache'
 
 // Secrets (e.g. BRAPI_TOKEN) live in .env, gitignored — never hardcoded in
 // source. Missing the file is fine (local dev without any external API
@@ -30,6 +31,10 @@ const app = Fastify({
   // Statements are text; 25 MB covers years of history in one upload.
   bodyLimit: 25 * 1024 * 1024,
 })
+
+// Um escopo de cache por requisição (core/requestCache): as telas leem as mesmas
+// funções caras várias vezes, e aqui cada uma roda uma vez por requisição.
+app.addHook('onRequest', (_req, _reply, done) => runInRequestScope(done))
 
 // Zod failures are user input problems, not server faults.
 app.setErrorHandler((error: unknown, _req, reply) => {

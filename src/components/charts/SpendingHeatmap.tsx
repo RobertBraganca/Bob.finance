@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { money, moneyCompactPlain } from '../../lib/format'
+import { date as fmtDate, money, moneyCompactPlain } from '../../lib/format'
 import { textOnFill, themeFor, type Surface } from '../../lib/chartTheme'
 import { useEffectiveSurface } from '../../lib/theme'
 import { EmptyState } from '../ui'
@@ -121,7 +121,8 @@ export function SpendingHeatmap({ days, surface = 'paper' }: { days: HeatmapDay[
                   setSelected((current) => (current?.day === cell.day ? null : cell))
                 }
               }}
-              title={`${cell.day}: ${money(cell.expenseCents)}`}
+              title={`${fmtDate(cell.day)}: ${money(cell.expenseCents)}`}
+              aria-label={hasSpend ? `${fmtDate(cell.day)}: ${money(cell.expenseCents)} de gasto` : undefined}
               style={{
                 height: 44,
                 display: 'flex',

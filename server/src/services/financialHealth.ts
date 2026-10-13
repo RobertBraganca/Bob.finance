@@ -3,11 +3,11 @@ import { db } from '../db/client'
 import { financialHealthSettings, monthlySnapshots } from '../db/schema'
 import { addDays, addMonths, periodBounds, periodRange, todayIso } from '../core/dates'
 import { accountBalances } from './analytics'
-import { monthSpendingVsCap, typicalPersonalSpending } from './budget'
-import { companyOverview } from './company'
+import { monthSpendingVsCap, spendingVsCapForPeriods, TYPICAL_WINDOW_MONTHS, typicalPersonalSpending } from './budget'
+import { companyOverview, logCompanyFailure } from './company'
 import { debtOverviewV2, debtTrend } from './debt'
 import { ILLIQUID_ASSET_CLASS, allocation, positions, reserveStatus } from './investments'
-import { accountScope } from './withdrawals'
+import { accountScope, idList } from './withdrawals'
 
 /**
  * The financial-health layer: Health Score, Runway, Radar de risco.
@@ -176,7 +176,7 @@ export function debtIndicator(input: {
     rendaMensalTipicaCents: input.typicalMonthlyIncomeCents,
     janelaDaRendaMeses: input.incomeWindowMonths,
     mesesComMovimentoNaJanela: input.incomeSampleMonths,
-    baseDaRenda: 'renda típica pessoal do Orçamento: mediana de 6 meses fechados, contas pessoais + repasse da PJ',
+    baseDaRenda: `renda típica pessoal do Orçamento: mediana de ${input.incomeWindowMonths} meses fechados, contas pessoais + repasse da PJ`,
     origem: 'Endividamento (mesmo número da tela)',
     mesDeReferencia: input.period,
     dividasAtivas: input.debtCount,
@@ -293,7 +293,6 @@ export type ScoredIndicator = {
 
 export type HealthScore = {
   period: string
-  accountId: number | null
   scoreBps: number | null
   indicators: ScoredIndicator[]
   assumptions: Assumptions
@@ -356,6 +355,9 @@ export type ScoreInputs = {
  * reaproveita em cada mês, em vez de refazer tudo 12 vezes.
  */
 export type SharedInputs = {
+  settings: HealthSettings
+  /** gasto e teto já calculados para os meses do histórico (uma carga só) */
+  spendByPeriod?: Map<string, { spentCents: number; capCents: number | null }>
   v2: Awaited<ReturnType<typeof debtOverviewV2>>
   reserve: Awaited<ReturnType<typeof reserveStatus>>
   allocationSlices: Awaited<ReturnType<typeof allocation>>
@@ -377,13 +379,17 @@ async function personalCash(asOfDate?: string) {
 
 // Sequencial, não Promise.all: sob o pooler de transação das Edge Functions,
 // fan-out concorrente demais numa conexão trava a requisição (goals.ts#goalHistory).
-export async function sharedInputs(): Promise<SharedInputs> {
+export async function sharedInputs(historyPeriods?: string[]): Promise<SharedInputs> {
+  const settings = await getSettings()
+  const spendByPeriod = historyPeriods ? await spendingVsCapForPeriods(historyPeriods) : undefined
   const v2 = await debtOverviewV2()
   const reserve = await reserveStatus()
   const allocationSlices = await allocation()
   const cash = await personalCash()
   const personalCost = await typicalPersonalSpending()
   return {
+    settings,
+    spendByPeriod,
     v2,
     reserve,
     allocationSlices,
@@ -392,15 +398,11 @@ export async function sharedInputs(): Promise<SharedInputs> {
   }
 }
 
-/**
- * Os insumos dos indicadores (decisions/0045): cada número vem da tela dona.
- * `accountId` fica na assinatura por compatibilidade; o escopo agora é o
- * pessoal do Orçamento.
- */
-export async function gatherScoreInputs(period: string, _accountId: number | null = null, shared?: SharedInputs): Promise<ScoreInputs> {
-  const settings = await getSettings()
+/** Os insumos dos indicadores (decisions/0045): cada número vem da tela dona, no escopo pessoal do Orçamento. */
+export async function gatherScoreInputs(period: string, shared?: SharedInputs): Promise<ScoreInputs> {
   const base = shared ?? (await sharedInputs())
-  const spend = await monthSpendingVsCap(period)
+  const settings = base.settings
+  const spend = base.spendByPeriod?.get(period) ?? (await monthSpendingVsCap(period))
   const { v2, reserve, allocationSlices } = base
 
   const drifts = allocationSlices
@@ -413,14 +415,14 @@ export async function gatherScoreInputs(period: string, _accountId: number | nul
     liquidity: {
       availableBalanceCents: base.personalCashCents,
       monthlyCostCents: base.personalCost.typicalCents,
-      lookbackMonths: 6,
+      lookbackMonths: TYPICAL_WINDOW_MONTHS,
     },
     debt: {
       debtToIncomeBps: v2.commitment.shareBps,
       debtCount: v2.debts.length + v2.cards.filter((c) => c.usedCents > 0).length,
       scheduledCents: v2.commitment.debtCents + v2.commitment.cardCents,
       typicalMonthlyIncomeCents: v2.income.typicalCents,
-      incomeWindowMonths: 6,
+      incomeWindowMonths: TYPICAL_WINDOW_MONTHS,
       incomeSampleMonths: v2.income.sampleMonths,
       period: v2.startPeriod,
     },
@@ -451,16 +453,15 @@ export function composeScoreFromInputs(inputs: ScoreInputs) {
   ])
 }
 
-export async function healthScore(period: string, accountId: number | null = null, shared?: SharedInputs): Promise<HealthScore> {
+export async function healthScore(period: string, shared?: SharedInputs): Promise<HealthScore> {
   const { start, end } = periodBounds(period)
-  const inputs = await gatherScoreInputs(period, accountId, shared)
+  const inputs = await gatherScoreInputs(period, shared)
   const settings = inputs.settings
 
   const { scoreBps, indicators, activeWeight } = composeScoreFromInputs(inputs)
 
   return {
     period,
-    accountId,
     scoreBps,
     indicators,
     assumptions: {
@@ -499,7 +500,6 @@ export async function healthScore(period: string, accountId: number | null = nul
  */
 export async function healthScoreHistory(
   months = 12,
-  accountId: number | null = null,
 ): Promise<Array<{ period: string; scoreBps: number | null; source: 'foto' | 'reconstruído' }>> {
   const currentPeriod = todayIso().slice(0, 7)
   const periods = periodRange(addMonths(currentPeriod, -(months - 1)), currentPeriod)
@@ -507,13 +507,14 @@ export async function healthScoreHistory(
   // com a dívida, a reserva e a alocação de hoje (marcado como tal).
   const snaps = new Map((await db.select().from(monthlySnapshots)).map((r) => [r.period, r]))
   const missing = periods.filter((p) => !snaps.has(p))
-  const shared = missing.length > 0 ? await sharedInputs() : undefined
+  // Uma carga só do gasto e do teto dos meses reconstruídos (antes eram ~13 consultas por mês).
+  const shared = missing.length > 0 ? await sharedInputs(missing) : undefined
 
   const out: Array<{ period: string; scoreBps: number | null; source: 'foto' | 'reconstruído' }> = []
   for (const period of periods) {
     const snap = snaps.get(period)
     if (snap) out.push({ period, scoreBps: snap.scoreBps, source: 'foto' })
-    else out.push({ period, scoreBps: (await healthScore(period, accountId, shared)).scoreBps, source: 'reconstruído' })
+    else out.push({ period, scoreBps: (await healthScore(period, shared)).scoreBps, source: 'reconstruído' })
   }
   return out
 }
@@ -538,7 +539,7 @@ export type RunwayScope = {
  * pendentes" widget shows, so the runway and that widget can never
  * disagree about what is about to leave the account.
  */
-async function shortTermDebtCents(accountId: number | null): Promise<number> {
+async function shortTermDebtCents(personal: number[]): Promise<number> {
   const today = todayIso()
   const horizon = addDays(today, SHORT_TERM_DEBT_DAYS)
   const rows = await db.execute<{ total: number }>(sql`
@@ -547,13 +548,13 @@ async function shortTermDebtCents(accountId: number | null): Promise<number> {
     where pending = true
       and debt_id is not null
       and posted_on between ${today} and ${horizon}
-      ${accountId ? sql`and account_id = ${accountId}` : sql``}
+      and account_id in (${idList(personal)})
   `)
   return rows[0]?.total ?? 0
 }
 
 async function liquidInvestmentsCents(liquidClasses: readonly string[]): Promise<number> {
-  return (await positions())
+  return (await positions(undefined, { withNotes: false }))
     .filter((p) => p.countsTowardReserve || liquidClasses.includes(p.assetClass))
     .reduce((sum, p) => sum + p.marketValueCents, 0)
 }
@@ -572,7 +573,7 @@ async function runwayPersonal(liquidClasses: readonly string[], overrides: Runwa
   const investmentsDeltaCents = overrides.investmentsDeltaCents ?? 0
   const balanceCents = cash.personal.reduce((sum, a) => sum + Number(a.balanceCents), 0) + balanceDeltaCents
   const investmentsCents = (await liquidInvestmentsCents(liquidClasses)) + investmentsDeltaCents
-  const pendingDebtCents = await shortTermDebtCents(null)
+  const pendingDebtCents = await shortTermDebtCents(cash.scope.personal)
   // Faturas abertas que vencem na janela (as dívidas pagas no cartão já saíram
   // delas); cartão pago pela conta PJ é da empresa e fica fora.
   const cardBillsCents = v2.cards
@@ -650,8 +651,9 @@ export async function runway(
         },
       })
     }
-  } catch {
-    // Sem conta PJ configurada: só a linha pessoal.
+  } catch (error) {
+    // Sem conta PJ configurada (409) é o caso normal: só a linha pessoal. O resto vai para o log.
+    logCompanyFailure('runway', error)
   }
   return { scopes, consolidated: personal }
 }
@@ -692,7 +694,7 @@ export type RiskRule = {
  * reported as being within range, which would be a claim the data does
  * not support.
  */
-export async function riskRadar(period: string, accountId: number | null = null): Promise<{
+export async function riskRadar(period: string): Promise<{
   period: string
   rules: RiskRule[]
   assumptions: Assumptions
@@ -717,7 +719,6 @@ export async function riskRadar(period: string, accountId: number | null = null)
   }
 
   // Uma fonte para cada número (decisions/0045); em sequência pelo pooler.
-  void accountId
   const spend = await monthSpendingVsCap(period)
   const reserve = await reserveStatus()
   const allocationSlices = await allocation()
@@ -876,7 +877,7 @@ export type NetWorth = {
 export async function netWorth(): Promise<NetWorth> {
   // Em sequência pelo pooler das Edge Functions.
   const cash = await personalCash()
-  const holdings = await positions()
+  const holdings = await positions(undefined, { withNotes: false })
   const v2 = await debtOverviewV2()
   const balanceCents = cash.personal.reduce((sum, a) => sum + Number(a.balanceCents), 0)
 
@@ -902,7 +903,8 @@ export async function netWorth(): Promise<NetWorth> {
     let withdrawableCents: number | null = null
     try {
       withdrawableCents = (await companyOverview(todayIso().slice(0, 7))).withdrawable?.withdrawableCents ?? null
-    } catch {
+    } catch (error) {
+      logCompanyFailure('netWorth', error)
       withdrawableCents = null
     }
     company = {
@@ -973,7 +975,7 @@ export async function netWorthHistory(months = 12): Promise<Array<{ period: stri
     // cartões não têm série; as fotos mensais resolvem isso daqui em diante).
     const asOfDate = periodBounds(period).end
     const balances = await accountBalances(asOfDate)
-    const holdings = await positions(asOfDate)
+    const holdings = await positions(asOfDate, { withNotes: false })
     const balanceCents = balances
       .filter((a) => a.kind !== 'investment' && scope.personal.includes(Number(a.id)))
       .reduce((sum, a) => sum + Number(a.balanceCents), 0)

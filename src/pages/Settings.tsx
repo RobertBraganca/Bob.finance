@@ -20,6 +20,7 @@ import {
 } from '../components/ui'
 import { PageHeader } from '../components/shell/Shell'
 import { OpenFinanceCard } from './OpenFinance'
+import { todayIso } from '../lib/period'
 
 type ColumnMap = Record<string, string | number | undefined>
 
@@ -405,7 +406,7 @@ export function BalanceCheckModal({ account, onClose }: { account: Account; onCl
   const derivedCents = meta.data?.accounts.find((a) => a.id === account.id)?.balanceCents ?? account.openingBalanceCents
 
   const [reported, setReported] = useState(centsToInput(derivedCents))
-  const [postedOn, setPostedOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const [postedOn, setPostedOn] = useState(() => todayIso())
   const [description, setDescription] = useState('')
   const [categoryId, setCategoryId] = useState<number | null>(null)
   const [mode, setMode] = useState<'adjustment' | 'manual' | null>(null)

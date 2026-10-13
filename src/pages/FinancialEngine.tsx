@@ -140,7 +140,7 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
             <EmptyState
               icon="sparkle"
               title="Nenhum dado importado ainda"
-              body="O motor cruza saldo, compromissos, limite de cartão, metas e dívida. Ele aparece assim que houver histórico para cruzar."
+              body="O motor cruza saldo, compromissos, faturas de cartão, metas e dívida. Ele aparece assim que houver histórico para cruzar."
             />
           </Card>
         ) : available.isError ? (
@@ -164,8 +164,8 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
               >
                 <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-xs)', marginTop: 'var(--sp-3)' }}>
                   {available.data.availableCents >= 0
-                    ? 'O que resta do saldo depois dos compromissos, do limite de cartão comprometido e do que já foi destinado a metas neste período.'
-                    : 'Os compromissos, o limite de cartão comprometido e o já destinado a metas somam mais que o saldo consolidado do período.'}
+                    ? 'O que resta do saldo depois dos compromissos, das faturas abertas dos cartões e do que já foi destinado a metas neste período.'
+                    : 'Os compromissos, as faturas abertas dos cartões e o já destinado a metas somam mais que o saldo consolidado do período.'}
                 </p>
               </HeroFigure>
             </Slab>
@@ -178,7 +178,7 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
                 <span className="kv__v neg">
                   {money(-available.data.terms.futureCommitmentsCents)}
                 </span>
-                <span className="kv__k">Limite de cartão comprometido</span>
+                <span className="kv__k">Faturas abertas dos cartões</span>
                 <span className="kv__v neg">
                   {money(-available.data.terms.provisionedCardBillCents)}
                 </span>

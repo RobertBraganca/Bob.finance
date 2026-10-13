@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { categories, financialEngineSettings } from '../db/schema'
 import { addMonths, periodBounds, todayIso } from '../core/dates'
+import { memoPerRequest } from '../core/requestCache'
 import {
   DEFAULT_CUSHION_MONTHS,
   DEFAULT_MEI_LIMIT_CENTS,
@@ -23,6 +24,12 @@ import { accountScope, pjWithdrawals } from './withdrawals'
  * MEI e se as retiradas cobrem o custo de vida. Leitura sobre o extrato; só
  * as quatro configurações são gravadas.
  */
+
+/** "Configure a conta da empresa" (409) não é falha: quem não tem PJ cai aqui a cada chamada. O resto vai para o log. */
+export function logCompanyFailure(where: string, error: unknown) {
+  if (error instanceof CompanyError && error.statusCode === 409) return
+  console.error(`${where}: Minha empresa indisponível`, error)
+}
 
 export class CompanyError extends Error {
   statusCode: number
@@ -129,7 +136,11 @@ export async function saveCompanySettings(input: {
   return companySettings()
 }
 
-export async function companyOverview(period: string) {
+export function companyOverview(period: string) {
+  return memoPerRequest(`companyOverview:${period}`, () => computeCompanyOverview(period))
+}
+
+async function computeCompanyOverview(period: string) {
   const row = await settingsRow()
   const scope = await accountScope()
   const pjAccountId = scope.pjAccountId

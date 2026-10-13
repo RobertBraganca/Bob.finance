@@ -372,6 +372,11 @@ export const stagedTransactions = pgTable(
     index('staged_batch_idx').on(t.batchId),
     index('staged_suggested_category_idx').on(t.suggestedCategoryId),
     index('staged_category_idx').on(t.categoryId),
+    // FKs para transactions e debts: sem eles, cada delete de lançamento (desfazer
+    // importação) varria as 27 mil linhas daqui. Parciais, porque quase todas são nulas.
+    index('staged_pending_match_idx').on(t.pendingMatchId).where(sql`${t.pendingMatchId} is not null`),
+    index('staged_manual_match_idx').on(t.possibleManualMatchId).where(sql`${t.possibleManualMatchId} is not null`),
+    index('staged_payoff_debt_idx').on(t.possiblePayoffDebtId).where(sql`${t.possiblePayoffDebtId} is not null`),
   ],
 )
 
@@ -577,7 +582,11 @@ export const debts = pgTable(
     active: boolean('active').notNull().default(true),
     createdAt: text('created_at').notNull().default(now),
   },
-  (t) => [index('debts_account_idx').on(t.accountId)],
+  (t) => [
+    index('debts_account_idx').on(t.accountId),
+    index('debts_category_idx').on(t.categoryId),
+    index('debts_paid_via_card_idx').on(t.paidViaCardId),
+  ],
 )
 
 /**
@@ -968,7 +977,6 @@ export const skippedOccurrences = pgTable(
     createdAt: text('created_at').notNull().default(now),
   },
   (t) => [
-    index('skipped_occurrences_forecast_idx').on(t.forecastId),
     index('skipped_occurrences_debt_idx').on(t.debtId),
     // Split in two, both partial: a plain unique index on (forecastId,
     // debtId, period) never fires here, because forecastId/debtId are
@@ -1119,7 +1127,6 @@ export const targetAllocations = pgTable(
     targetBps: int('target_bps').notNull(),
   },
   (t) => [
-    index('target_allocations_goal_idx').on(t.goalId),
     // Split in two, both partial: `goalId is null` means "global policy"
     // (a real, used case, not an absence of one) — a plain unique index on
     // (goalId, assetClass) never fires for those rows, same NULL-defeats-

@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from 're
 import { useQuery } from '@tanstack/react-query'
 import { api } from './api'
 import { useAuth } from './auth'
-import { shiftPeriod } from './period'
+import { shiftPeriod, todayIso } from './period'
 
 /* ------------------------------------------------------------------ *
  * Shared server types (mirrors of the service return shapes)
@@ -169,7 +169,9 @@ export function RangeProvider({ children }: { children: ReactNode }) {
       ? meta.data.ledger.max < meta.data.today
         ? meta.data.ledger.max
         : meta.data.today
-      : meta.data?.today ?? '2026-01-01'
+      : // Sem a data do servidor ainda, a do aparelho: a data fixa deixava a
+        // Visão geral parada em "janeiro de 2026" quando /meta falhava (09/10/2026).
+        meta.data?.today ?? todayIso()
 
   const earliest = meta.data?.ledger.min ?? anchor
 

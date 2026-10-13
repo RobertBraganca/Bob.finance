@@ -1,4 +1,5 @@
 import '@supabase/functions-js/edge-runtime.d.ts'
+import { runInRequestScope } from '../_shared/core/requestCache.ts'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { z, ZodError } from 'zod'
@@ -97,6 +98,9 @@ const issuerBody = z
 const app = new Hono().basePath('/pricing')
 
 app.use('*', cors({ origin: '*' }))
+// Um escopo de cache por requisição (core/requestCache): as telas leem as mesmas
+// funções caras várias vezes, e aqui cada uma roda uma vez por requisição.
+app.use('*', (_c, next) => runInRequestScope(next))
 app.use('*', requireAdmin)
 
 // Zod falhando é problema do dado de entrada, não falha de servidor —

@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { currentPeriod } from '../lib/period'
+import { historyNote, type NetWorth } from '../lib/health'
 import { useMeta, useRange } from '../lib/store'
-import { bps, bpsToInput, money, parsePercentInput, period as fmtPeriod, points } from '../lib/format'
+import { bps, bpsToInput, money, parsePercentInput, points } from '../lib/format'
 import {
   Assumptions,
   Bento,
@@ -68,7 +69,6 @@ type ScoredIndicator = {
 
 type HealthScore = {
   period: string
-  accountId: number | null
   scoreBps: number | null
   indicators: ScoredIndicator[]
   assumptions: AssumptionBag
@@ -84,14 +84,6 @@ type RunwayScope = {
 }
 
 type Runway = { scopes: RunwayScope[]; consolidated: RunwayScope }
-
-type NetWorth = {
-  balanceCents: number
-  investmentsCents: number
-  debtCents: number
-  liquidityCents: number
-  assumptions: AssumptionBag
-}
 
 type ClosingChecklistItem = {
   key: string
@@ -147,15 +139,6 @@ const monthsLabel = (months: number | null) =>
     : months <= 0
       ? 'sem saldo positivo'
       : `${months.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${months === 1 ? 'mês' : 'meses'}`
-
-/** Quais meses do histórico são foto gravada e quais são reconstruídos (decisions/0045). */
-function historyNote(points: Array<{ period: string; source?: 'foto' | 'reconstruído' }> | undefined): string {
-  if (!points || points.length === 0) return ''
-  const firstPhoto = points.find((p) => p.source === 'foto')
-  if (!firstPhoto) return 'Ainda sem foto mensal: todos os meses são reconstruídos com os dados de hoje.'
-  const before = points.filter((p) => p.period < firstPhoto.period).length
-  return before > 0 ? `Foto mensal desde ${fmtPeriod(firstPhoto.period)}; os ${before} meses antes dela são reconstruídos.` : 'Todos os meses são fotos gravadas no fim do mês.'
-}
 
 /** Onde cada item do fechamento se resolve (revisão de 09/10/2026). */
 const CHECKLIST_LINK: Record<string, string> = {
@@ -525,7 +508,7 @@ function IndicatorRow({ indicator }: { indicator: ScoredIndicator }) {
           <span className="indicator__score">{missing ? '-' : bps(indicator.scoreBps!, 0)}</span>
         </span>
       </div>
-      <Meter usedBps={indicator.scoreBps ?? 0} state={scoreIndicatorState(indicator.scoreBps)} />
+      <Meter label={`Nota de ${indicator.label}`} usedBps={indicator.scoreBps ?? 0} state={scoreIndicatorState(indicator.scoreBps)} />
       <Assumptions data={indicator.assumptions} compact />
     </div>
   )

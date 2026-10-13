@@ -311,6 +311,7 @@ export function GoalsPage() {
                         </span>
                       </div>
                       <Meter
+                        label={`Uso do teto de ${cap.name}`}
                         usedBps={cap.usedBps}
                         paceBps={
                           cap.capCents > 0 ? Math.round((cap.paceCents / cap.capCents) * 10_000) : null
@@ -411,7 +412,7 @@ function GoalRow({
         <StatusBadge state={state} />
       </div>
       <span className="stat__value">{money(actual)}</span>
-      <Meter usedBps={usedBps} paceBps={paceBps} state={state} />
+      <Meter label={`Uso da meta: ${label}`} usedBps={usedBps} paceBps={paceBps} state={state} />
       <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         {target === null
           ? 'sem meta definida'

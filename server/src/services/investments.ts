@@ -11,8 +11,7 @@ import {
   targetAllocations,
 } from '../db/schema'
 import { addDays, addMonths, periodBounds, periodOf, periodRange, todayIso } from '../core/dates'
-import { medianCents } from '../core/money'
-import { monthlyTotals, totals } from './analytics'
+import { clearRequestCache, memoPerRequest } from '../core/requestCache'
 import { typicalPersonalSpending } from './budget'
 import { notesForAssets } from './criteria'
 import type { GoalState } from './goals'
@@ -156,7 +155,20 @@ export type Position = {
  * viabilidade #8, 29/08/2026) — nunca uma segunda função paralela pra
  * "posições no passado".
  */
-export async function positions(asOfDate?: string): Promise<Position[]> {
+export async function positions(asOfDate?: string, options: { withNotes?: boolean } = {}): Promise<Position[]> {
+  // A consulta pesada (JOIN + GROUP BY) é uma só por requisição; as notas, que
+  // custam uma consulta por classe, entram por cima só para quem as pede.
+  const base = await memoPerRequest(`positions:${asOfDate ?? ''}`, () => computePositions(asOfDate))
+  if (!(options.withNotes ?? true)) return base
+  const ids = base.map((p) => p.assetId)
+  const notes = await memoPerRequest(`positionNotes:${ids.join(',')}`, () => notesForAssets(ids))
+  return base.map((p) => {
+    const note = notes.get(p.assetId)
+    return { ...p, note: note?.note ?? null, answeredCriteria: note?.answered ?? 0, totalCriteria: note?.total ?? 0 }
+  })
+}
+
+async function computePositions(asOfDate: string | undefined): Promise<Position[]> {
   const tradeCutoff = asOfDate ? sql`and t.traded_on <= ${asOfDate}` : sql``
   const valuationCutoff = asOfDate ? sql`and v.as_of <= ${asOfDate}` : sql``
 
@@ -202,7 +214,6 @@ export async function positions(asOfDate?: string): Promise<Position[]> {
     order by a.name
   `)
 
-  const notes = await notesForAssets(rows.map((r) => r.assetId))
 
   return rows.map((r) => {
     const quantity = r.boughtQty - r.soldQty
@@ -213,7 +224,6 @@ export async function positions(asOfDate?: string): Promise<Position[]> {
     const unitPrice = r.lastUnitPriceCents ?? avgUnitPriceCents
     const marketValueCents = Math.round(quantity * unitPrice)
     const gainCents = marketValueCents - contributedCents + r.dividendsCents
-    const note = notes.get(r.assetId)
 
     return {
       assetId: r.assetId,
@@ -231,9 +241,9 @@ export async function positions(asOfDate?: string): Promise<Position[]> {
       dividendsCents: r.dividendsCents,
       gainCents,
       gainBps: contributedCents > 0 ? Math.round((gainCents / contributedCents) * 10_000) : null,
-      note: note?.note ?? null,
-      answeredCriteria: note?.answered ?? 0,
-      totalCriteria: note?.total ?? 0,
+      note: null,
+      answeredCriteria: 0,
+      totalCriteria: 0,
       countsTowardReserve: !!r.countsTowardReserve,
       goalId: r.goalId === null ? null : Number(r.goalId),
     }
@@ -266,8 +276,8 @@ export type IlliquidItem = {
  * so netWorth, netWorthHistory e illiquidOverview usam positions() cru,
  * porque a pergunta deles e mesmo "o que voce tem" (01/09/2026).
  */
-export async function tradablePositions(asOfDate?: string): Promise<Position[]> {
-  return (await positions(asOfDate)).filter((p) => p.assetClass !== ILLIQUID_ASSET_CLASS)
+export async function tradablePositions(asOfDate?: string, options: { withNotes?: boolean } = {}): Promise<Position[]> {
+  return (await positions(asOfDate, options)).filter((p) => p.assetClass !== ILLIQUID_ASSET_CLASS)
 }
 
 export type IlliquidOverview = {
@@ -351,7 +361,7 @@ export async function ensureReserveAsset(): Promise<number> {
 export async function contributeToReserve(input: { amountCents: number; tradedOn: string; kind?: 'buy' | 'sell' }) {
   const assetId = await ensureReserveAsset()
   const amountCents = Math.abs(input.amountCents)
-  return (
+  const trade = (
     await db
       .insert(assetTrades)
       .values({
@@ -364,6 +374,9 @@ export async function contributeToReserve(input: { amountCents: number; tradedOn
       })
       .returning()
   )[0]!
+  // A rota devolve a reserva logo depois: sem isto, ela leria o valor guardado desta requisição.
+  clearRequestCache()
+  return trade
 }
 
 /**
@@ -437,7 +450,11 @@ export async function setReserveSettings(patch: {
   }
 }
 
-export async function reserveStatus(): Promise<ReserveStatus> {
+export function reserveStatus(): Promise<ReserveStatus> {
+  return memoPerRequest('reserveStatus', computeReserveStatus)
+}
+
+async function computeReserveStatus(): Promise<ReserveStatus> {
   const { multiple, lookbackMonths, manualLivingCostCents } = await reserveSettings()
 
   let monthlyLivingCostCents: number
@@ -463,7 +480,7 @@ export async function reserveStatus(): Promise<ReserveStatus> {
   const targetCents = monthlyLivingCostCents * multiple
   // Imobilizado nunca compõe reserva de emergência, mesmo se marcado: uma
   // reserva que exige vender um bem para virar dinheiro não é reserva.
-  const currentCents = (await tradablePositions())
+  const currentCents = (await tradablePositions(undefined, { withNotes: false }))
     .filter((p) => p.countsTowardReserve)
     .reduce((s, p) => s + p.marketValueCents, 0)
   const gapCents = Math.max(0, targetCents - currentCents)

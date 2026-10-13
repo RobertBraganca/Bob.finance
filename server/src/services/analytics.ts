@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { addDays, addMonths, dayRange, periodBounds, periodOf, periodRange, todayIso } from '../core/dates'
+import { addDays, addMonths, addMonthsToDate, dayRange, periodBounds, periodOf, periodRange, todayIso } from '../core/dates'
+import { memoPerRequest } from '../core/requestCache'
+import { accountScope, idList, pjWithdrawals } from './withdrawals'
 import { merchantSignature } from '../core/normalize'
 
 /**
@@ -38,10 +40,41 @@ const FLOW_KIND = sql`
     else c.kind::text
   end`
 
-export type Range = { from: string; to: string; accountId?: number | null }
+export type Range = {
+  from: string
+  to: string
+  accountId?: number | null
+  /**
+   * Escopo pessoal (decisions/0045): as contas pessoais, sem a PJ. Só vale
+   * quando nenhuma conta foi escolhida. Com ele, a renda soma as retiradas
+   * PJ → PF, como no Orçamento.
+   */
+  accountIds?: number[] | null
+}
 
 const accountFilter = (accountId?: number | null) =>
   accountId ? sql`and t.account_id = ${accountId}` : sql``
+
+/** Filtro do recorte: uma conta, a lista do escopo pessoal, ou tudo. */
+const scopeFilter = (range: Pick<Range, 'accountId' | 'accountIds'>) =>
+  range.accountId
+    ? sql`and t.account_id = ${range.accountId}`
+    : range.accountIds
+      ? sql`and t.account_id in (${idList(range.accountIds)})`
+      : sql``
+
+/** Retiradas PJ → PF por mês dentro do recorte, só no escopo pessoal (a renda pessoal do Orçamento). */
+function personalWithdrawals(range: Range): Promise<Map<string, number>> {
+  if (!range.accountIds || range.accountId) return Promise.resolve(new Map())
+  // Mesmo recorte pedido duas vezes na requisição (totais e série mensal): uma consulta só.
+  return memoPerRequest(`personalWithdrawals:${range.from}:${range.to}:${range.accountIds.join(',')}`, async () => {
+    const out = new Map<string, number>()
+    const scope = await accountScope()
+    const transfers = await pjWithdrawals(periodOf(range.from), periodOf(range.to), scope, { from: range.from, to: range.to }, true)
+    for (const [period, t] of transfers) out.set(period, t.toPersonalCents)
+    return out
+  })
+}
 
 /* ------------------------------------------------------------------ *
  * Headline numbers for a range, plus the same numbers for the
@@ -85,7 +118,7 @@ export async function totals(range: Range): Promise<Totals> {
         left join categories c on c.id = t.category_id
         where t.posted_on between ${range.from} and ${range.to}
           and t.pending = false and t.ignored = false
-        ${accountFilter(range.accountId)}
+        ${scopeFilter(range)}
       ) x
     `)
   const row = rows[0]
@@ -266,59 +299,21 @@ export async function monthlySeries(range: Range): Promise<MonthlyPoint[]> {
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
         and t.pending = false and t.ignored = false
-      ${accountFilter(range.accountId)}
+      ${scopeFilter(range)}
     ) x
     group by period
     order by period
   `)
 
   const byPeriod = new Map(rows.map((r) => [r.period, r] as const))
+  // Escopo pessoal: as retiradas PJ → PF são a renda pessoal do mês (decisions/0045).
+  const withdrawals = await personalWithdrawals(range)
   return periodRange(periodOf(range.from), periodOf(range.to)).map((period) => {
     const row = byPeriod.get(period)
-    const incomeCents = row?.income ?? 0
-    const expenseCents = row?.expense ?? 0
+    const incomeCents = Number(row?.income ?? 0) + (withdrawals.get(period) ?? 0)
+    const expenseCents = Number(row?.expense ?? 0)
     return {
       period,
-      incomeCents,
-      expenseCents,
-      netCents: incomeCents - expenseCents,
-      investedCents: row?.invested ?? 0,
-    }
-  })
-}
-
-/**
- * Same shape as `monthlySeries`, grouped by day instead of month — feeds
- * the dashboard's Entradas/Saídas chart when the selected period is short
- * enough that a bar per day is more useful than a single bar for the
- * whole month (the caller decides the cutoff; this just computes it).
- */
-export async function dailyIncomeExpenseSeries(range: Range): Promise<MonthlyPoint[]> {
-  const rows = await db.execute<{ day: string; income: number; expense: number; invested: number }>(sql`
-    select
-      day,
-      coalesce(sum(case when flow = 'income'     and amount_cents > 0 then amount_cents else 0 end), 0) as income,
-      coalesce(sum(case when flow = 'expense'    and amount_cents < 0 then -amount_cents else 0 end), 0) as expense,
-      coalesce(sum(case when flow = 'investment' and amount_cents < 0 then -amount_cents else 0 end), 0) as invested
-    from (
-      select t.posted_on as day, t.amount_cents, ${FLOW_KIND} as flow
-      from transactions t
-      left join categories c on c.id = t.category_id
-      where t.posted_on between ${range.from} and ${range.to}
-        and t.pending = false and t.ignored = false
-      ${accountFilter(range.accountId)}
-    ) x
-    group by day
-    order by day
-  `)
-
-  const byDay = new Map(rows.map((r) => [r.day, r] as const))
-  return dayRange(range.from, range.to).map((day) => {
-    const row = byDay.get(day)
-    const incomeCents = row?.income ?? 0
-    const expenseCents = row?.expense ?? 0
-    return {
-      period: day,
       incomeCents,
       expenseCents,
       netCents: incomeCents - expenseCents,
@@ -374,7 +369,7 @@ export async function categoryBreakdown(
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
         and t.pending = false and t.ignored = false
-      ${accountFilter(range.accountId)}
+      ${scopeFilter(range)}
     ) x
     left join categories g on g.id = x.group_id
     where x.flow = ${flow} and ${sign}
@@ -411,7 +406,7 @@ export async function dailySeries(range: Range): Promise<DailyPoint[]> {
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
         and t.pending = false and t.ignored = false
-      ${accountFilter(range.accountId)}
+      ${scopeFilter(range)}
     ) x
     group by day
     order by day
@@ -493,7 +488,7 @@ export async function receivable(range: Range, opts: { includeFuture?: boolean }
       where t.posted_on >= ${range.from}
         ${upperBound}
         and t.pending = true
-        ${accountFilter(range.accountId)}
+        ${scopeFilter(range)}
     ) x
   `)
   return rows[0]?.amount ?? 0
@@ -503,7 +498,7 @@ export async function receivable(range: Range, opts: { includeFuture?: boolean }
  * Everything the dashboard needs, in one round trip.
  * ------------------------------------------------------------------ */
 export async function dashboard(range: Range, opts: { includeFutureReceivables?: boolean } = {}) {
-  const current = await totals(range)
+  const current = await withWithdrawals(range, await totals(range))
 
   /**
    * A janela anterior comparável. A maioria dos presets (mtd/3m/6m/12m/
@@ -519,38 +514,35 @@ export async function dashboard(range: Range, opts: { includeFutureReceivables?:
    */
   const isFullMonthRange =
     range.from === periodBounds(periodOf(range.from)).start && range.to === periodBounds(periodOf(range.to)).end
+  // Mês corrente até hoje (dia 1 até o dia N do mesmo mês): compara com o dia
+  // 1 ao dia N do mês anterior, não com os N dias antes do dia 1 (revisão de
+  // 09/10/2026: o aluguel do dia 2 virava "+678%").
+  const isMonthToDate = range.from === periodBounds(periodOf(range.from)).start && periodOf(range.from) === periodOf(range.to) && !isFullMonthRange
+  const scope = { accountId: range.accountId ?? null, accountIds: range.accountIds ?? null }
   const previousRange: Range = isFullMonthRange
     ? {
         from: periodBounds(addMonths(periodOf(range.from), -periodRange(periodOf(range.from), periodOf(range.to)).length)).start,
         to: periodBounds(addMonths(periodOf(range.to), -periodRange(periodOf(range.from), periodOf(range.to)).length)).end,
-        accountId: range.accountId ?? null,
+        ...scope,
       }
-    : {
-        from: addDays(range.from, -dayRange(range.from, range.to).length),
-        to: addDays(range.from, -1),
-        accountId: range.accountId ?? null,
-      }
-  const [previous, currentReceivableCents, previousReceivableCents, monthly, byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf, netFlow, topMerchantsList] =
-    await Promise.all([
-      totals(previousRange),
-      receivable(range, { includeFuture: opts.includeFutureReceivables }),
-      // O período anterior nunca olha pra frente, mesmo com includeFuture —
-      // é só a base de comparação, e "quanto tinha a receber no futuro no
-      // período anterior" não tem leitura útil nenhuma.
-      receivable(previousRange),
-      monthlySeries(range),
-      categoryBreakdown(range, { flow: 'expense', level: 'parent' }),
-      categoryBreakdown(range, { flow: 'expense', level: 'leaf' }),
-      categoryBreakdown(range, { flow: 'income', level: 'parent' }),
-      categoryBreakdown(range, { flow: 'income', level: 'leaf' }),
-      netFlowSeries(range),
-      topMerchants(range, 8),
-    ])
-
-  // A bar per day only makes sense for a short window — for anything
-  // longer than a month of days, the chart falls back to `monthly` on
-  // the client, so there is no reason to compute this at all.
-  const daily = dayRange(range.from, range.to).length <= 31 ? await dailyIncomeExpenseSeries(range) : []
+    : isMonthToDate
+      ? { from: periodBounds(addMonths(periodOf(range.from), -1)).start, to: addMonthsToDate(range.to, -1), ...scope }
+      : {
+          from: addDays(range.from, -dayRange(range.from, range.to).length),
+          to: addDays(range.from, -1),
+          ...scope,
+        }
+  // Em sequência, não Promise.all: com as retiradas da PJ, o fan-out passava de 15
+  // consultas e o pooler de transação das Edge Functions trava com isso.
+  const previous = await withWithdrawals(previousRange, await totals(previousRange))
+  const currentReceivableCents = await receivable(range, { includeFuture: opts.includeFutureReceivables })
+  // O período anterior nunca olha pra frente, mesmo com includeFuture —
+  // é só a base de comparação, e "quanto tinha a receber no futuro no
+  // período anterior" não tem leitura útil nenhuma.
+  const previousReceivableCents = await receivable(previousRange)
+  const { byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf } = await categorySpending(range)
+  const netFlow = await netFlowSeries(range)
+  const topMerchantsList = await topMerchants(range, 8)
 
   return {
     range,
@@ -566,14 +558,37 @@ export async function dashboard(range: Range, opts: { includeFutureReceivables?:
       // não uma mudança real de comportamento.
       receivableBps: opts.includeFutureReceivables ? null : deltaBps(currentReceivableCents, previousReceivableCents),
     },
-    monthly,
-    daily,
     byCategory,
     byCategoryLeaf,
     incomeByCategory,
     incomeByCategoryLeaf,
     netFlow,
     topMerchants: topMerchantsList,
+  }
+}
+
+/** As quatro quebras por TAG (despesa e receita, TAG-mãe e folha): o que a tela Categorias e a Visão geral leem. */
+export async function categorySpending(range: Range) {
+  const byCategory = await categoryBreakdown(range, { flow: 'expense', level: 'parent' })
+  const byCategoryLeaf = await categoryBreakdown(range, { flow: 'expense', level: 'leaf' })
+  const incomeByCategory = await categoryBreakdown(range, { flow: 'income', level: 'parent' })
+  const incomeByCategoryLeaf = await categoryBreakdown(range, { flow: 'income', level: 'leaf' })
+  return { byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf }
+}
+
+/** No escopo pessoal, a renda inclui as retiradas PJ → PF do recorte (como no Orçamento). */
+async function withWithdrawals<T extends { incomeCents: number; netCents: number; savingsRateBps: number }>(range: Range, t: T): Promise<T & { withdrawalsCents: number }> {
+  const byPeriod = await personalWithdrawals(range)
+  const w = [...byPeriod.values()].reduce((sum, v) => sum + v, 0)
+  const incomeCents = t.incomeCents + w
+  const netCents = t.netCents + w
+  return {
+    ...t,
+    incomeCents,
+    netCents,
+    // A taxa de poupança acompanha a renda e o saldo que já incluem a retirada.
+    savingsRateBps: incomeCents > 0 ? Math.round((netCents / incomeCents) * 10_000) : 0,
+    withdrawalsCents: w,
   }
 }
 
@@ -603,7 +618,7 @@ export async function topMerchants(range: Range, limit = 8) {
       and t.pending = false and t.ignored = false
       and ${FLOW_KIND} = 'expense'
       and t.amount_cents < 0
-    ${accountFilter(range.accountId)}
+    ${scopeFilter(range)}
   `)
 
   const bySignature = new Map<string, { signature: string; amount: number; count: number }>()
@@ -628,7 +643,11 @@ export async function topMerchants(range: Range, limit = 8) {
  * antes. Mesmo motivo de `investments.positions(asOfDate)`: série
  * histórica de patrimônio líquido, nunca uma segunda função paralela.
  */
-export async function accountBalances(asOfDate?: string) {
+export function accountBalances(asOfDate?: string) {
+  return memoPerRequest(`accountBalances:${asOfDate ?? ''}`, () => computeAccountBalances(asOfDate))
+}
+
+async function computeAccountBalances(asOfDate?: string) {
   const cutoff = asOfDate ? sql`and t.posted_on <= ${asOfDate}` : sql``
   return db.execute<{
     id: number

@@ -1,4 +1,5 @@
 import '@supabase/functions-js/edge-runtime.d.ts'
+import { runInRequestScope } from '../_shared/core/requestCache.ts'
 import { Buffer } from 'node:buffer'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
@@ -29,6 +30,9 @@ const idParam = z.object({ id: z.coerce.number().int().positive() })
 
 const app = new Hono().basePath('/ledger')
 app.use('*', cors({ origin: '*' }))
+// Um escopo de cache por requisição (core/requestCache): as telas leem as mesmas
+// funções caras várias vezes, e aqui cada uma roda uma vez por requisição.
+app.use('*', (_c, next) => runInRequestScope(next))
 /**
  * A rotina diária de Open Finance (pg_cron, decisions/0039) não tem sessão de
  * usuário: entra só nesta rota e só com o segredo `BANK_SYNC_CRON_SECRET`.

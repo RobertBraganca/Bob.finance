@@ -2,8 +2,8 @@ import { sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { addDays, dayRange, periodBounds, todayIso } from '../core/dates'
 import { medianCents } from '../core/money'
-import { accountBalances, dailyStreak, receivable } from './analytics'
-import { monthSpendingVsCap } from './budget'
+import { accountBalances, dailySeries, dailyStreak, receivable } from './analytics'
+import { budgetDailySpend, monthSpendingVsCap } from './budget'
 import { debtOverviewV2 } from './debt'
 import { accountScope, idList } from './withdrawals'
 
@@ -24,26 +24,8 @@ const MAX_HORIZON_DAYS = 45
 export type UpcomingItem = { kind: 'expense' | 'income' | 'card'; label: string; amountCents: number; overdue?: boolean }
 export type UpcomingDay = { day: string; items: UpcomingItem[]; outCents: number; inCents: number; balanceCents: number }
 
-/** Gasto das contas pessoais por dia do mês (só realizado). */
-async function personalDailySpend(from: string, to: string, personal: number[]) {
-  const rows = await db.execute<{ day: string; expense: number; count: number }>(sql`
-    select t.posted_on as day,
-      coalesce(sum(-t.amount_cents), 0) as expense,
-      count(*) as count
-    from transactions t
-    join categories c on c.id = t.category_id
-    where c.kind = 'expense' and t.amount_cents < 0
-      and t.pending = false and t.ignored = false
-      and t.posted_on between ${from} and ${to}
-      ${accountIdsFilter(personal)}
-    group by 1`)
-  const byDay = new Map(rows.map((r) => [r.day, r] as const))
-  return dayRange(from, to).map((day) => ({
-    day,
-    expenseCents: Number(byDay.get(day)?.expense ?? 0),
-    transactionCount: Number(byDay.get(day)?.count ?? 0),
-  }))
-}
+/** Gasto das contas pessoais por dia: a MESMA série da Visão geral (`analytics.dailySeries`), para o mesmo dia dar o mesmo número. */
+const personalDailySpend = (from: string, to: string, personal: number[]) => dailySeries({ from, to, accountIds: personal })
 
 /** Pendências (entradas e saídas) das contas pessoais até `to`, atrasadas inclusas. */
 async function personalPending(to: string, personal: number[]) {
@@ -56,6 +38,53 @@ async function personalPending(to: string, personal: number[]) {
   return rows.map((r) => ({ ...r, amountCents: Number(r.amountCents) }))
 }
 
+export type SpendProjection = {
+  daysElapsed: number
+  daysTotal: number
+  spentCents: number
+  capCents: number | null
+  pendingRestOfMonthCents: number
+  dailyMedianCents: number
+  projectedMonthCents: number
+  state: 'no_target' | 'exceeded' | 'at_risk' | 'on_track'
+}
+
+/**
+ * Gasto do mês contra o teto do Orçamento, com a projeção sem a distorção de
+ * um gasto único grande: realizado + pendências conhecidas do mês + mediana
+ * do gasto por dia nos 90 dias anteriores (dias sem gasto contam como zero)
+ * × dias que faltam. Usada pelo Diário e pelos avisos do sino (uma régua só).
+ */
+export async function spendProjection(
+  period: string,
+  /** gasto e teto do mês já lidos por quem chama (evita recarregar o Orçamento) */
+  knownSpend?: { spentCents: number; capCents: number | null; pendingCents: number },
+): Promise<SpendProjection> {
+  const today = todayIso()
+  const { start, end } = periodBounds(period)
+  const isCurrent = today >= start && today <= end
+  const spend = knownSpend ?? (await monthSpendingVsCap(period))
+  const daysTotal = dayRange(start, end).length
+  const daysElapsed = isCurrent ? Number(today.slice(8, 10)) : today > end ? daysTotal : 0
+  const remaining = Math.max(0, daysTotal - daysElapsed)
+
+  let pendingRestOfMonthCents = 0
+  let dailyMedianCents = 0
+  if (isCurrent) {
+    // O que ainda vai sair vem do Orçamento (mesma base do gasto e do teto): sem transferência,
+    // investimento nem TAG fora do orçamento, e com as parcelas pagas no cartão.
+    pendingRestOfMonthCents = spend.pendingCents
+    // O ritmo vem da base do Orçamento (a mesma do teto), não da série do mapa de calor.
+    dailyMedianCents = medianCents(await budgetDailySpend(addDays(start, -90), addDays(start, -1)))
+  }
+  const spentCents = spend.spentCents
+  const cap = spend.capCents
+  const projectedMonthCents = isCurrent ? spentCents + pendingRestOfMonthCents + dailyMedianCents * remaining : spentCents
+  const state: SpendProjection['state'] =
+    cap === null ? 'no_target' : spentCents > cap ? 'exceeded' : projectedMonthCents > cap ? 'at_risk' : 'on_track'
+  return { daysElapsed, daysTotal, spentCents, capCents: cap, pendingRestOfMonthCents, dailyMedianCents, projectedMonthCents, state }
+}
+
 export async function dailyView(period: string) {
   const today = todayIso()
   const { start, end } = periodBounds(period)
@@ -65,19 +94,15 @@ export async function dailyView(period: string) {
 
   // Em sequência pelo pooler das Edge Functions.
   const days = await personalDailySpend(start, end, personal)
-  const spend = await monthSpendingVsCap(period)
+  const projection = await spendProjection(period)
   const balances = await accountBalances()
   const v2 = isCurrent ? await debtOverviewV2() : null
 
-  const daysTotal = days.length
-  const daysElapsed = isCurrent ? Number(today.slice(8, 10)) : today > end ? daysTotal : 0
+  const { daysTotal, daysElapsed, spentCents, capCents: cap, pendingRestOfMonthCents, dailyMedianCents, projectedMonthCents, state } = projection
   const remaining = Math.max(0, daysTotal - daysElapsed)
-  const cap = spend.capCents
-  const spentCents = spend.spentCents
 
   /* ---- próximos dias e saldo pessoal projetado (só no mês corrente) ---- */
   let upcoming: { days: UpcomingDay[]; startBalanceCents: number; nextIncome: { day: string; amountCents: number; label: string } | null; firstNegativeDay: string | null } | null = null
-  let pendingRestOfMonthCents = 0
   if (isCurrent && v2) {
     const startBalanceCents = balances
       .filter((a) => a.kind !== 'investment' && personal.includes(Number(a.id)))
@@ -118,22 +143,8 @@ export async function dailyView(period: string) {
       nextIncome: nextIncomeRow ? { day: nextIncomeRow.postedOn, amountCents: nextIncomeRow.amountCents, label: nextIncomeRow.description } : null,
       firstNegativeDay,
     }
-    pendingRestOfMonthCents = pending
-      .filter((p) => p.amountCents < 0 && p.postedOn <= end)
-      .reduce((sum, p) => sum - p.amountCents, 0)
   }
 
-  /*
-   * Projeção do mês sem a distorção de um gasto único grande: realizado +
-   * pendências conhecidas do mês + mediana do gasto por dia nos 90 dias
-   * anteriores (dias sem gasto contam como zero) × dias que faltam. O aluguel
-   * do dia 2 entra uma vez; poucos dias do mês não bastam para medir ritmo.
-   */
-  const rhythm = isCurrent ? await personalDailySpend(addDays(start, -90), addDays(start, -1), personal) : []
-  const dailyMedianCents = medianCents(rhythm.map((d) => d.expenseCents))
-  const projectedMonthCents = isCurrent ? spentCents + pendingRestOfMonthCents + dailyMedianCents * remaining : spentCents
-  const state: 'no_target' | 'exceeded' | 'at_risk' | 'on_track' =
-    cap === null ? 'no_target' : spentCents > cap ? 'exceeded' : projectedMonthCents > cap ? 'at_risk' : 'on_track'
   const paceCents = cap !== null && daysTotal > 0 ? Math.round(cap * (daysElapsed / daysTotal)) : null
 
   return {

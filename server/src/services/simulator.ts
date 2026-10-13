@@ -111,27 +111,25 @@ function scoreOf(inputs: health.ScoreInputs): number | null {
 export type OneTimeExpenseInput = {
   amountCents: number
   source: MoneySource
-  accountId?: number | null
   period?: string
 }
 
 export async function simulateOneTimeExpense(input: OneTimeExpenseInput): Promise<SimulationResult> {
   const period = input.period ?? periodOf(todayIso())
-  const accountId = input.accountId ?? null
 
-  const baseInputs = await health.gatherScoreInputs(period, accountId)
+  const baseInputs = await health.gatherScoreInputs(period)
   const { inputs: afterInputs, runwayOverrides, availableDeltaCents } = applyOutflow(
     baseInputs,
     input.source,
     input.amountCents,
   )
 
-  const [runwayBeforeScope, runwayAfterScope, availableBefore, availableAfter] = await Promise.all([
-    health.runway(),
-    health.runway(health.DEFAULT_LIQUID_ASSET_CLASSES, runwayOverrides),
-    engine.availableForAllocation(period),
-    engine.availableForAllocation(period, { consolidatedBalanceDeltaCents: availableDeltaCents }),
-  ])
+  // Em sequência (pooler das Edge Functions), com o que não muda lido uma vez só.
+  const runwayBeforeScope = await health.runway()
+  const runwayAfterScope = await health.runway(health.DEFAULT_LIQUID_ASSET_CLASSES, runwayOverrides)
+  const engineShared = await engine.availabilityShared()
+  const availableBefore = await engine.availableForAllocation(period, {}, engineShared)
+  const availableAfter = await engine.availableForAllocation(period, { consolidatedBalanceDeltaCents: availableDeltaCents }, engineShared)
   const runwayBefore = runwayBeforeScope.consolidated
   const runwayAfter = runwayAfterScope.consolidated
 
@@ -209,7 +207,7 @@ export async function simulateDebtPayoff(input: DebtPayoffInput): Promise<DebtPa
   const savedInterestCents = baseline.perDebt.find((d) => d.debtId === input.debtId)?.interestCents ?? 0
 
   const payoffCents = debt.balanceCents
-  const baseInputs = await health.gatherScoreInputs(period, null)
+  const baseInputs = await health.gatherScoreInputs(period)
   const { inputs: afterOutflow, runwayOverrides, availableDeltaCents } = applyOutflow(
     baseInputs,
     input.source,
@@ -235,15 +233,15 @@ export async function simulateDebtPayoff(input: DebtPayoffInput): Promise<DebtPa
     },
   }
 
-  const [runwayBeforeScope, runwayAfterScope, availableBefore, availableAfter] = await Promise.all([
-    health.runway(),
-    // A dívida de curto prazo do runway olha parcelas pendentes já
-    // materializadas; quitar não as apaga do ledger (nada é gravado), então o
-    // efeito modelado aqui é só a saída de dinheiro da origem escolhida.
-    health.runway(health.DEFAULT_LIQUID_ASSET_CLASSES, runwayOverrides),
-    engine.availableForAllocation(period),
-    engine.availableForAllocation(period, { consolidatedBalanceDeltaCents: availableDeltaCents }),
-  ])
+  // Em sequência (pooler das Edge Functions), com o que não muda lido uma vez só.
+  const runwayBeforeScope = await health.runway()
+  // A dívida de curto prazo do runway olha parcelas pendentes já
+  // materializadas; quitar não as apaga do ledger (nada é gravado), então o
+  // efeito modelado aqui é só a saída de dinheiro da origem escolhida.
+  const runwayAfterScope = await health.runway(health.DEFAULT_LIQUID_ASSET_CLASSES, runwayOverrides)
+  const engineShared = await engine.availabilityShared()
+  const availableBefore = await engine.availableForAllocation(period, {}, engineShared)
+  const availableAfter = await engine.availableForAllocation(period, { consolidatedBalanceDeltaCents: availableDeltaCents }, engineShared)
   const runwayBefore = runwayBeforeScope.consolidated
   const runwayAfter = runwayAfterScope.consolidated
 

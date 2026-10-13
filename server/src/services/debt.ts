@@ -1,12 +1,14 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { accounts, debtPayments, debtRenegotiations, debtSnapshots, debts, skippedOccurrences, transactions } from '../db/schema'
-import { addMonths, daysInMonth, periodBounds, todayIso } from '../core/dates'
-import { medianCents, monthlyRateOf } from '../core/money'
+import { addMonths, daysInMonth, monthsBetween, periodBounds, todayIso } from '../core/dates'
+import { monthlyRateOf } from '../core/money'
+import { memoPerRequest } from '../core/requestCache'
 import { dedupeHash, directionOf, normalizeDescription } from '../core/normalize'
 import { balanceAfter, installmentsCents, type AmortizationSystem, type AmortizedContract } from '../core/propertyPlan'
 import {
   agreementTerms,
+  MAX_DEBT_MONTHS,
   debtPlan,
   estimatedInterestCents,
   exitCalendar,
@@ -15,8 +17,8 @@ import {
   type CalendarSource,
   type DebtPlanInput,
 } from '../core/debtPlan'
-import { monthlyTotals, totals } from './analytics'
-import { typicalPersonalIncome } from './budget'
+import { TYPICAL_WINDOW_MONTHS, typicalPersonalIncome } from './budget'
+import { idList } from './withdrawals'
 import { listCards } from './creditCards'
 
 /** Regra do Endividamento violada (taxa que não fecha, acordo inválido): 400/404/409. */
@@ -33,8 +35,6 @@ export class DebtError extends Error {
  * of measured balances. Projections are computed, never stored, so changing a
  * rate or a payment immediately changes every chart.
  */
-
-const MAX_MONTHS = 600 // 50 years — the guard against a never-amortizing loan
 
 type DebtKind = (typeof debts.$inferSelect)['kind']
 type DebtPaymentKind = (typeof debtPayments.$inferSelect)['kind']
@@ -56,12 +56,6 @@ const contractOf = (d: Pick<DebtRecord, 'principalCents' | 'aprBps' | 'installme
 })
 /** Parcela de um contrato amortizado a pagar depois de `paid` parcelas (0 se acabou). */
 const nextInstallment = (d: DebtRecord, paid: number) => installmentsCents(contractOf(d))[paid] ?? 0
-/** Quantos meses do período âncora até `period` (a parcela k desse período). */
-const monthIndex = (anchor: string, period: string) => {
-  const [ay, am] = anchor.split('-').map(Number) as [number, number]
-  const [py, pm] = period.split('-').map(Number) as [number, number]
-  return (py - ay) * 12 + (pm - am)
-}
 
 export type DebtRow = {
   id: number
@@ -119,6 +113,32 @@ export async function currentBalance(debt: typeof debts.$inferSelect): Promise<n
   return snapshot?.balanceCents ?? debt.principalCents
 }
 
+/** Saldo medido mais recente de cada dívida numa consulta só (a de `currentBalance`, em lote). */
+async function latestBalances(list: Array<{ id: number; principalCents: number }>): Promise<Map<number, number>> {
+  const out = new Map(list.map((d) => [d.id, d.principalCents] as const))
+  if (list.length === 0) return out
+  const rows = await db.execute<{ debtId: number; balanceCents: number }>(sql`
+    select distinct on (debt_id) debt_id as "debtId", balance_cents as "balanceCents"
+    from debt_snapshots
+    where debt_id in (${idList(list.map((d) => d.id))})
+    order by debt_id, as_of desc`)
+  for (const r of rows) out.set(Number(r.debtId), Number(r.balanceCents))
+  return out
+}
+
+/** Pagamentos registrados por dívida numa consulta só: quantidade, última data e total. */
+async function paymentTotals(ids: number[]): Promise<Map<number, { count: number; lastPaidOn: string | null; totalCents: number }>> {
+  const out = new Map<number, { count: number; lastPaidOn: string | null; totalCents: number }>()
+  if (ids.length === 0) return out
+  const rows = await db.execute<{ debtId: number; count: number; lastPaidOn: string | null; total: number }>(sql`
+    select debt_id as "debtId", count(*)::int as count, max(paid_on) as "lastPaidOn", coalesce(sum(amount_cents), 0) as total
+    from debt_payments
+    where kind = 'payment' and debt_id in (${idList(ids)})
+    group by debt_id`)
+  for (const r of rows) out.set(Number(r.debtId), { count: Number(r.count), lastPaidOn: r.lastPaidOn, totalCents: Number(r.total) })
+  return out
+}
+
 /** Parcelas pagas + the most recent payment date, from the payment ledger. */
 export async function paymentStats(debtId: number): Promise<{ count: number; lastPaidOn: string | null }> {
   const rows = await db.execute<{ count: number; lastPaidOn: string | null }>(sql`
@@ -136,10 +156,11 @@ export async function listDebts(): Promise<DebtRow[]> {
     .from(debts)
     .leftJoin(accounts, eq(accounts.id, debts.accountId))
     .where(eq(debts.active, true))
-  const withBalance = await Promise.all(
-    rows.map(async ({ debt: d, accountName }) => {
-      const balanceCents = await currentBalance(d)
-      const { count: installmentsPaid, lastPaidOn } = await paymentStats(d.id)
+  const balances = await latestBalances(rows.map((r) => r.debt))
+  const payments = await paymentTotals(rows.map((r) => r.debt.id))
+  const withBalance = rows.map(({ debt: d, accountName }) => {
+      const balanceCents = balances.get(d.id) ?? d.principalCents
+      const { count: installmentsPaid, lastPaidOn } = payments.get(d.id) ?? { count: 0, lastPaidOn: null }
       return {
         id: d.id,
         name: d.name,
@@ -167,8 +188,7 @@ export async function listDebts(): Promise<DebtRow[]> {
         openedOn: d.openedOn,
         paidViaCardId: d.paidViaCardId,
       }
-    }),
-  )
+  })
   const total = withBalance.reduce((sum, d) => sum + d.balanceCents, 0)
   return withBalance
     .map((d) => ({ ...d, shareBps: total > 0 ? Math.round((d.balanceCents / total) * 10_000) : 0 }))
@@ -206,13 +226,11 @@ export async function listClosedDebts(): Promise<ClosedDebtRow[]> {
     .from(debts)
     .leftJoin(accounts, eq(accounts.id, debts.accountId))
     .where(eq(debts.active, false))
-  return Promise.all(
-    rows.map(async ({ debt: d, accountName }) => {
-      const balanceCents = await currentBalance(d)
-      const { count: installmentsPaid, lastPaidOn } = await paymentStats(d.id)
-      const stats = await db.execute<{ total: number }>(sql`
-        select coalesce(sum(amount_cents), 0) as total
-        from debt_payments where debt_id = ${d.id} and kind = 'payment'`)
+  const balances = await latestBalances(rows.map((r) => r.debt))
+  const payments = await paymentTotals(rows.map((r) => r.debt.id))
+  return rows.map(({ debt: d, accountName }) => {
+      const balanceCents = balances.get(d.id) ?? d.principalCents
+      const { count: installmentsPaid, lastPaidOn, totalCents } = payments.get(d.id) ?? { count: 0, lastPaidOn: null, totalCents: 0 }
       return {
         id: d.id,
         name: d.name,
@@ -240,11 +258,10 @@ export async function listClosedDebts(): Promise<ClosedDebtRow[]> {
         openedOn: d.openedOn,
         paidViaCardId: d.paidViaCardId,
         closedOn: d.closedOn,
-        totalPaidCents: stats[0]?.total ?? 0,
+        totalPaidCents: totalCents,
         closedReason: d.closedReason,
       }
-    }),
-  )
+  })
 }
 
 /**
@@ -456,7 +473,7 @@ async function syncMaterializedRows(debt: typeof debts.$inferSelect): Promise<vo
     const day = Math.min(debt.dueDay, daysInMonth(year, month))
     const postedOn = `${period}-${String(day).padStart(2, '0')}`
     // Contrato amortizado: o valor da parcela k deste período no cronograma.
-    const amountCents = scheduleAmounts && anchor ? (scheduleAmounts[monthIndex(anchor, period)] ?? 0) : fixedAmountCents
+    const amountCents = scheduleAmounts && anchor ? (scheduleAmounts[monthsBetween(anchor, period)] ?? 0) : fixedAmountCents
     if (amountCents <= 0) continue
     await db
       .update(transactions)
@@ -499,79 +516,26 @@ async function syncMaterializedRows(debt: typeof debts.$inferSelect): Promise<vo
 export const monthlyRate = (aprBps: number) => monthlyRateOf(aprBps)
 
 /* ------------------------------------------------------------------ *
- * Composition + exposure + debt-to-income
+ * Composition + exposure
  * ------------------------------------------------------------------ */
 
 /**
- * Meses fechados que compõem a renda típica usada como denominador do
- * comprometimento de renda. Seis é a borda inferior da faixa de 6 a 12
- * meses que a análise de crédito usa para renda variável: suficiente para
- * atravessar um trimestre fraco, curto o bastante para ainda descrever a
- * situação atual e não a de dois anos atrás.
+ * O que o Motor financeiro e a tela de dívidas leem: dívidas ativas, parcela
+ * programada e mínima, juros do mês. Não depende de período (a parcela do
+ * mês é a mesma para o ano todo) e não calcula renda: a renda típica
+ * pessoal e o comprometimento são do `debtOverviewV2` (decisions/0045).
  */
-export const INCOME_WINDOW_MONTHS = 6
-
-export async function debtOverview(options: { period?: string } = {}) {
+export async function debtOverview() {
   const rows = await listDebts()
   const totalCents = rows.reduce((sum, d) => sum + d.balanceCents, 0)
   const monthlyInterestCents = rows.reduce((sum, d) => sum + d.monthlyInterestCents, 0)
   const minimumCents = rows.reduce((sum, d) => sum + d.minimumPaymentCents, 0)
   const scheduledCents = rows.reduce((sum, d) => sum + d.scheduledPaymentCents, 0)
-
-  // Balance-weighted average rate — a simple mean would understate the
-  // damage a small, very expensive revolving balance does.
-  const weightedAprBps =
-    totalCents > 0
-      ? Math.round(rows.reduce((sum, d) => sum + d.aprBps * d.balanceCents, 0) / totalCents)
-      : 0
-
-  // A single real month, not an average across several — "como estava a
-  // situação em julho" is a different (and more decision-useful) question
-  // than "qual foi a renda média dos últimos 3 meses", and averaging hides
-  // exactly the month-to-month swings the user wants to see. Defaults to
-  // the last fully closed month: the current month's income is still
-  // arriving, so showing it as final would understate how comprometida a
-  // renda really é.
-  //
-  // Este número continua sendo o do mês de referência e continua na tela.
-  // O que ele deixou de ser, em 09/09/2026, é o DENOMINADOR do
-  // comprometimento de renda: ver `typicalMonthlyIncomeCents` abaixo.
-  const period = options.period ?? addMonths(todayIso().slice(0, 7), -1)
-  const { start: from, end: to } = periodBounds(period)
-  const income = await totals({ from, to })
-  const monthlyIncomeCents = income.incomeCents
-
-  /**
-   * Renda TÍPICA, e não a de um único mês, como denominador do
-   * comprometimento de renda.
-   *
-   * A persona do produto é autônomo/PJ com receita irregular por definição
-   * (`PRD.md` §2). Um mês com dois projetos faturados e um mês sem nenhum
-   * produzem comprometimentos que diferem por um fator de 2 ou 3 sem que
-   * nada tenha mudado na dívida, e o ruído não fica contido aqui: este
-   * número alimenta o indicador de endividamento da Saúde financeira (peso
-   * padrão de 20% no score) e uma das cinco regras do radar de risco. O
-   * score composto oscilava mês a mês por uma razão sem relação com saúde
-   * financeira nenhuma.
-   *
-   * A prática de crédito para renda variável usa média de 6 a 12 meses
-   * pelo mesmo motivo. Aqui é a MEDIANA da janela, que é robusta a um mês
-   * excepcional em qualquer das duas direções sem precisar decidir o que
-   * conta como excepcional.
-   *
-   * Só entram meses com movimento registrado no ledger. Um mês vazio é
-   * ausência de dado, não um mês sem renda, e contá-lo como zero afundaria
-   * o denominador de quem importou o extrato semana passada. Um mês com
-   * despesa e receita zero, esse sim, entra: é um mês seco de verdade e é
-   * informação real sobre renda variável.
-   */
-  const incomeWindow = await monthlyTotals({ endPeriod: period, months: INCOME_WINDOW_MONTHS })
-  const coveredMonths = incomeWindow.filter((m) => m.transactionCount > 0)
-  const typicalMonthlyIncomeCents = medianCents(coveredMonths.map((m) => m.incomeCents))
-
+  // Taxa média ponderada pelo saldo: a média simples subestimaria o estrago de um
+  // saldo pequeno e caríssimo (rotativo).
+  const weightedAprBps = totalCents > 0 ? Math.round(rows.reduce((sum, d) => sum + d.aprBps * d.balanceCents, 0) / totalCents) : 0
   const byKind = new Map<string, number>()
   for (const d of rows) byKind.set(d.kind, (byKind.get(d.kind) ?? 0) + d.balanceCents)
-
   return {
     debts: rows,
     totalCents,
@@ -579,33 +543,15 @@ export async function debtOverview(options: { period?: string } = {}) {
     minimumCents,
     scheduledCents,
     weightedAprBps,
-    /** receita realizada no mês de referência, exatamente aquele mês */
-    monthlyIncomeCents,
-    /** mediana da receita dos meses com movimento na janela */
-    typicalMonthlyIncomeCents,
-    /** tamanho da janela pedida */
-    incomeWindowMonths: INCOME_WINDOW_MONTHS,
-    /** quantos meses da janela realmente tinham movimento e entraram na mediana */
-    incomeSampleMonths: coveredMonths.length,
-    /** committed debt service as a share of the typical monthly income */
-    debtToIncomeBps:
-      typicalMonthlyIncomeCents > 0
-        ? Math.round((scheduledCents / typicalMonthlyIncomeCents) * 10_000)
-        : null,
-    /** total balance as a share of annual income (typical month x12) */
-    debtToAnnualIncomeBps:
-      typicalMonthlyIncomeCents > 0
-        ? Math.round((totalCents / (typicalMonthlyIncomeCents * 12)) * 10_000)
-        : null,
-    period,
     byKind: [...byKind.entries()]
-      .map(([kind, amountCents]) => ({
-        kind,
-        amountCents,
-        shareBps: totalCents > 0 ? Math.round((amountCents / totalCents) * 10_000) : 0,
-      }))
+      .map(([kind, amountCents]) => ({ kind, amountCents, shareBps: totalCents > 0 ? Math.round((amountCents / totalCents) * 10_000) : 0 }))
       .sort((a, b) => b.amountCents - a.amountCents),
   }
+}
+
+/** Lido várias vezes por requisição (Motor, histórico, plano): uma vez só. */
+export function debtSchedule() {
+  return memoPerRequest('debtSchedule', debtOverview)
 }
 
 /* ------------------------------------------------------------------ *
@@ -693,7 +639,7 @@ export async function projectPaydown(options: {
   let month = 0
   let stalled = false
 
-  while (sim.some((d) => d.balance > 0) && month < MAX_MONTHS) {
+  while (sim.some((d) => d.balance > 0) && month < MAX_DEBT_MONTHS) {
     month++
     const startingTotal = sim.reduce((s, d) => s + d.balance, 0)
 
@@ -887,8 +833,23 @@ export async function updateDebt(id: number, patch: Partial<DebtInput> & { activ
 }
 
 export async function deleteDebt(id: number) {
-  const result = await db.delete(debts).where(eq(debts.id, id))
-  return { removed: result.count }
+  // O vínculo cai junto (ON DELETE CASCADE). Apagar o ACORDO desfaz a renegociação: as dívidas
+  // de origem que ele encerrou voltam a ficar ativas (sem isso ficariam "renegociadas" sem acordo).
+  // Apagar só uma ORIGEM deixa o acordo de pé, apenas sem aquele vínculo.
+  return db.transaction(async (tx) => {
+    // Trava o acordo antes de ler as origens: um registerRenegotiation simultâneo termina antes
+    // (ou depois) do delete, nunca no meio, e a origem nova não fica fechada sem acordo.
+    await tx.select({ id: debts.id }).from(debts).where(eq(debts.id, id)).for('update')
+    const origins = await tx.select({ originId: debtRenegotiations.originDebtId }).from(debtRenegotiations).where(eq(debtRenegotiations.debtId, id))
+    if (origins.length > 0) {
+      await tx
+        .update(debts)
+        .set({ active: true, closedOn: null, closedReason: null })
+        .where(and(inArray(debts.id, origins.map((o) => o.originId)), eq(debts.closedReason, 'renegotiated')))
+    }
+    const result = await tx.delete(debts).where(eq(debts.id, id))
+    return { removed: result.count }
+  })
 }
 
 /**
@@ -1141,12 +1102,11 @@ export const payoffPaymentNote = (transactionId: number) => `quitação · lanç
  */
 export async function payoffCandidates(accountId: number): Promise<Array<{ id: number; name: string; balanceCents: number }>> {
   const rows = await db.select().from(debts).where(and(eq(debts.active, true), eq(debts.accountId, accountId)))
-  const out: Array<{ id: number; name: string; balanceCents: number }> = []
-  for (const debt of rows) {
-    const balanceCents = await currentBalance(debt)
-    if (balanceCents > 0) out.push({ id: debt.id, name: debt.name, balanceCents })
-  }
-  return out
+  const balances = await latestBalances(rows)
+  return rows.flatMap((debt) => {
+    const balanceCents = balances.get(debt.id) ?? debt.principalCents
+    return balanceCents > 0 ? [{ id: debt.id, name: debt.name, balanceCents }] : []
+  })
 }
 
 /** Até 3% de diferença: quitação antecipada costuma vir com desconto de juros. */
@@ -1246,13 +1206,27 @@ function planInputOf(d: DebtRow, startPeriod: string, paid = d.installmentsPaid)
   }
 }
 
-/** Saldo medido no fim de cada um dos 12 meses antes de `startPeriod` (0 fora da vida da dívida). */
-async function balancesLast12(debt: { id: number; openedOn: string | null; closedOn: string | null; principalCents: number }, startPeriod: string) {
-  const snaps = await db
-    .select({ asOf: debtSnapshots.asOf, balanceCents: debtSnapshots.balanceCents })
+type Snapshot = { asOf: string; balanceCents: number }
+
+/** Todos os snapshots das dívidas pedidas, agrupados por dívida e em ordem de data, numa consulta só. */
+async function snapshotsByDebt(ids: number[]): Promise<Map<number, Snapshot[]>> {
+  const out = new Map<number, Snapshot[]>()
+  if (ids.length === 0) return out
+  const rows = await db
+    .select({ debtId: debtSnapshots.debtId, asOf: debtSnapshots.asOf, balanceCents: debtSnapshots.balanceCents })
     .from(debtSnapshots)
-    .where(eq(debtSnapshots.debtId, debt.id))
+    .where(inArray(debtSnapshots.debtId, ids))
     .orderBy(debtSnapshots.asOf)
+  for (const r of rows) {
+    const list = out.get(r.debtId)
+    if (list) list.push({ asOf: r.asOf, balanceCents: r.balanceCents })
+    else out.set(r.debtId, [{ asOf: r.asOf, balanceCents: r.balanceCents }])
+  }
+  return out
+}
+
+/** Saldo medido no fim de cada um dos 12 meses antes de `startPeriod` (0 fora da vida da dívida). */
+function balancesLast12(debt: { id: number; openedOn: string | null; closedOn: string | null; principalCents: number }, snaps: Snapshot[], startPeriod: string) {
   const out: number[] = []
   for (let i = 12; i >= 1; i--) {
     const period = addMonths(startPeriod, -i)
@@ -1270,7 +1244,11 @@ async function balancesLast12(debt: { id: number; openedOn: string | null; close
  * comprometimento sobre a renda típica pessoal, calendário de 6 meses,
  * custo do crédito, datas livres e acordos.
  */
-export async function debtOverviewV2() {
+export function debtOverviewV2() {
+  return memoPerRequest('debtOverviewV2', computeDebtOverviewV2)
+}
+
+async function computeDebtOverviewV2() {
   const startPeriod = todayIso().slice(0, 7)
   // Em sequência: lido por Saúde, Patrimônio e Endividamento, e o pooler das
   // Edge Functions trava com fan-out concorrente demais (goals.ts#goalHistory).
@@ -1302,6 +1280,8 @@ export async function debtOverviewV2() {
       principalThisMonthCents: first?.principalCents ?? 0,
       endsOn: plan.endsOn,
       monthsLeft: plan.endsOn ? plan.rows.length : null,
+      /** parcelas já pagas ou confirmadas (a base do cronograma e das simulações da tela) */
+      installmentsPaidEffective: effectivePaid(d, settled),
       /** taxa que fecha o contrato de parcela fixa; nula se não houver ou se for amortizado/rotativo */
       impliedAprBps: implied,
       categoryId: d.categoryId,
@@ -1360,35 +1340,35 @@ export async function debtOverviewV2() {
 
   // Juros dos últimos 12 meses: contrato amortizado pelo cronograma; os
   // demais estimados por saldo medido × taxa; cartões pelos encargos das faturas.
-  const raw = new Map((await db.select().from(debts).where(eq(debts.active, true))).map((d) => [d.id, d]))
   const interest12m: Array<{ key: string; label: string; cents: number; estimated: boolean }> = []
   // Encerradas no período levam a data: várias dívidas costumam ter o mesmo nome.
   const labelOf = (d: DebtRecord) => (d.active ? d.name : `${d.name} (encerrada ${d.closedOn ? `${d.closedOn.slice(8, 10)}/${d.closedOn.slice(5, 7)}` : ''})`)
-  for (const d of [...raw.values(), ...closedRecent]) {
+  // Ativas: as linhas do `listDebts` já trazem tudo (a de banco é só a leitura crua dos mesmos registros).
+  const activeRaw = await db.select().from(debts).where(eq(debts.active, true))
+  const considered = [...activeRaw, ...closedRecent]
+  const paidByDebt = new Map(rows.map((r) => [r.id, r.installmentsPaid] as const))
+  const closedPayments = await paymentTotals(closedRecent.map((d) => d.id))
+  const snaps = await snapshotsByDebt(considered.filter((d) => !(d.amortization && d.installmentCount && d.openedOn)).map((d) => d.id))
+  for (const d of considered) {
     if (d.amortization && d.installmentCount && d.openedOn) {
       const anchor = d.openedOn.slice(0, 7)
-      const { count: paid } = await paymentStats(d.id)
-      const fromK = Math.max(0, monthIndex(anchor, addMonths(startPeriod, -12)))
-      const toK = Math.min(paid, Math.max(0, monthIndex(anchor, startPeriod)))
+      const paid = paidByDebt.get(d.id) ?? closedPayments.get(d.id)?.count ?? 0
+      const fromK = Math.max(0, monthsBetween(anchor, addMonths(startPeriod, -12)))
+      const toK = Math.min(paid, Math.max(0, monthsBetween(anchor, startPeriod)))
       const cents = toK > fromK ? scheduledInterestCents({ principalCents: d.principalCents, aprBps: d.aprBps, installmentCount: d.installmentCount, amortization: d.amortization }, fromK, toK) : 0
       if (cents > 0) interest12m.push({ key: `debt:${d.id}`, label: labelOf(d), cents, estimated: false })
     } else {
-      const cents = estimatedInterestCents(await balancesLast12(d, startPeriod), d.aprBps)
+      const cents = estimatedInterestCents(balancesLast12(d, snaps.get(d.id) ?? [], startPeriod), d.aprBps)
       if (cents > 0) interest12m.push({ key: `debt:${d.id}`, label: labelOf(d), cents, estimated: true })
     }
   }
   for (const c of cardItems) if (c.charges12mCents > 0) interest12m.push({ key: `card:${c.id}`, label: c.name, cents: c.charges12mCents, estimated: false })
 
   // Acordos: um por dívida-acordo, com as origens que ele encerrou.
-  const allDebts = new Map([...raw.values(), ...closedRecent].map((d) => [d.id, d]))
-  for (const r of renegotiations) {
-    for (const id of [r.debtId, r.originDebtId]) {
-      if (!allDebts.has(id)) {
-        const extra = (await db.select().from(debts).where(eq(debts.id, id)))[0]
-        if (extra) allDebts.set(id, extra)
-      }
-    }
-  }
+  const allDebts = new Map(considered.map((d) => [d.id, d]))
+  // As dívidas dos acordos que ainda não vieram (encerradas há mais de 12 meses): uma consulta só.
+  const missingIds = [...new Set(renegotiations.flatMap((r) => [r.debtId, r.originDebtId]))].filter((id) => !allDebts.has(id))
+  if (missingIds.length > 0) for (const extra of await db.select().from(debts).where(inArray(debts.id, missingIds))) allDebts.set(extra.id, extra)
   const byAgreement = new Map<number, typeof renegotiations>()
   for (const r of renegotiations) byAgreement.set(r.debtId, [...(byAgreement.get(r.debtId) ?? []), r])
   const agreements = [...byAgreement].map(([debtId, origins]) => {
@@ -1442,7 +1422,7 @@ export async function debtOverviewV2() {
     agreements,
     assumptions: {
       total: 'saldo das dívidas ativas + limite usado dos cartões (o limite usado já inclui as parcelas futuras do cartão); dívida paga na fatura de um cartão sai do limite usado dele, para contar uma vez',
-      comprometimento: '(parcelas das dívidas do mês + fatura aberta dos cartões ligados) ÷ renda típica pessoal (mediana de 6 meses fechados, contas pessoais + repasse da PJ, a mesma do Orçamento)',
+      comprometimento: `(parcelas das dívidas do mês + fatura aberta dos cartões ligados) ÷ renda típica pessoal (mediana de ${TYPICAL_WINDOW_MONTHS} meses fechados, contas pessoais + repasse da PJ, a mesma do Orçamento)`,
       calendario: 'dívidas pelo cronograma (parcela atrasada entra no mês corrente); cartões ligados ao Open Finance pela fatura aberta e pelas parcelas futuras; cartões medidos à mão ficam fora',
       jurosDoMes: 'saldo × taxa mensal (ou a parte de juros da parcela no contrato amortizado) + encargos da última fatura fechada de cada cartão',
       juros12m: 'contrato amortizado pelo cronograma; demais dívidas estimadas pelo saldo medido de cada mês × taxa mensal; cartões pelos encargos das faturas fechadas',
@@ -1469,28 +1449,73 @@ export async function useImpliedRate(id: number) {
 }
 
 /**
+ * Confere que as dívidas de origem existem e ainda não foram renegociadas.
+ * A rota de criar um acordo chama isto ANTES de criar a dívida: sem isso, um
+ * 409 na segunda etapa deixava o acordo criado e a tela em erro (salvar de
+ * novo duplicava).
+ */
+export async function assertRenegotiable(originDebtIds: number[], agreementId?: number) {
+  const ids = [...new Set(originDebtIds)]
+  if (ids.length === 0) throw new DebtError('informe ao menos uma dívida de origem')
+  if (agreementId !== undefined && ids.includes(agreementId)) throw new DebtError('o acordo não pode renegociar a si mesmo')
+  const origins = await db.select().from(debts).where(inArray(debts.id, ids))
+  if (origins.length !== ids.length) throw new DebtError('dívida de origem não encontrada', 404)
+  const already = await db.select({ id: debtRenegotiations.originDebtId }).from(debtRenegotiations).where(inArray(debtRenegotiations.originDebtId, ids))
+  if (already.length > 0) throw new DebtError('uma dessas dívidas já foi renegociada', 409)
+  return { ids, origins }
+}
+
+/**
+ * Cria a dívida e, se for um acordo, registra a renegociação. Se qualquer passo
+ * depois da criação falhar, o que foi criado é desfeito: sem isso o acordo ficava
+ * no banco com a tela em erro, e salvar de novo duplicava.
+ */
+export async function createDebtWithAgreement(input: Parameters<typeof createDebt>[0], renegotiates?: number[]) {
+  if (renegotiates?.length) await assertRenegotiable(renegotiates)
+  const debt = await createDebt(input)
+  try {
+    await materializeDebtInstallments(debt.id)
+    if (renegotiates?.length) await registerRenegotiation(debt.id, renegotiates)
+  } catch (error) {
+    // O erro que o usuário vê é o original, mesmo que o desfazer também falhe.
+    try {
+      await db.transaction(async (tx) => {
+        await tx.delete(transactions).where(and(eq(transactions.debtId, debt.id), eq(transactions.pending, true)))
+        await tx.delete(debts).where(eq(debts.id, debt.id))
+      })
+    } catch (cleanupError) {
+      console.error('createDebtWithAgreement: não foi possível desfazer a dívida criada', debt.id, cleanupError)
+    }
+    throw error
+  }
+  return debt
+}
+
+/**
  * Registra que a dívida `debtId` (o acordo) renegociou `originDebtIds`:
  * guarda o saldo de cada origem no dia e encerra cada uma como
  * "renegociada" (não "quitada"), levando junto as pendências dela.
  */
 export async function registerRenegotiation(debtId: number, originDebtIds: number[], agreedOn = todayIso()) {
-  const ids = [...new Set(originDebtIds)]
-  if (ids.length === 0) throw new DebtError('informe ao menos uma dívida de origem')
-  if (ids.includes(debtId)) throw new DebtError('o acordo não pode renegociar a si mesmo')
   const agreement = (await db.select().from(debts).where(eq(debts.id, debtId)))[0]
   if (!agreement) throw new DebtError('acordo não encontrado', 404)
-  const origins = await db.select().from(debts).where(inArray(debts.id, ids))
-  if (origins.length !== ids.length) throw new DebtError('dívida de origem não encontrada', 404)
-  const already = await db.select({ id: debtRenegotiations.originDebtId }).from(debtRenegotiations).where(inArray(debtRenegotiations.originDebtId, ids))
-  if (already.length > 0) throw new DebtError('uma dessas dívidas já foi renegociada', 409)
-  const balances = await Promise.all(origins.map(async (o) => ({ id: o.id, balanceCents: await currentBalance(o) })))
-  await db.transaction(async (tx) => {
-    for (const b of balances) {
-      await tx.insert(debtRenegotiations).values({ debtId, originDebtId: b.id, originBalanceCents: b.balanceCents, agreedOn })
-      await tx.update(debts).set({ active: false, closedOn: agreedOn, closedReason: 'renegotiated' }).where(eq(debts.id, b.id))
-      await tx.delete(transactions).where(and(eq(transactions.debtId, b.id), eq(transactions.pending, true)))
-    }
-  })
+  const { origins } = await assertRenegotiable(originDebtIds, debtId)
+  const latest = await latestBalances(origins)
+  const balances = origins.map((o) => ({ id: o.id, balanceCents: latest.get(o.id) ?? o.principalCents }))
+  try {
+    await db.transaction(async (tx) => {
+      for (const b of balances) {
+        await tx.insert(debtRenegotiations).values({ debtId, originDebtId: b.id, originBalanceCents: b.balanceCents, agreedOn })
+        await tx.update(debts).set({ active: false, closedOn: agreedOn, closedReason: 'renegotiated' }).where(eq(debts.id, b.id))
+        await tx.delete(transactions).where(and(eq(transactions.debtId, b.id), eq(transactions.pending, true)))
+      }
+    })
+  } catch (error) {
+    // Duas requisições juntas: a segunda cai no índice único e é um conflito, não uma falha do servidor.
+    const code = (error as { code?: string; cause?: { code?: string } }).code ?? (error as { cause?: { code?: string } }).cause?.code
+    if (code === '23505') throw new DebtError('uma dessas dívidas já foi renegociada', 409)
+    throw error
+  }
   const originBalanceCents = balances.reduce((sum, b) => sum + b.balanceCents, 0)
   return {
     debtId,

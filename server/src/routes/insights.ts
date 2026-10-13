@@ -8,6 +8,7 @@ import * as companyService from '../services/company'
 import * as cashFlowService from '../services/cashFlow'
 import * as creditCardsService from '../services/creditCards'
 import * as criteriaService from '../services/criteria'
+import { accountScope } from '../services/withdrawals'
 import * as dailyService from '../services/daily'
 import * as debtService from '../services/debt'
 import { ensureMaterialized } from '../services/materialization'
@@ -29,6 +30,8 @@ const rangeQuery = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   accountId: z.coerce.number().int().positive().optional(),
+  /** "personal": sem conta escolhida, só as contas pessoais (decisions/0045) */
+  scope: z.enum(['personal', 'all']).optional(),
 })
 
 const periodParam = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) })
@@ -39,12 +42,15 @@ const idParam = z.object({ id: z.coerce.number().int().positive() })
  * Falling back to "today" would show an empty dashboard to someone who just
  * imported historical statements.
  */
-async function resolveRange(query: z.infer<typeof rangeQuery>): Promise<analytics.Range> {
-  const bounds = await ledgerBounds()
-  const anchor = query.to ?? bounds.max ?? todayIso()
+async function resolveRange(query: z.infer<typeof rangeQuery>, knownBounds?: Awaited<ReturnType<typeof ledgerBounds>>): Promise<analytics.Range> {
+  // Com `to` informado o recorte não depende do razão: sem a varredura (count/min/max) a cada chamada.
+  const bounds = query.to ? null : (knownBounds ?? (await ledgerBounds()))
+  const anchor = query.to ?? bounds?.max ?? todayIso()
   const to = query.to ?? periodBounds(anchor.slice(0, 7)).end
   const from = query.from ?? periodBounds(addMonths(anchor.slice(0, 7), -5)).start
-  return { from, to, accountId: query.accountId ?? null }
+  // Sem conta escolhida e com escopo pessoal: as contas pessoais (sem a PJ).
+  const accountIds = !query.accountId && query.scope === 'personal' ? (await accountScope()).personal : null
+  return { from, to, accountId: query.accountId ?? null, accountIds }
 }
 
 
@@ -115,7 +121,7 @@ export async function insightsRoutes(app: FastifyInstance) {
     return {
       ledger: bounds,
       today: todayIso(),
-      defaultRange: await resolveRange({}),
+      defaultRange: await resolveRange({}, bounds),
       accounts: await analytics.accountBalances(),
       hasData: bounds.count > 0,
     }
@@ -178,9 +184,21 @@ export async function insightsRoutes(app: FastifyInstance) {
     }
   })
 
+  /** As quatro quebras por TAG da tela Categorias, sem o resto do /dashboard. */
+  app.get('/analytics/category-spending', async (req) => {
+    return analytics.categorySpending(await resolveRange(rangeQuery.parse(req.query)))
+  })
+
   /* ---------------------------------------------------------------- *
    * Daily tracker
    * ---------------------------------------------------------------- */
+  /** Gasto por dia do mês para o mapa de calor e o Ritmo da Visão geral: leve, com filtro de conta e escopo. */
+  app.get('/analytics/daily-series', async (req) => {
+    const query = rangeQuery.extend({ period: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query)
+    const range = await resolveRange({ ...query, from: periodBounds(query.period).start, to: periodBounds(query.period).end })
+    return { period: query.period, days: await analytics.dailySeries(range) }
+  })
+
   app.get('/analytics/daily', async (req) => {
     const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.query)
     // Diário pessoal (specs/personal-picture): próximos dias, saldo projetado, gasto contra o Orçamento.
@@ -278,10 +296,9 @@ export async function insightsRoutes(app: FastifyInstance) {
   /* ---------------------------------------------------------------- *
    * Debt
    * ---------------------------------------------------------------- */
-  app.get('/debts', async (req) => {
-    const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.query)
+  app.get('/debts', async () => {
     const [overview, trend, closedDebts] = await Promise.all([
-      debtService.debtOverview(query),
+      debtService.debtOverview(),
       debtService.debtTrend(),
       debtService.listClosedDebts(),
     ])
@@ -307,11 +324,12 @@ export async function insightsRoutes(app: FastifyInstance) {
         // TAG das parcelas (specs/debt-v2); ausente = "Financeiro › Empréstimos".
         categoryId: z.number().int().positive().nullable().optional(),
         paidViaCardId: z.number().int().positive().nullable().optional(),
+        // Dívidas que este acordo renegocia: validadas ANTES de criar, registradas logo depois (uma chamada só).
+        renegotiates: z.array(z.number().int().positive()).max(20).optional(),
       })
       .parse(req.body)
-    const debt = await debtService.createDebt(body)
-    await debtService.materializeDebtInstallments(debt.id)
-    return debt
+    const { renegotiates, ...input } = body
+    return debtService.createDebtWithAgreement(input, renegotiates)
   })
 
   app.patch('/debts/:id', async (req) => {
@@ -501,19 +519,18 @@ export async function insightsRoutes(app: FastifyInstance) {
 
   const healthQuery = z.object({
     period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
-    accountId: z.coerce.number().int().positive().optional(),
   })
 
   app.get('/financial-health/score', async (req) => {
     const query = healthQuery.parse(req.query)
-    return healthService.healthScore(await resolvePeriod(query.period), query.accountId ?? null)
+    return healthService.healthScore(await resolvePeriod(query.period))
   })
 
   app.get('/financial-health/score-history', async (req) => {
     const query = z
-      .object({ months: z.coerce.number().int().min(1).max(36).default(12), accountId: z.coerce.number().int().positive().optional() })
+      .object({ months: z.coerce.number().int().min(1).max(36).default(12) })
       .parse(req.query)
-    return { history: await healthService.healthScoreHistory(query.months, query.accountId ?? null) }
+    return { history: await healthService.healthScoreHistory(query.months) }
   })
 
   app.get('/financial-health/net-worth-history', async (req) => {
@@ -562,7 +579,7 @@ export async function insightsRoutes(app: FastifyInstance) {
 
   app.get('/financial-health/risk-radar', async (req) => {
     const query = healthQuery.parse(req.query)
-    return healthService.riskRadar(await resolvePeriod(query.period), query.accountId ?? null)
+    return healthService.riskRadar(await resolvePeriod(query.period))
   })
 
   /**

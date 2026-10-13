@@ -1111,7 +1111,7 @@ function ReserveCard({ positions }: { positions: Position[] }) {
             </div>
           )}
 
-          <Meter usedBps={data.progressBps} state={meterState} />
+          <Meter label="Progresso da reserva de emergência" usedBps={data.progressBps} state={meterState} />
           {holdings.length > 0 && (
             <p className="chart__note">
               Composta por{' '}
@@ -2256,7 +2256,7 @@ function GoalsEnvironment({
                 </span>
               </div>
               <span className="stat__value kpi__value">{money(data.currentValueCents)}</span>
-              <Meter usedBps={data.progressBps ?? 0} state={data.state} />
+              <Meter label="Progresso da meta" usedBps={data.progressBps ?? 0} state={data.state} />
               <span className="stat__foot" style={{ justifyContent: 'space-between' }}>
                 <span>
                   {data.progressBps === null ? '' : `${bps(data.progressBps, 0)} de `}

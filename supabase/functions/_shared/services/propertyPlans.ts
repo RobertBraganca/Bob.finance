@@ -3,7 +3,8 @@ import { db } from '../db/client.ts'
 import { assets, debts, investmentGoals, propertyPlans } from '../db/schema.ts'
 import { addMonths, todayIso } from '../core/dates.ts'
 import { needAt, projectPlan, type AmortizationSystem, type CostItem, type PlanInputs } from '../core/propertyPlan.ts'
-import { createDebt, debtOverview, materializeDebtInstallments } from './debt.ts'
+import { typicalPersonalIncome } from './budget.ts'
+import { createDebt, materializeDebtInstallments } from './debt.ts'
 import {
   InvestmentRuleError,
   createAsset,
@@ -54,11 +55,13 @@ const notFound = () => new InvestmentRuleError('plano de imóvel não encontrado
 
 /** O que o app já sabe para preencher a calculadora e o plano: reserva, custo de vida e renda típica. */
 export async function planDefaults(): Promise<PlanDefaults> {
-  const [reserve, overview] = await Promise.all([reserveStatus(), debtOverview()])
+  const reserve = await reserveStatus()
+  // A renda típica pessoal do Orçamento (decisions/0045), a mesma da Saúde e do Endividamento.
+  const income = await typicalPersonalIncome()
   return {
     reserve: { currentCents: reserve.currentCents, livingCostCents: reserve.monthlyLivingCostCents, multiple: reserve.multiple },
-    typicalIncomeCents: overview.typicalMonthlyIncomeCents,
-    incomeSampleMonths: overview.incomeSampleMonths,
+    typicalIncomeCents: income.typicalCents,
+    incomeSampleMonths: income.sampleMonths,
   }
 }
 

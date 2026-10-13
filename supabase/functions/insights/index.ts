@@ -1,4 +1,5 @@
 import '@supabase/functions-js/edge-runtime.d.ts'
+import { runInRequestScope } from '../_shared/core/requestCache.ts'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { z, ZodError } from 'zod'
@@ -12,6 +13,7 @@ import * as companyService from '../_shared/services/company.ts'
 import * as cashFlowService from '../_shared/services/cashFlow.ts'
 import * as creditCardsService from '../_shared/services/creditCards.ts'
 import * as criteriaService from '../_shared/services/criteria.ts'
+import { accountScope } from '../_shared/services/withdrawals.ts'
 import * as dailyService from '../_shared/services/daily.ts'
 import * as debtService from '../_shared/services/debt.ts'
 import { ensureMaterialized } from '../_shared/services/materialization.ts'
@@ -48,17 +50,22 @@ const rangeQuery = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   accountId: z.coerce.number().int().positive().optional(),
+  /** "personal": sem conta escolhida, só as contas pessoais (decisions/0045) */
+  scope: z.enum(['personal', 'all']).optional(),
 })
 
 const periodParam = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) })
 const idParam = z.object({ id: z.coerce.number().int().positive() })
 
-async function resolveRange(query: z.infer<typeof rangeQuery>): Promise<analytics.Range> {
-  const bounds = await ledgerBounds()
-  const anchor = query.to ?? bounds.max ?? todayIso()
+async function resolveRange(query: z.infer<typeof rangeQuery>, knownBounds?: Awaited<ReturnType<typeof ledgerBounds>>): Promise<analytics.Range> {
+  // Com `to` informado o recorte não depende do razão: sem a varredura (count/min/max) a cada chamada.
+  const bounds = query.to ? null : (knownBounds ?? (await ledgerBounds()))
+  const anchor = query.to ?? bounds?.max ?? todayIso()
   const to = query.to ?? periodBounds(anchor.slice(0, 7)).end
   const from = query.from ?? periodBounds(addMonths(anchor.slice(0, 7), -5)).start
-  return { from, to, accountId: query.accountId ?? null }
+  // Sem conta escolhida e com escopo pessoal: as contas pessoais (sem a PJ).
+  const accountIds = !query.accountId && query.scope === 'personal' ? (await accountScope()).personal : null
+  return { from, to, accountId: query.accountId ?? null, accountIds }
 }
 
 /** O mês sendo medido, com o mesmo fallback de resolveRange — para o mês mais recente do ledger. */
@@ -113,6 +120,9 @@ const goalIdParam = z.object({ goalId: z.coerce.number().int().positive() })
 
 const app = new Hono().basePath('/insights')
 app.use('*', cors({ origin: '*' }))
+// Um escopo de cache por requisição (core/requestCache): as telas leem as mesmas
+// funções caras várias vezes, e aqui cada uma roda uma vez por requisição.
+app.use('*', (_c, next) => runInRequestScope(next))
 app.use('*', requireAdmin)
 
 app.onError((error, c) => {
@@ -154,7 +164,7 @@ app.get('/meta', async (c) => {
   return c.json({
     ledger: bounds,
     today: todayIso(),
-    defaultRange: await resolveRange({}),
+    defaultRange: await resolveRange({}, bounds),
     accounts: await analytics.accountBalances(),
     hasData: bounds.count > 0,
   })
@@ -191,6 +201,11 @@ app.get('/analytics/dre/formal', async (c) => {
   return c.json(await dreService.formalDre(range))
 })
 
+/** As quatro quebras por TAG da tela Categorias, sem o resto do /dashboard. */
+app.get('/analytics/category-spending', async (c) => {
+  return c.json(await analytics.categorySpending(await resolveRange(rangeQuery.parse(c.req.query()))))
+})
+
 app.get('/analytics/categories', async (c) => {
   const query = rangeQuery
     .extend({
@@ -208,6 +223,13 @@ app.get('/analytics/categories', async (c) => {
 /* ---------------------------------------------------------------- *
  * Daily tracker
  * ---------------------------------------------------------------- */
+/** Gasto por dia do mês para o mapa de calor e o Ritmo da Visão geral: leve, com filtro de conta e escopo. */
+app.get('/analytics/daily-series', async (c) => {
+  const query = rangeQuery.extend({ period: z.string().regex(/^\d{4}-\d{2}$/) }).parse(c.req.query())
+  const range = await resolveRange({ ...query, from: periodBounds(query.period).start, to: periodBounds(query.period).end })
+  return c.json({ period: query.period, days: await analytics.dailySeries(range) })
+})
+
 app.get('/analytics/daily', async (c) => {
   const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(c.req.query())
   // Diário pessoal (specs/personal-picture): próximos dias, saldo projetado, gasto contra o Orçamento.
@@ -292,9 +314,8 @@ app.get('/home/banners', async (c) => c.json({ banners: await goalsService.homeB
  * Debt
  * ---------------------------------------------------------------- */
 app.get('/debts', async (c) => {
-  const query = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(c.req.query())
   const [overview, trend, closedDebts] = await Promise.all([
-    debtService.debtOverview(query),
+    debtService.debtOverview(),
     debtService.debtTrend(),
     debtService.listClosedDebts(),
   ])
@@ -320,11 +341,12 @@ app.post('/debts', async (c) => {
       // TAG das parcelas (specs/debt-v2); ausente = "Financeiro › Empréstimos".
       categoryId: z.number().int().positive().nullable().optional(),
       paidViaCardId: z.number().int().positive().nullable().optional(),
+      // Dívidas que este acordo renegocia: validadas ANTES de criar, registradas logo depois (uma chamada só).
+      renegotiates: z.array(z.number().int().positive()).max(20).optional(),
     })
     .parse(await c.req.json())
-  const debt = await debtService.createDebt(body)
-  await debtService.materializeDebtInstallments(debt.id)
-  return c.json(debt)
+  const { renegotiates, ...input } = body
+  return c.json(await debtService.createDebtWithAgreement(input, renegotiates))
 })
 
 app.patch('/debts/:id', async (c) => {
@@ -496,19 +518,18 @@ app.get('/credit-cards/:id/invoices', async (c) => {
  * ---------------------------------------------------------------- */
 const healthQuery = z.object({
   period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
-  accountId: z.coerce.number().int().positive().optional(),
 })
 
 app.get('/financial-health/score', async (c) => {
   const query = healthQuery.parse(c.req.query())
-  return c.json(await healthService.healthScore(await resolvePeriod(query.period), query.accountId ?? null))
+  return c.json(await healthService.healthScore(await resolvePeriod(query.period)))
 })
 
 app.get('/financial-health/score-history', async (c) => {
   const query = z
-    .object({ months: z.coerce.number().int().min(1).max(36).default(12), accountId: z.coerce.number().int().positive().optional() })
+    .object({ months: z.coerce.number().int().min(1).max(36).default(12) })
     .parse(c.req.query())
-  return c.json({ history: await healthService.healthScoreHistory(query.months, query.accountId ?? null) })
+  return c.json({ history: await healthService.healthScoreHistory(query.months) })
 })
 
 app.get('/financial-health/net-worth-history', async (c) => {
@@ -545,7 +566,7 @@ app.get('/financial-health/net-worth', async (c) => {
 
 app.get('/financial-health/risk-radar', async (c) => {
   const query = healthQuery.parse(c.req.query())
-  return c.json(await healthService.riskRadar(await resolvePeriod(query.period), query.accountId ?? null))
+  return c.json(await healthService.riskRadar(await resolvePeriod(query.period)))
 })
 
 app.get('/financial-health/settings', async (c) =>
@@ -1287,7 +1308,6 @@ app.post('/simulate/one-time-expense', async (c) => {
     .object({
       amountCents: z.number().int().positive(),
       source: simulatorSourceSchema,
-      accountId: z.number().int().positive().nullable().optional(),
       period: simulatorPeriodSchema,
     })
     .parse(await c.req.json())

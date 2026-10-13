@@ -412,15 +412,18 @@ export function Meter({
   usedBps,
   paceBps,
   state,
+  label,
 }: {
   usedBps: number
   paceBps?: number | null
   state: MeterState
+  /** nome para leitor de tela (o que a barra mede) */
+  label: string
 }) {
   const width = Math.max(0, Math.min(100, usedBps / 100))
   return (
     // Leitor de tela: o valor vem junto, não só a cor (revisão de 09/10/2026).
-    <div className="meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(usedBps / 100)}>
+    <div className="meter" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(width)}>
       <div className="meter__track">
         {/* Recorte, não largura: animar `width` refaz o layout a cada quadro. */}
         <div

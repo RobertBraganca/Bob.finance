@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/
 import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
 import { InvoiceHistoryChart, type InvoiceHistoryPoint } from '../components/charts/InvoiceHistoryChart'
+import { todayIso } from '../lib/period'
 
 export type CardRow = {
   id: number
@@ -475,7 +476,7 @@ function CardModal({ card, onClose }: { card: CardRow | null; onClose: () => voi
 function SnapshotModal({ card, onClose }: { card: CardRow; onClose: () => void }) {
   const toast = useToast()
   const queryClient = useQueryClient()
-  const [asOf, setAsOf] = useState(() => new Date().toISOString().slice(0, 10))
+  const [asOf, setAsOf] = useState(() => todayIso())
   const [available, setAvailable] = useState(centsToInput(card.availableLimitCents))
 
   const asOfFieldId = useId()
@@ -529,7 +530,7 @@ function SnapshotModal({ card, onClose }: { card: CardRow; onClose: () => void }
               {(usedBpsPreview / 100).toFixed(0)}% usado · {money(usedPreview)} de {money(card.creditLimitCents)}
             </span>
           </div>
-          <Meter usedBps={usedBpsPreview} state={capUsageState(usedBpsPreview)} />
+          <Meter label="Uso do limite do cartão" usedBps={usedBpsPreview} state={capUsageState(usedBpsPreview)} />
         </div>
         <DialogFooter>
           <Button variant="quiet" onClick={onClose}>

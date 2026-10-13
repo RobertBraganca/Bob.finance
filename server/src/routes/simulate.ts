@@ -17,7 +17,6 @@ export async function simulateRoutes(app: FastifyInstance) {
       .object({
         amountCents: z.number().int().positive(),
         source: sourceSchema,
-        accountId: z.number().int().positive().nullable().optional(),
         period: periodSchema,
       })
       .parse(req.body)

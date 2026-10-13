@@ -2,7 +2,7 @@ import { useId, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { useAccounts, useMeta } from '../lib/store'
-import { currentPeriod, periodBounds } from '../lib/period'
+import { currentPeriod, periodBounds, todayIso } from '../lib/period'
 import {
   bps,
   centsToInput,
@@ -390,7 +390,7 @@ function PlatformLine({
 
       {/* Sem mínimo não existe progresso a desenhar: uma barra cheia ou
           vazia aqui afirmaria um alvo que ninguém configurou. */}
-      {hasMinimum && <Meter usedBps={platform.progressBps ?? 0} state={state} />}
+      {hasMinimum && <Meter label="Progresso até o mínimo" usedBps={platform.progressBps ?? 0} state={state} />}
 
       <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
         {hasMinimum
@@ -523,7 +523,7 @@ function PlatformModal({ platform, onClose }: { platform?: PlatformRow; onClose:
 function CommissionModal({ platform, onClose }: { platform: PlatformRow; onClose: () => void }) {
   const toast = useToast()
   const queryClient = useQueryClient()
-  const [earnedOn, setEarnedOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const [earnedOn, setEarnedOn] = useState(() => todayIso())
   const [amount, setAmount] = useState('')
   const [notes, setNotes] = useState('')
   const earnedOnFieldId = useId()
@@ -595,7 +595,7 @@ function WithdrawModal({ platform, onClose }: { platform: PlatformRow; onClose: 
   const queryClient = useQueryClient()
   const accounts = useAccounts()
   const [accountId, setAccountId] = useState<number | null>(null)
-  const [postedOn, setPostedOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const [postedOn, setPostedOn] = useState(() => todayIso())
   const [amount, setAmount] = useState(() => centsToInput(platform.balanceCents))
   const [notes, setNotes] = useState('')
   const accountFieldId = useId()

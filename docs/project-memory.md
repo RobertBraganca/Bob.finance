@@ -1520,3 +1520,32 @@ enxugar telas repetidas, textos técnicos e menu.
 - Motor: Custos PJ da Minha empresa subiu o ponto de equilíbrio da
   Precificação em R$ 163,07.
 - Publicar `ledger`, `insights` e `pricing` (o Motor está no `_shared`).
+
+## 09/10/2026 — Visão geral pessoal (decisions/0045)
+
+- Revisão beta da Visão geral: topo com receita/despesa de todas as contas,
+  teto e meta das Metas do mês, saldo com a PJ, variação contra a janela
+  errada e a tela parada em "janeiro de 2026" quando /meta falhava (data fixa
+  em `lib/store.tsx`).
+- Agora: escopo pessoal (`scope=personal` em `/dashboard`, `/analytics/monthly`
+  e `/analytics/daily-series`), retiradas da PJ como renda, teto e renda típica
+  do Orçamento, linha da empresa, pendências pessoal + empresa, cards
+  repetidos viram links, sino pela mesma projeção do Diário
+  (`daily.spendProjection`).
+- Em aberto: teto por categoria do sino ainda das Metas do mês.
+- Publicar `insights` (e `ledger`/`pricing` se ainda não publicados).
+
+## 12/10/2026 — Rodada de revisão (banco + code smell)
+
+- Cache por requisição (`core/requestCache.ts`, AsyncLocalStorage) em
+  `accountBalances`, `accountScope`, `companyOverview`, `debtOverviewV2`,
+  `debtSchedule`, `positions`, `reserveStatus`; `contributeToReserve` limpa o
+  cache. Serviços em sequência (sem Promise.all) por causa do pooler da Edge.
+- Histórico da Saúde/Patrimônio e Motor em lote (5,3→1,6 s, 3,7→1,3 s,
+  15,4→2,2 s) com números idênticos. `todayIso` agora em America/Sao_Paulo.
+- Renegociação: `createDebtWithAgreement` (valida antes, desfaz se falhar), 409 em
+  corrida; apagar o acordo reabre as dívidas de origem (`deleteDebt` transacional).
+- Migração aplicada: `20261012120000_db_indexes` (5 índices parciais/FK; 2
+  duplicados removidos). Sem mudança de dados.
+- Fluxograma de rotas: `docs/fluxograma-rotas.html`.
+- Publicar `ledger`, `insights` e `pricing`.

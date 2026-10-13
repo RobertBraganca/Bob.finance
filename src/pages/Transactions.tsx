@@ -30,6 +30,7 @@ import {
 import { PageHeader, RangeFilter } from '../components/shell/Shell'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { TransactionForm, type TransactionFormValue } from '../components/forms/TransactionForm'
+import { todayIso } from '../lib/period'
 
 /**
  * Substitui os antigos checkboxes "Entradas e saídas / Só entradas / Só
@@ -1007,7 +1008,7 @@ function InstallmentsPanel({
                       <DeleteInstallmentButton installmentId={row.id} description={row.description} />
                     </span>
                   </div>
-                  <Meter usedBps={progressBps} state={targetProgressState(progressBps)} />
+                  <Meter label={`Progresso de ${row.description}`} usedBps={progressBps} state={targetProgressState(progressBps)} />
                   <div className="kv">
                     <span className="kv__k">Total</span>
                     <span className="kv__v">{money(row.totalCents)}</span>
@@ -1098,7 +1099,7 @@ function InstallmentModal({ installment, onClose }: { installment: InstallmentRo
   )
   const [installmentsRealized, setInstallmentsRealized] = useState('0')
   const [paymentDate, setPaymentDate] = useState(() => {
-    if (!installment) return new Date().toISOString().slice(0, 10)
+    if (!installment) return todayIso()
     return `${installment.startPeriod}-${String(installment.dueDay).padStart(2, '0')}`
   })
   const [dueDay, setDueDay] = useState(String(installment?.dueDay ?? 10))
@@ -1290,7 +1291,7 @@ function PeriodFlowCard({
           </span>
         </div>
         <span className="stat__value">{money(confirmedCents)}</span>
-        <Meter usedBps={confirmedBps} state="no_target" />
+        <Meter label="Lançamentos confirmados" usedBps={confirmedBps} state="no_target" />
         <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
           {pendingCents > 0 ? `${money(pendingCents)} ${pendingWord}` : `nada ${pendingWord} no período`}
         </span>
@@ -1454,7 +1455,7 @@ function NewTransactionModal({ onClose }: { onClose: () => void }) {
 
   const [value, setValue] = useState<TransactionFormValue>({
     description: '',
-    postedOn: new Date().toISOString().slice(0, 10),
+    postedOn: todayIso(),
     direction: 'out',
     amount: '',
     accountId: null,
