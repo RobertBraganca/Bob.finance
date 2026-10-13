@@ -4,9 +4,9 @@ import { financialEngineSettings } from '../db/schema.ts'
 import { addMonths, periodBounds, periodRange, todayIso } from '../core/dates.ts'
 import { accountBalances, monthlyTotals, totals } from './analytics.ts'
 import { listPending } from './cashFlow.ts'
-import { companyOverview } from './company.ts'
+import { companyOverview, logCompanyFailure } from './company.ts'
 import { listCards } from './creditCards.ts'
-import { debtOverview } from './debt.ts'
+import { debtSchedule } from './debt.ts'
 import { targetState, type GoalState } from './goals.ts'
 import { listGoals, reserveStatus } from './investments.ts'
 import { accountFlows } from './transfers.ts'
@@ -216,41 +216,102 @@ export type AvailableForAllocation = {
 /** Ajuste hipotético do simulador. Ausente em toda chamada de produção. */
 export type AvailableOverrides = { consolidatedBalanceDeltaCents?: number }
 
+/**
+ * O que não muda de um mês para o outro: saldos, cartões, reserva, metas,
+ * configurações e a parcela programada. O histórico de 24 meses carrega isto
+ * uma vez (antes eram ~38 consultas por mês, 914 no total).
+ */
+export type AvailabilityShared = {
+  balances: Awaited<ReturnType<typeof accountBalances>>
+  cards: Awaited<ReturnType<typeof listCards>>
+  reserve: Awaited<ReturnType<typeof reserveStatus>>
+  investmentGoals: Awaited<ReturnType<typeof listGoals>>
+  debt: Awaited<ReturnType<typeof debtSchedule>>
+  settings: Awaited<ReturnType<typeof getSettings>>
+  /** só no histórico: pendências e realizado dos meses já lidos de uma vez */
+  history?: {
+    pendingAll: Array<{ postedOn: string; amountCents: number }>
+    realized: Map<string, { reserve: number; investment: number; debt: number }>
+  }
+}
+
+/**
+ * Realizado de vários meses em três consultas agrupadas por mês (o histórico
+ * de 24 meses fazia 3 por mês) e as pendências até o último mês numa leitura.
+ */
+async function historyInputs(first: string, last: string, opts: { withPending?: boolean } = {}): Promise<NonNullable<AvailabilityShared['history']>> {
+  const from = periodBounds(first).start
+  const to = periodBounds(last).end
+  const realized = new Map<string, { reserve: number; investment: number; debt: number }>()
+  const slot = (period: string) => {
+    let r = realized.get(period)
+    if (!r) realized.set(period, (r = { reserve: 0, investment: 0, debt: 0 }))
+    return r
+  }
+  const trades = await db.execute<{ period: string; reserve: number; investment: number }>(sql`
+    select substr(t.traded_on, 1, 7) as period,
+      coalesce(sum(case when a.counts_toward_reserve then round(t.quantity * t.unit_price_cents) else 0 end), 0) as reserve,
+      coalesce(sum(case when not a.counts_toward_reserve then round(t.quantity * t.unit_price_cents) + t.fees_cents else 0 end), 0) as investment
+    from asset_trades t
+    join assets a on a.id = t.asset_id
+    where t.kind = 'buy' and t.traded_on between ${from} and ${to}
+    group by 1`)
+  for (const r of trades) {
+    slot(r.period).reserve = Number(r.reserve)
+    slot(r.period).investment = Number(r.investment)
+  }
+  const payments = await db.execute<{ period: string; total: number }>(sql`
+    select substr(paid_on, 1, 7) as period, coalesce(sum(amount_cents), 0) as total
+    from debt_payments
+    where kind = 'payment' and paid_on between ${from} and ${to}
+    group by 1`)
+  for (const r of payments) slot(r.period).debt = Number(r.total)
+  const pendingAll = opts.withPending !== false ? (await listPending('expense', { from, to })).map((p) => ({ postedOn: p.postedOn, amountCents: p.amountCents })) : []
+  return { pendingAll, realized }
+}
+
+// Em sequência, não Promise.all: o pooler de transação das Edge Functions trava com
+// fan-out concorrente demais numa conexão (mesmo achado de goals.ts#goalHistory).
+export async function availabilityShared(): Promise<AvailabilityShared> {
+  const balances = await accountBalances()
+  const cards = await listCards()
+  const reserve = await reserveStatus()
+  // `listGoals` já devolve só as ativas.
+  const investmentGoals = await listGoals()
+  const debt = await debtSchedule()
+  const settings = await getSettings()
+  return { balances, cards, reserve, investmentGoals, debt, settings }
+}
+
 export async function availableForAllocation(
   period: string,
   overrides: AvailableOverrides = {},
+  shared?: AvailabilityShared,
 ): Promise<AvailableForAllocation> {
   const { start, end } = periodBounds(period)
 
   const balanceDeltaCents = overrides.consolidatedBalanceDeltaCents ?? 0
-  // Sequencial, não Promise.all: sob o pooler de transação desta Edge
-  // Function, fan-out concorrente demais numa mesma conexão trava a
-  // requisição para sempre (sem erro nenhum) em vez de só ficar lenta —
-  // mesmo achado e mesmo fix de goals.ts#goalHistory. `debtOverview` sozinho
-  // já faz seu próprio fan-out por dívida, então rodar as outras 8 chamadas
-  // ao mesmo tempo empilhava concorrência suficiente para travar.
-  const balances = await accountBalances()
+  const { balances, cards, reserve, investmentGoals, debt, settings } = shared ?? (await availabilityShared())
   // Pending expenses, bounded by the period's end. `listPending` deliberately
   // keeps overdue rows in the list (see specs/cash-flow-reconciliation), and
   // that is the right behaviour here too: something still owed from last
   // month is still money that is not free.
-  const pending = await listPending('expense', { from: start, to: end })
-  const cards = await listCards()
-  const reserve = await reserveStatus()
-  const reserveRealizedCents = await reserveContributedCents(start, end)
-  const investmentRealizedCents = await investmentContributedCents(start, end)
-  const debtRealizedCents = await debtPaidCents(start, end)
-  // `listGoals` already returns only the active ones.
-  const investmentGoals = await listGoals()
-  const debt = await debtOverview({ period })
-  const settings = await getSettings()
+  const pre = shared?.history
+  const pending = pre ? pre.pendingAll.filter((p) => p.postedOn <= end) : await listPending('expense', { from: start, to: end })
+  const done = pre?.realized.get(period)
+  const reserveRealizedCents = pre ? (done?.reserve ?? 0) : await reserveContributedCents(start, end)
+  const investmentRealizedCents = pre ? (done?.investment ?? 0) : await investmentContributedCents(start, end)
+  const debtRealizedCents = pre ? (done?.debt ?? 0) : await debtPaidCents(start, end)
 
   // O delta entra ANTES das subtrações, porque o que a hipótese muda é
   // quanto existe em conta, não quanto está comprometido.
   const consolidatedBalanceCents = balances.reduce((sum, a) => sum + a.balanceCents, 0) + balanceDeltaCents
 
   const futureCommitmentsCents = pending.reduce((sum, p) => sum + Math.abs(p.amountCents), 0)
-  const provisionedCardBillCents = cards.reduce((sum, c) => sum + c.usedCents, 0)
+  // Fatura aberta de cada cartão (Open Finance), não o limite usado inteiro: as
+  // parcelas dos meses seguintes não saem deste mês (revisão de 10/10/2026).
+  // Cartão medido à mão não tem fatura: vale o limite usado, por prudência.
+  const provisionedCardBillCents = cards.reduce((sum, c) => sum + (c.openBillCents ?? c.usedCents), 0)
   const alreadyAllocatedCents = reserveRealizedCents + investmentRealizedCents + debtRealizedCents
 
   const availableCents =
@@ -326,7 +387,7 @@ export async function availableForAllocation(
       differenceCents: null,
       state: 'no_target',
       assumptions: {
-        formula: 'o que resta depois de compromissos, limite de cartão comprometido e metas; por definição não tem meta configurada',
+        formula: 'o que resta depois de compromissos, faturas abertas dos cartões e metas; por definição não tem meta configurada',
         valorDisponivelCents: availableCents,
         origem: 'este cálculo',
       },
@@ -349,7 +410,7 @@ export async function availableForAllocation(
     destinations,
     assumptions: {
       formula:
-        'saldo consolidado, menos compromissos futuros confirmados, menos limite de cartão comprometido, menos o valor já destinado a metas no período',
+        'saldo consolidado, menos compromissos futuros confirmados, menos as faturas abertas dos cartões, menos o valor já destinado a metas no período',
       periodo: period,
       intervalo: { from: start, to: end },
       saldoConsolidadoCents: consolidatedBalanceCents,
@@ -358,7 +419,7 @@ export async function availableForAllocation(
       compromissosFuturosCount: pending.length,
       compromissosFuturosOrigem: 'specs/cash-flow-reconciliation (transactions pendentes)',
       limiteCartaoComprometidoCents: provisionedCardBillCents,
-      limiteCartaoOrigem: 'soma do limite usado de todos os cartões ativos; inclui parcelamento em andamento e saldo revolvente, não separável do que vence neste ciclo sem o gasto por lançamento de cartão, que este app não rastreia separado da conta vinculada',
+      limiteCartaoOrigem: 'fatura aberta de cada cartão ligado ao Open Finance (o que vence neste ciclo); cartão medido à mão entra pelo limite usado, por não ter fatura',
       jaDestinadoAMetasCents: alreadyAllocatedCents,
       jaDestinadoDetalhe: {
         reservaCents: reserveRealizedCents,
@@ -391,8 +452,8 @@ export type YearlyDestinations = {
  * Item pedido em 07/09/2026: "Modo mês" (specs/dashboard) vira "Modo ano"
  * quando o seletor de período do Painel está em "Máximo" — Investimento e
  * Dívida somam o realizado/meta de cada mês já decorrido do ano (mesmas
- * três fontes de `availableForAllocation`, mês a mês), igual `goalHistory`
- * já faz pra Metas.
+ * três fontes de `availableForAllocation`, só que por `Promise.all` mês a
+ * mês em vez de uma chamada só), igual `goalHistory` já faz pra Metas.
  *
  * Reserva é diferente dos outros dois: `reserve.gapCents` é o que FALTA
  * pra completar a reserva HOJE, não uma meta mensal recorrente — não dá
@@ -408,27 +469,18 @@ export async function yearlyDestinationsProgress(year: string): Promise<YearlyDe
   const periods = Array.from({ length: monthsElapsed }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`)
   const isCurrent = year === currentYear
 
-  // Sequencial de propósito, mês a mês e consulta a consulta — mesmo
-  // achado que já forçou `goalHistory` (services/goals.ts) a virar
-  // sequencial nesta árvore: cada iteração já soma 4 queries, e um ano
-  // inteiro (12 meses) em paralelo empilha o suficiente pro pooler de
-  // transação desta Edge Function travar sem erro (nunca reproduzido no
-  // server Node/pooler de sessão, onde este mesmo arquivo usa Promise.all).
-  const perMonth: Array<{ investedCents: number; reserveCents: number; debtPaid: number; scheduledCents: number }> = []
-  for (const period of periods) {
-    const { start, end } = periodBounds(period)
-    const investedCents = await investmentContributedCents(start, end)
-    const reserveCents = await reserveContributedCents(start, end)
-    const debtPaid = await debtPaidCents(start, end)
-    const debt = await debtOverview({ period })
-    perMonth.push({ investedCents, reserveCents, debtPaid, scheduledCents: debt.scheduledCents })
-  }
-
-  const [investmentGoals, reserve, settings] = await Promise.all([
-    listGoals(),
-    reserveStatus(),
-    getSettings(),
-  ])
+  // A parcela programada é a mesma em todos os meses: lida uma vez, em sequência
+  // (pooler das Edge Functions), em vez de uma leitura por mês.
+  const { scheduledCents } = await debtSchedule()
+  // O realizado dos 12 meses vem agrupado em 3 consultas (`historyInputs`), não 3 por mês.
+  const realized = periods.length > 0 ? (await historyInputs(periods[0]!, periods[periods.length - 1]!, { withPending: false })).realized : new Map<string, { reserve: number; investment: number; debt: number }>()
+  const perMonth = periods.map((period) => {
+    const r = realized.get(period)
+    return { investedCents: r?.investment ?? 0, reserveCents: r?.reserve ?? 0, debtPaid: r?.debt ?? 0, scheduledCents }
+  })
+  const investmentGoals = await listGoals()
+  const reserve = await reserveStatus()
+  const settings = await getSettings()
 
   const investmentRealizedCents = perMonth.reduce((sum, m) => sum + m.investedCents, 0)
   const reserveRealizedCents = perMonth.reduce((sum, m) => sum + m.reserveCents, 0)
@@ -485,8 +537,9 @@ export async function financialEngineRecords(months = 24): Promise<FinancialEngi
   const periods = periodRange(addMonths(currentPeriod, -(months - 1)), currentPeriod)
 
   let highestAvailable: { periodo: string; valorCents: number } | null = null
+  const shared = { ...(await availabilityShared()), history: await historyInputs(periods[0]!, periods[periods.length - 1]!) }
   for (const period of periods) {
-    const { availableCents } = await availableForAllocation(period)
+    const { availableCents } = await availableForAllocation(period, {}, shared)
     if (highestAvailable === null || availableCents > highestAvailable.valorCents) {
       highestAvailable = { periodo: period, valorCents: availableCents }
     }
@@ -626,7 +679,8 @@ export async function breakEven(
   let companyFixedCents: number | null = null
   try {
     companyFixedCents = (await companyOverview(period)).withdrawable?.fixedMonthlyCents ?? null
-  } catch {
+  } catch (error) {
+    logCompanyFailure('financialEngine', error)
     companyFixedCents = null
   }
   const investmentGoalsTargetCents = investmentGoals.reduce((sum, g) => sum + g.monthlyContributionCents, 0)

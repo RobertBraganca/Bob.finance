@@ -266,7 +266,7 @@ function CategorySpendingView() {
 
   const spending = useQuery({
     queryKey: ['category-spending', from, to],
-    queryFn: () => api.get<CategorySpendingResponse>('/dashboard', { from, to }),
+    queryFn: () => api.get<CategorySpendingResponse>('/analytics/category-spending', { from, to }),
     placeholderData: (previous) => previous,
   })
 

@@ -143,7 +143,7 @@ function TodayCoverage({ inputs }: { inputs: PlanInputs }) {
                   {row.needCents === 0 ? 'nada a cobrir' : `${money(row.coveredCents)} de ${money(row.needCents)}`}
                 </span>
               </div>
-              <Meter usedBps={progressBps} state={progressBps >= 10_000 ? 'met' : 'no_target'} />
+              <Meter label="Progresso da entrada" usedBps={progressBps} state={progressBps >= 10_000 ? 'met' : 'no_target'} />
             </div>
           )
         })}

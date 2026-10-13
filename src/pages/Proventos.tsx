@@ -193,7 +193,7 @@ export function ProventosTab({ positions, classes }: { positions: Position[]; cl
               {data.monthlyTargetCents === null ? 'Sem meta' : `${money(data.monthlyTargetCents)}/mês`}
             </span>
             {data.monthlyTargetCents !== null && (
-              <Meter usedBps={data.progressBps ?? 0} state={targetProgressState(data.progressBps)} />
+              <Meter label="Progresso da meta de proventos" usedBps={data.progressBps ?? 0} state={targetProgressState(data.progressBps)} />
             )}
             <span className="stat__foot">
               {data.monthlyTargetCents !== null && <span>{bps(data.progressBps ?? 0, 1)} alcançado</span>}

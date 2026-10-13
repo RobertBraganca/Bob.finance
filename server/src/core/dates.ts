@@ -68,9 +68,12 @@ const pad4 = (n: number) => String(n).padStart(4, '0')
 /** "2026-06-14" -> "2026-06" */
 export const periodOf = (iso: string) => iso.slice(0, 7)
 
+/** Data de São Paulo de um instante: a Edge Function roda em UTC e às 22h de Brasília já seria o dia seguinte. */
+const saoPauloFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' })
+export const saoPauloDate = (instant: string | Date): string => saoPauloFormat.format(new Date(instant))
+
 export function todayIso(): string {
-  const d = new Date()
-  return `${pad4(d.getFullYear())}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+  return saoPauloDate(new Date())
 }
 
 /** Inclusive first/last ISO day of a `YYYY-MM` period. */

@@ -1,7 +1,8 @@
 import { sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
 import { accounts, financialEngineSettings } from '../db/schema.ts'
-import { periodBounds } from '../core/dates.ts'
+import { addDays, periodBounds } from '../core/dates.ts'
+import { memoPerRequest } from '../core/requestCache.ts'
 
 /**
  * Repasse entre a conta PJ e as contas pessoais (specs/company-mei,
@@ -17,7 +18,11 @@ import { periodBounds } from '../core/dates.ts'
 export type AccountScope = { personal: number[]; pjAccountId: number | null }
 
 /** Contas pessoais: todas menos a conta PJ configurada no Motor financeiro. */
-export async function accountScope(): Promise<AccountScope> {
+export function accountScope(): Promise<AccountScope> {
+  return memoPerRequest('accountScope', computeAccountScope)
+}
+
+async function computeAccountScope(): Promise<AccountScope> {
   const [settings, rows] = await Promise.all([
     db.select({ pj: financialEngineSettings.pjAccountId }).from(financialEngineSettings).limit(1),
     db.select({ id: accounts.id }).from(accounts),
@@ -30,11 +35,22 @@ export const idList = (ids: number[]) => (ids.length ? sql.join(ids.map((id) => 
 
 export type MonthlyTransfers = Map<string, { toPersonalCents: number; fromPersonalCents: number }>
 
-export async function pjWithdrawals(fromPeriod: string, toPeriod: string, scope: AccountScope): Promise<MonthlyTransfers> {
+export async function pjWithdrawals(
+  fromPeriod: string,
+  toPeriod: string,
+  scope: AccountScope,
+  /** recorta por dia dentro dos meses (mês corrente até hoje, intervalo personalizado) */
+  bounds?: { from: string; to: string },
+  /** analytics: positivo sem TAG já conta como receita pelo sinal; incluir aqui seria contar duas vezes */
+  tagged = false,
+): Promise<MonthlyTransfers> {
   const out: MonthlyTransfers = new Map()
   if (scope.pjAccountId === null || scope.personal.length === 0) return out
-  const from = periodBounds(fromPeriod).start
-  const to = periodBounds(toPeriod).end
+  const from = bounds && bounds.from > periodBounds(fromPeriod).start ? bounds.from : periodBounds(fromPeriod).start
+  const to = bounds && bounds.to < periodBounds(toPeriod).end ? bounds.to : periodBounds(toPeriod).end
+  // A outra perna pode cair um dia fora do recorte: a busca dela olha um dia para cada lado.
+  const legFrom = addDays(from, -1)
+  const legTo = addDays(to, 1)
   const slot = (period: string) => {
     let s = out.get(period)
     if (!s) out.set(period, (s = { toPersonalCents: 0, fromPersonalCents: 0 }))
@@ -48,12 +64,14 @@ export async function pjWithdrawals(fromPeriod: string, toPeriod: string, scope:
       left join categories c on c.id = t.category_id
       where t.amount_cents > 0 and t.pending = false and t.ignored = false
         and coalesce(c.kind::text, '') <> 'income'
+        ${tagged ? sql`and c.id is not null` : sql``}
         and t.account_id in (${idList(scope.personal)})
         and t.posted_on between ${from} and ${to}
         and exists (
           select 1 from transactions o
           where o.account_id = ${scope.pjAccountId} and o.amount_cents = -t.amount_cents
             and o.pending = false and o.ignored = false
+            and o.posted_on between ${legFrom} and ${legTo}
             and abs(o.posted_on::date - t.posted_on::date) <= 1
         )
       group by 1`),
@@ -63,12 +81,14 @@ export async function pjWithdrawals(fromPeriod: string, toPeriod: string, scope:
       left join categories c on c.id = t.category_id
       where t.amount_cents > 0 and t.pending = false and t.ignored = false
         and coalesce(c.kind::text, '') <> 'income'
+        ${tagged ? sql`and c.id is not null` : sql``}
         and t.account_id = ${scope.pjAccountId}
         and t.posted_on between ${from} and ${to}
         and exists (
           select 1 from transactions o
           where o.account_id in (${idList(scope.personal)}) and o.amount_cents = -t.amount_cents
             and o.pending = false and o.ignored = false
+            and o.posted_on between ${legFrom} and ${legTo}
             and abs(o.posted_on::date - t.posted_on::date) <= 1
         )
       group by 1`),

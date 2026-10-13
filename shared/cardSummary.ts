@@ -8,6 +8,8 @@
  * juros) e negativo é crédito (estorno, pagamento).
  */
 
+import { addPeriod } from './debt'
+
 export type CardTxn = {
   /** data de lançamento (YYYY-MM-DD) */
   date: string
@@ -33,11 +35,7 @@ export type CardMonth = {
 /** Ciclo de fatura: lançamentos até `closing` (inclusive) caem na fatura do mês `period`. */
 export type BillCycle = { closing: string; period: string }
 
-const addMonths = (period: string, n: number) => {
-  const [y, m] = period.split('-').map(Number) as [number, number]
-  const total = y * 12 + (m - 1) + n
-  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`
-}
+const addMonths = addPeriod
 
 /**
  * Mês da fatura pelo fechamento real das faturas (e do ciclo aberto). O
@@ -45,7 +43,7 @@ const addMonths = (period: string, n: number) => {
  * de uma fatura já paga vieram marcadas para a fatura seguinte. Sem ciclo
  * que cubra a data, cai em `billPeriodOf`.
  */
-export function cyclePeriodOf(t: Pick<CardTxn, 'date' | 'billForecastDate'>, cycles: BillCycle[]): string {
+function cyclePeriodOf(t: Pick<CardTxn, 'date' | 'billForecastDate'>, cycles: BillCycle[]): string {
   const i = cycles.findIndex((c) => t.date <= c.closing)
   if (i > 0) return cycles[i]!.period
   const first = cycles[0]
@@ -55,10 +53,14 @@ export function cyclePeriodOf(t: Pick<CardTxn, 'date' | 'billForecastDate'>, cyc
   return billPeriodOf(t)
 }
 
+/** Data deslocada em meses, com o dia preso ao fim do mês (31/03 − 1 mês = 28/02, nunca 03/03). */
 const shiftDate = (isoDate: string, months: number) => {
-  const d = new Date(`${isoDate}T12:00:00Z`)
-  d.setUTCMonth(d.getUTCMonth() + months)
-  return d.toISOString().slice(0, 10)
+  const [y, m, d] = isoDate.split('-').map(Number) as [number, number, number]
+  const total = y * 12 + (m - 1) + months
+  const year = Math.floor(total / 12)
+  const month = (total % 12) + 1
+  const day = Math.min(d, new Date(Date.UTC(year, month, 0)).getUTCDate())
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
 /**
@@ -66,7 +68,7 @@ const shiftDate = (isoDate: string, months: number) => {
  * anterior ao mês do lançamento (alguns bancos mandam ali o mês da compra
  * original de uma parcela); senão o mês do próprio lançamento.
  */
-export function billPeriodOf(t: Pick<CardTxn, 'date' | 'billForecastDate'>): string {
+function billPeriodOf(t: Pick<CardTxn, 'date' | 'billForecastDate'>): string {
   const posted = t.date.slice(0, 7)
   const forecast = t.billForecastDate && /^\d{4}-\d{2}/.test(t.billForecastDate) ? t.billForecastDate.slice(0, 7) : null
   return forecast && forecast >= posted ? forecast : posted
@@ -75,7 +77,7 @@ export function billPeriodOf(t: Pick<CardTxn, 'date' | 'billForecastDate'>): str
 const CHARGE = /juros|iof|multa|encargo|tarifa|anuidade/i
 
 /** Encargo do cartão (juros, IOF, multa...); estornos entram com o sinal deles e abatem. */
-export const isCharge = (t: Pick<CardTxn, 'description' | 'feeInfo'>) => CHARGE.test(t.description) || CHARGE.test(t.feeInfo ?? '')
+const isCharge = (t: Pick<CardTxn, 'description' | 'feeInfo'>) => CHARGE.test(t.description) || CHARGE.test(t.feeInfo ?? '')
 
 const PAYMENT = /pagamento (recebido|de fatura)|pgto fatura/i
 
@@ -83,7 +85,7 @@ const PAYMENT = /pagamento (recebido|de fatura)|pgto fatura/i
  * Pagamento da fatura anterior: não é compra nem crédito desta fatura, e
  * somar ele zera ou deixa negativa a fatura do mês em que caiu.
  */
-export const isBillPayment = (t: Pick<CardTxn, 'description' | 'category'>) =>
+const isBillPayment = (t: Pick<CardTxn, 'description' | 'category'>) =>
   t.category === 'Credit card payment' || PAYMENT.test(t.description)
 
 /** Descrição sem o "3/12", "TPARC12/24" etc., para agrupar as parcelas da mesma compra. */
@@ -165,6 +167,22 @@ export function summarizeCard(txns: CardTxn[], cycles: BillCycle[] = []): CardMo
     }
   }
   return [...months.values()].sort((a, b) => a.period.localeCompare(b.period))
+}
+
+/**
+ * Créditos de encargo por mês de fatura (valor positivo): estorno de juros,
+ * "AMORTIZACAO DE JUROS" de uma antecipação. A lista `financeCharges` da
+ * fatura é bruta e não traz esses créditos; descontá-los do encargo da
+ * fatura do mesmo ciclo dá o custo líquido (revisão de 09/10/2026, Inter).
+ */
+export function chargeCreditsByPeriod(txns: CardTxn[], cycles: BillCycle[] = []): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const t of txns) {
+    if (t.amountCents >= 0 || isBillPayment(t) || !isCharge(t)) continue
+    const period = cycles.length ? cyclePeriodOf(t, cycles) : billPeriodOf(t)
+    out.set(period, (out.get(period) ?? 0) - t.amountCents)
+  }
+  return out
 }
 
 /** Encargos de uma fatura fechada da Pluggy, fora `OTHER` (que é saldo levado, não encargo). */

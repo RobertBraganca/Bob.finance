@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import {
   Bar,
   BarChart,
@@ -14,6 +15,7 @@ import { MARK, axisProps, gridProps, themeFor, type Surface } from '../../lib/ch
 import { useEffectiveSurface } from '../../lib/theme'
 import { ChartFrame, makeTooltip, surfaceRing } from './frame'
 import { Icon } from '../ui/Icon'
+import type { CalendarMonth } from '@shared/debt'
 
 /* ================================================================== *
  * Paydown projection — two scenarios, same unit, ONE axis.
@@ -331,15 +333,7 @@ function fmtPeriodLongLocal(period: string): string {
  * Calendário de saída (specs/debt-v2): 6 meses, barras empilhadas por
  * origem (cada dívida e cada cartão), com a renda típica na tabela.
  * ================================================================== */
-export type ExitMonth = {
-  period: string
-  debtCents: number
-  cardCents: number
-  totalCents: number
-  incomeShareBps: number | null
-  bySource: Record<string, number>
-  ends: string[]
-}
+export type ExitMonth = CalendarMonth
 
 export function ExitCalendarChart({
   months,
@@ -358,14 +352,20 @@ export function ExitCalendarChart({
   const used = sources.filter((s) => months.some((m) => (m.bySource[s.key] ?? 0) > 0))
   const colorOf = (i: number) => theme.series[i % theme.series.length]!
   const rows = months.map((m) => ({ ...m, ...Object.fromEntries(used.map((s) => [s.key, m.bySource[s.key] ?? 0])) }))
-  const Tip = makeTooltip<(typeof rows)[number]>((m) => ({
-    title: fmtPeriod(m.period),
-    rows: [
-      ...used.filter((s) => (m.bySource[s.key] ?? 0) > 0).map((s) => ({ label: s.label, value: money(m.bySource[s.key] ?? 0), color: colorOf(used.indexOf(s)) })),
-      { label: 'Total', value: money(m.totalCents) },
-      { label: 'Da renda típica', value: m.incomeShareBps === null ? '-' : bps(m.incomeShareBps, 0) },
-    ],
-  }))
+  // Criado a cada renderização, o tooltip remontava a cada movimento do mouse.
+  const Tip = useMemo(
+    () =>
+      makeTooltip<(typeof rows)[number]>((m) => ({
+        title: fmtPeriod(m.period),
+        rows: [
+          ...used.filter((s) => (m.bySource[s.key] ?? 0) > 0).map((s) => ({ label: s.label, value: money(m.bySource[s.key] ?? 0), color: colorOf(used.indexOf(s)) })),
+          { label: 'Total', value: money(m.totalCents) },
+          { label: 'Da renda típica', value: m.incomeShareBps === null ? '-' : bps(m.incomeShareBps, 0) },
+        ],
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [months, sources, theme],
+  )
   return (
     <ChartFrame
       legend={used.map((s, i) => ({ label: s.label, color: colorOf(i), shape: 'block' as const }))}

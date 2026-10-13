@@ -40,6 +40,7 @@ import {
 import { PageHeader } from '../components/shell/Shell'
 import { ProposalsTab } from './proposals/ProposalsTab'
 import { IssuerCard } from './proposals/IssuerCard'
+import { todayIso } from '../lib/period'
 
 const QUOTE_STATUSES = ['draft', 'sent', 'in_review', 'needs_changes', 'paused', 'rejected', 'approved'] as const
 type QuoteStatus = (typeof QUOTE_STATUSES)[number]
@@ -841,7 +842,7 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
    */
   const [mode, setMode] = useState<'single' | 'recurring'>('single')
   const [accountId, setAccountId] = useState<number | null>(null)
-  const [paidOn, setPaidOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const [paidOn, setPaidOn] = useState(() => todayIso())
   const [dueDay, setDueDay] = useState('5')
   const [startPeriod, setStartPeriod] = useState(() => new Date().toISOString().slice(0, 7))
   const actualPriceFieldId = useId()
@@ -862,7 +863,7 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
   const dueDayValid = Number.isInteger(dueDayNum) && dueDayNum >= 1 && dueDayNum <= 28
   /** Padrão: um mês depois do recebimento da primeira, editável. */
   const [secondInstallmentOn, setSecondInstallmentOn] = useState(() =>
-    addMonthsToDateInput(new Date().toISOString().slice(0, 10), 1),
+    addMonthsToDateInput(todayIso(), 1),
   )
 
   /** O mesmo rateio do servidor (`splitInstallments`), só para PREVER na

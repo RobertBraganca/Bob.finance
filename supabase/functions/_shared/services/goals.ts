@@ -3,7 +3,10 @@ import { db } from '../db/client.ts'
 import { categories, categoryCaps, monthlyGoals } from '../db/schema.ts'
 import { addMonths, daysInMonth, periodBounds, periodRange, todayIso } from '../core/dates.ts'
 import { categoryBreakdown, totals, type Range } from './analytics.ts'
+import { spendingVsCapForPeriods } from './budget.ts'
+import { spendProjection } from './daily.ts'
 import { averageRecentQuoteCents } from './pricing.ts'
+import { accountScope } from './withdrawals.ts'
 import type { Assumptions } from './financialHealth.ts'
 
 /**
@@ -69,6 +72,8 @@ function dayCounts(period: string) {
 export async function getPeriodProgress(period: string, accountId?: number | null): Promise<PeriodProgress> {
   const { start, end } = periodBounds(period)
   const range: Range = { from: start, to: end, accountId: accountId ?? null }
+  // Tetos por categoria medem o gasto pessoal, como o resto do Orçamento (decisions/0045).
+  const capRange: Range = accountId ? range : { ...range, accountIds: (await accountScope()).personal }
   const [actual, goal, caps, expenseLeaf, categoryRows] = await Promise.all([
     totals(range),
     db.select().from(monthlyGoals).where(eq(monthlyGoals.period, period)).then((r) => r[0]),
@@ -82,7 +87,7 @@ export async function getPeriodProgress(period: string, accountId?: number | nul
       .from(categoryCaps)
       .innerJoin(categories, eq(categories.id, categoryCaps.categoryId))
       .where(eq(categoryCaps.period, period)),
-    categoryBreakdown(range, { flow: 'expense', level: 'leaf' }),
+    categoryBreakdown(capRange, { flow: 'expense', level: 'leaf' }),
     db.select({ id: categories.id, parentId: categories.parentId }).from(categories),
   ])
   const { daysTotal, daysElapsed, isCurrent } = dayCounts(period)
@@ -470,67 +475,56 @@ const TREND_DOWN_AT_BPS = -1000
 /** Nunca mais que isso ao mesmo tempo — "aviso" implica exceção, não um mural. */
 const MAX_BANNERS = 3
 
-/** Projeta o fechamento do mês pelo ritmo até agora — mesma ideia de `paceCents`, na direção oposta (dado o gasto real, qual o total esperado). */
-function projectMonthEnd(spentCentsSoFar: number, period: string): number {
-  const { daysElapsed, daysTotal } = dayCounts(period)
-  if (daysElapsed <= 0) return spentCentsSoFar
-  return Math.round((spentCentsSoFar / daysElapsed) * daysTotal)
-}
-
-export async function homeBanners(accountId?: number | null): Promise<HomeBanner[]> {
+export async function homeBanners(): Promise<HomeBanner[]> {
   const currentPeriod = todayIso().slice(0, 7)
   const lastPeriod = addMonths(currentPeriod, -1)
   const { start, end } = periodBounds(currentPeriod)
 
-  // Sequencial de propósito, não Promise.all: `getPeriodProgress` sozinho já
-  // dispara 5 queries concorrentes, e rodar duas chamadas dela ao mesmo
-  // tempo (mais o category breakdown) empilha o suficiente pro pooler de
-  // transação desta Edge Function travar sem erro — mesmo achado que já
-  // forçou `goalHistory` (logo abaixo) a virar sequencial nesta árvore
-  // (nunca reproduzido no server Node/pooler de sessão). Esta rota roda a
-  // cada carregamento do Painel — mais frequente que goals-history — não
-  // vale arriscar o mesmo travamento aqui.
-  const current = await getPeriodProgress(currentPeriod, accountId)
-  const last = await getPeriodProgress(lastPeriod, accountId)
+  // Uma régua só (decisions/0045): gasto pessoal contra o teto do Orçamento,
+  // com a mesma projeção do Diário; em sequência pelo pooler das Edge Functions.
+  const scope = await accountScope()
+  const current = await getPeriodProgress(currentPeriod)
+  // Os dois meses saem de uma carga só do Orçamento.
+  const spends = await spendingVsCapForPeriods([lastPeriod, currentPeriod])
+  const projection = await spendProjection(currentPeriod, spends.get(currentPeriod))
+  const lastSpend = spends.get(lastPeriod)!
   const concentration = await categoryBreakdown(
-    { from: start, to: end, accountId: accountId ?? null },
+    { from: start, to: end, accountId: null, accountIds: scope.personal },
     { flow: 'expense', level: 'parent' },
   )
 
   const banners: HomeBanner[] = []
   const flaggedCategoryIds = new Set<number>()
 
-  // 1) Teto geral do mês — só quando o ritmo ou o total já preocupa.
-  const spend = current.progress.spend
-  if (spend.capCents !== null) {
-    if (spend.state === 'exceeded') {
+  // 1) Teto do Orçamento — só quando o gasto ou a projeção já passa dele.
+  if (projection.capCents !== null) {
+    if (projection.state === 'exceeded') {
       banners.push({
         id: 'spend-cap',
         severity: 'critical',
         kind: 'spend_cap_exceeded',
-        spentCents: spend.spentCents,
-        capCents: spend.capCents,
+        spentCents: projection.spentCents,
+        capCents: projection.capCents,
         assumptions: {
-          formula: 'gasto do mês (todas as categorias) ÷ teto de gasto configurado',
-          spentCents: spend.spentCents,
-          capCents: spend.capCents,
-          origem: 'specs/monthly-goals',
+          formula: 'gasto pessoal do mês ÷ teto do Orçamento (previsto dos grupos de gasto)',
+          spentCents: projection.spentCents,
+          capCents: projection.capCents,
+          origem: 'Orçamento',
         },
       })
-    } else if (spend.state === 'at_risk') {
-      const projectedCents = projectMonthEnd(spend.spentCents, currentPeriod)
+    } else if (projection.state === 'at_risk') {
       banners.push({
         id: 'spend-cap',
         severity: 'warning',
         kind: 'spend_cap_at_risk',
-        projectedCents,
-        capCents: spend.capCents,
+        projectedCents: projection.projectedMonthCents,
+        capCents: projection.capCents,
         assumptions: {
-          formula: 'projeção de fechamento do mês (ritmo atual) ÷ teto de gasto configurado',
-          spentCents: spend.spentCents,
-          projectedCents,
-          capCents: spend.capCents,
-          origem: 'specs/monthly-goals',
+          formula: 'projeção do mês (realizado + pendências + mediana do gasto por dia × dias que faltam) ÷ teto do Orçamento',
+          spentCents: projection.spentCents,
+          projectedCents: projection.projectedMonthCents,
+          capCents: projection.capCents,
+          origem: 'Orçamento e Diário',
         },
       })
     }
@@ -598,13 +592,13 @@ export async function homeBanners(accountId?: number | null): Promise<HomeBanner
   // 4) Tendência vs. mês passado — projeção de fechamento contra o total
   // JÁ FECHADO do mês anterior, nunca o parcial de hoje contra o fechado
   // (senão todo início de mês pareceria uma economia enorme).
-  if (last.actual.expenseCents > 0) {
-    const projectedCents = projectMonthEnd(current.actual.expenseCents, currentPeriod)
-    const deltaBps = Math.round(((projectedCents - last.actual.expenseCents) / last.actual.expenseCents) * 10_000)
+  if (lastSpend.spentCents > 0) {
+    const projectedCents = projection.projectedMonthCents
+    const deltaBps = Math.round(((projectedCents - lastSpend.spentCents) / lastSpend.spentCents) * 10_000)
     const trendAssumptions: Assumptions = {
-      formula: 'projeção de fechamento do mês (ritmo atual) vs. total já fechado do mês anterior',
+      formula: 'projeção do mês (a mesma do Diário) vs. gasto pessoal já fechado do mês anterior (Orçamento)',
       projectedCents,
-      mesAnteriorCents: last.actual.expenseCents,
+      mesAnteriorCents: lastSpend.spentCents,
       deltaBps,
     }
     if (deltaBps >= TREND_UP_AT_BPS) {

@@ -244,7 +244,7 @@ export function AposentadoriaTab() {
                         <span className="stat__label truncate">{accumGoal.name}</span>
                       </div>
                       <span className="stat__value kpi__value">{money(accumData.currentValueCents)}</span>
-                      <Meter usedBps={accumData.progressBps ?? 0} state={accumData.state} />
+                      <Meter label="Progresso da meta de patrimônio" usedBps={accumData.progressBps ?? 0} state={accumData.state} />
                       <span className="stat__foot" style={{ justifyContent: 'space-between' }}>
                         <span>
                           {accumData.progressBps === null ? '' : `${bps(accumData.progressBps, 0)} de `}

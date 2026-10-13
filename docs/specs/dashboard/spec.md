@@ -201,3 +201,36 @@ produto julgando, não evidenciando (`decisions/0010`).
 ### Casos de borda
 - Mês corrente sem nenhum dado ainda (dia 1, nada lançado): todas as
   barras em zero, card presente, não escondido até haver dado.
+
+## Visão geral pessoal (Status: implementado, 09/10/2026, decisions/0045)
+Revisão de 09/10/2026 (relatório local em `docs/beta-reviews`). Decisões do
+usuário: escopo pessoal com a empresa numa linha; os quatro números do topo
+continuam, pelas definições novas; tarefas no fim; um card de cada, o resto
+vira link.
+
+- **Escopo**: `/dashboard`, `/analytics/monthly` e `/analytics/daily-series`
+  aceitam `scope=personal` (contas pessoais, sem a PJ). Nesse escopo a
+  receita soma as retiradas PJ → PF, como no Orçamento (`withdrawalsCents`).
+- **Quatro números**: Resultado, Receitas (com a renda típica pessoal do
+  Orçamento), Despesas (com "Orçamento: N% do teto"), Saldo das contas
+  pessoais. O teto e a meta de Metas do mês saíram daqui.
+- **Comparação**: o mês corrente até hoje compara com o mesmo recorte do mês
+  anterior ("vs. 1 a 8 de set"), não com os dias antes do dia 1.
+- **Empresa**: uma linha com o faturamento, o repasse e o retirável do mês,
+  levando à Minha empresa (substitui a nota de "% repassado").
+- **Pendências**: todas continuam na lista; o número é o pessoal, com
+  "+ R$ X na conta da empresa"; carregando e erro deixam de aparecer como R$ 0.
+- **Saíram** "Destino do dinheiro", "Cartões de crédito", "Entradas e saídas no
+  período" e "Fluxo entre contas"; um card "Em outras telas" leva a
+  Endividamento, Saúde e Minha empresa.
+- **Mapa de calor e Ritmo** usam `/analytics/daily-series` (leve, com filtro de
+  conta), não a rota do Diário.
+- **Sino**: teto geral e tendência pela régua do Diário (`daily.spendProjection`,
+  teto do Orçamento); concentração no escopo pessoal.
+- **Sem a data do servidor**: o período usa a data do aparelho e a tela mostra
+  "tentar de novo", em vez de ficar em janeiro de 2026.
+
+### Desvios
+- O aviso de teto **por categoria** do sino lê os tetos de categoria das Metas do
+  mês, agora medidos no escopo pessoal (`goals.getPeriodProgress`).
+- O "Por tag" continua no escopo da tela (pessoal), sem o previsto do grupo.

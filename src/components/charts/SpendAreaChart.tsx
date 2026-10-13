@@ -24,10 +24,13 @@ export function SpendAreaChart({
   days,
   surface = 'slab',
   height = 220,
+  onDayClick,
 }: {
   days: DayPoint[]
   surface?: Surface
   height?: number
+  /** clicar num dia abre os lançamentos dele (Diário) */
+  onDayClick?: (day: string) => void
 }) {
   const theme = themeFor(useEffectiveSurface(surface))
   const hasData = days.some((d) => d.expenseCents > 0)
@@ -49,7 +52,15 @@ export function SpendAreaChart({
       }}
     >
       <ChartContainer config={chartConfig} className="aspect-auto w-full chart__plot chart__plot--basis" style={{ height }}>
-        <AreaChart data={days} margin={{ left: 12, right: 12 }}>
+        <AreaChart
+          data={days}
+          margin={{ left: 12, right: 12 }}
+          onClick={(state) => {
+            const day = state?.activeLabel
+            if (onDayClick && day) onDayClick(String(day))
+          }}
+          style={onDayClick ? { cursor: 'pointer' } : undefined}
+        >
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor={theme.expense} stopOpacity={0.8} />

@@ -19,12 +19,6 @@ export const addPeriod = (period: string, n: number) => {
   return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`
 }
 
-export const periodDiff = (from: string, to: string) => {
-  const [fy, fm] = from.split('-').map(Number) as [number, number]
-  const [ty, tm] = to.split('-').map(Number) as [number, number]
-  return (ty - fy) * 12 + (tm - fm)
-}
-
 /** Taxa EFETIVA anual (bps) para mensal equivalente, e a volta. */
 export const monthlyRateOfAnnual = (annualBps: number) => Math.pow(1 + annualBps / 10_000, 1 / 12) - 1
 export const annualBpsOfMonthly = (monthlyRate: number) => Math.round((Math.pow(1 + monthlyRate, 12) - 1) * 10_000)
@@ -121,7 +115,7 @@ export function debtPlan(input: DebtPlanInput): { rows: PlanRow[]; endsOn: strin
       for (let j = 1; j < CALENDAR_MONTHS * 4; j++) {
         const i2 = Math.round(balance * rate)
         balance = balance + i2 - payment
-        rows.push({ period: placeOf(input.installmentsPaid + k + j), paymentCents: payment, interestCents: payment, principalCents: 0, balanceAfterCents: balance })
+        rows.push({ period: placeOf(input.installmentsPaid + k + j), paymentCents: payment, interestCents: Math.min(i2, payment), principalCents: 0, balanceAfterCents: balance })
       }
       return { rows: mergeSamePeriod(rows), endsOn: null }
     }

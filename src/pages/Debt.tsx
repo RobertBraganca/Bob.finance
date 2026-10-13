@@ -150,13 +150,6 @@ type Overview = {
   minimumCents: number
   scheduledCents: number
   weightedAprBps: number
-  monthlyIncomeCents: number
-  typicalMonthlyIncomeCents: number
-  incomeWindowMonths: number
-  incomeSampleMonths: number
-  debtToIncomeBps: number | null
-  debtToAnnualIncomeBps: number | null
-  period: string
   byKind: Array<{ kind: string; amountCents: number; shareBps: number }>
 }
 
@@ -987,9 +980,10 @@ function DebtModal({
         ...(debt || categoryId !== null ? { categoryId } : {}),
         paidViaCardId,
       }
-      const saved = debt ? await api.patch<{ id: number }>(`/debts/${debt.id}`, body) : await api.post<{ id: number }>('/debts', body)
-      if (origins.size > 0) await api.post(`/debts/${saved.id}/renegotiation`, { originDebtIds: [...origins] })
-      return saved
+      // O acordo vai na mesma chamada que cria a dívida: o servidor valida as origens antes de criar.
+      return debt
+        ? api.patch<{ id: number }>(`/debts/${debt.id}`, body)
+        : api.post<{ id: number }>('/debts', { ...body, ...(origins.size > 0 ? { renegotiates: [...origins] } : {}) })
     },
     onSuccess: async () => {
       if (!debt) telemetry.action('debt', 'debt_created')
@@ -1314,7 +1308,7 @@ function DebtPaymentModal({ debt, onClose }: { debt: DebtRow; onClose: () => voi
   const toast = useToast()
   const queryClient = useQueryClient()
   const [kind, setKind] = useState('payment')
-  const [paidOn, setPaidOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const [paidOn, setPaidOn] = useState(() => todayIso())
   const [amount, setAmount] = useState('')
   const [notes, setNotes] = useState('')
   const paidOnFieldId = useId()

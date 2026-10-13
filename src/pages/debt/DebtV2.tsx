@@ -15,7 +15,7 @@ import {
 import { Button, Card, EmptyState, HeroFigure, Icon, Meter, Modal, Segmented, Select, Slab, TextInput, capUsageState, useToast } from '../../components/ui'
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert'
 import { DebtServiceGauge, ExitCalendarChart } from '../../components/charts/DebtCharts'
-import { compareProposal, debtPlan, monthlyRateOfAnnual, type DebtPlanInput } from '@shared/debt'
+import { annualBpsOfMonthly, compareProposal, debtPlan, monthlyRateOfAnnual, type DebtPlanInput } from '@shared/debt'
 import type { AmortizationSystem } from '@shared/propertyPlan'
 
 /**
@@ -39,6 +39,7 @@ export type DebtV2 = {
     principalThisMonthCents: number
     endsOn: string | null
     monthsLeft: number | null
+    installmentsPaidEffective: number
     impliedAprBps: number | null
     categoryId: number | null
   }>
@@ -117,8 +118,9 @@ export type AgreementPrefill = {
 const monthsText = (n: number | null) => (n === null ? 'sem data' : n === 1 ? '1 mês' : `${n} meses`)
 
 /** Mesma entrada do servidor, com as parcelas restantes que o Endividamento v2 usa. */
-export function planInputFor(d: DebtBasics, v2: DebtV2['debts'][number] | undefined, startPeriod: string, aprBps = d.aprBps): DebtPlanInput {
-  const paid = d.installmentCount !== null && v2?.monthsLeft !== null && v2?.monthsLeft !== undefined ? d.installmentCount - v2.monthsLeft : d.installmentsPaid
+function planInputFor(d: DebtBasics, v2: DebtV2['debts'][number] | undefined, startPeriod: string, aprBps = d.aprBps): DebtPlanInput {
+  // Parcelas pagas ou já confirmadas, como o servidor conta (monthsLeft funde as atrasadas numa linha só).
+  const paid = v2?.installmentsPaidEffective ?? d.installmentsPaid
   return {
     balanceCents: d.balanceCents,
     aprBps,
@@ -153,18 +155,18 @@ export function OweToday({ v2 }: { v2: DebtV2 }) {
             {v2.cards.map((c) => (
               <div key={c.id} className="stack" style={{ gap: 4 }}>
                 <span className="row row--between" style={{ fontSize: 'var(--text-sm)', gap: 'var(--sp-3)' }}>
-                  <span className="truncate" style={{ color: 'var(--on-slab)' }}>
+                  <span className="truncate" style={{ color: 'var(--on-slab-1)' }}>
                     {c.name}
                     <span style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-2xs)' }}>
                       {' '}
                       · {c.source === 'pluggy' ? 'Open Finance' : 'medido à mão'}
                     </span>
                   </span>
-                  <span className="tabular" style={{ color: 'var(--on-slab)', fontWeight: c.usedBps >= 8000 ? 600 : undefined }}>
+                  <span className="tabular" style={{ color: 'var(--on-slab-1)', fontWeight: c.usedBps >= 8000 ? 600 : undefined }}>
                     {money(c.usedCents)} · {bps(c.usedBps, 0)}
                   </span>
                 </span>
-                <Meter usedBps={c.usedBps} state={capUsageState(c.usedBps)} />
+                <Meter label="Uso do limite do cartão" usedBps={c.usedBps} state={capUsageState(c.usedBps)} />
                 <span style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-2xs)' }}>
                   {c.openBillCents !== null ? `fatura aberta ${money(c.openBillCents)} · ` : ''}vence {fmtDate(c.dueOn)}
                   {c.usedBps >= 8000 && ' · acima de 80% do limite'}
@@ -600,7 +602,7 @@ function ProposalSimulator({ v2, debts, onRegister }: { v2: DebtV2; debts: DebtB
                 onRegister({
                   name: `Acordo · ${debt!.name}`,
                   principalCents: Math.abs(parseMoneyInput(amount) ?? 0),
-                  aprBps: Math.round((Math.pow(1 + (result.proposal!.monthlyRate ?? 0), 12) - 1) * 10_000),
+                  aprBps: annualBpsOfMonthly(result.proposal!.monthlyRate ?? 0),
                   scheduledPaymentCents: result.proposal!.paymentCents,
                   installmentCount: result.proposal!.months ?? 0,
                   originDebtIds: [debt!.id],

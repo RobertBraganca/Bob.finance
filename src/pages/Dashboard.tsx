@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react'
+import { useId, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -11,7 +11,7 @@ import {
   type Account,
   type RangeContextValue,
 } from '../lib/store'
-import { shiftPeriod, singleMonthOf, todayIso } from '../lib/period'
+import { periodBounds, shiftPeriod, singleMonthOf, todayIso } from '../lib/period'
 import { AccountModal, BalanceCheckModal } from './Settings'
 import {
   bps,
@@ -21,11 +21,9 @@ import {
   period as fmtPeriod,
   periodLong as fmtPeriodLong,
   date as fmtDate,
-  points,
-  signedBps,
+  MONTHS_SHORT,
 } from '../lib/format'
 import {
-  Assumptions,
   Bento,
   Button,
   Card,
@@ -43,21 +41,19 @@ import {
   Select,
   Slab,
   SkeletonBlock,
+  SkeletonLines,
   StatTile,
   TextInput,
   useToast,
-  type AssumptionBag,
-  type MeterState,
   type PendingDeleteScope,
   LoadError,
 } from '../components/ui'
 import { PageHeader, RangeFilter } from '../components/shell/Shell'
+import type { IconName } from '../components/ui/Icon'
 import { IncomeExpenseChart } from '../components/charts/IncomeExpenseChart'
 import { TransactionForm, type TransactionFormValue } from '../components/forms/TransactionForm'
 import { CategoryRing, type Slice } from '../components/charts/CategoryRing'
 import { NetFlowChart } from '../components/charts/NetFlowChart'
-import { type FlowEdge } from '../components/charts/AccountFlowSankey'
-import { CARD_USAGE_BANDS, DebtServiceGauge } from '../components/charts/DebtCharts'
 import { SpendingPaceChart, type SpendingPacePoint } from '../components/charts/SpendingPaceChart'
 import { AnnualPaceChart, type AnnualPacePoint } from '../components/charts/AnnualPaceChart'
 import { SpendingHeatmap } from '../components/charts/SpendingHeatmap'
@@ -76,6 +72,8 @@ type DashboardResponse = {
     savingsRateBps: number
     transactionCount: number
     uncategorizedCount: number
+    /** retiradas PJ → PF contadas como receita no escopo pessoal */
+    withdrawalsCents?: number
     /** receita pendente (ainda não confirmada) com vencimento dentro do período — "a receber" */
     receivableCents: number
   }
@@ -85,8 +83,6 @@ type DashboardResponse = {
     netBps: number | null
     receivableBps: number | null
   }
-  monthly: Array<{ period: string; incomeCents: number; expenseCents: number; netCents: number; investedCents: number }>
-  daily: Array<{ period: string; incomeCents: number; expenseCents: number; netCents: number; investedCents: number }>
   byCategory: Slice[]
   byCategoryLeaf: Slice[]
   incomeByCategory: Slice[]
@@ -95,10 +91,6 @@ type DashboardResponse = {
   topMerchants: Array<{ signature: string; amount: number; count: number }>
 }
 
-type FlowResponse = {
-  edges: FlowEdge[]
-  totals: { internalCents: number; internalCount: number; looseCents: number; looseCount: number; pairedBps: number }
-}
 
 type PendingRow = {
   id: number
@@ -135,17 +127,6 @@ type ReconciliationCandidate = {
   match: { id: number; postedOn: string; description: string; amountCents: number }
 }
 
-type CardRow = {
-  id: number
-  name: string
-  institution: string | null
-  accountName: string | null
-  creditLimitCents: number
-  availableLimitCents: number
-  usedBps: number
-  nextClosingOn: string
-  nextDueOn: string
-}
 
 /** Formato do skeleton do primeiro carregamento — espelha a forma fixa da
  * tela real (saudação, duas linhas de dois cards, lista de pendências),
@@ -176,12 +157,14 @@ export function Dashboard() {
   const [showMore, setShowMore] = useState(false)
 
   const dashboard = useQuery({
-    queryKey: ['dashboard', range.from, range.to, range.accountId, range.preset],
+    queryKey: ['dashboard', range.from, range.to, range.accountId, range.preset, 'personal'],
     queryFn: () =>
       api.get<DashboardResponse>('/dashboard', {
         from: range.from,
         to: range.to,
         accountId: range.accountId,
+        // Visão geral pessoal (decisions/0045): a PJ aparece na linha da empresa.
+        scope: 'personal',
         // decisions/0030: "Período máximo" é a única leitura de "A receber"
         // que deveria olhar pra frente, sem limite — os outros presets
         // continuam restritos ao próprio período, como sempre.
@@ -192,31 +175,23 @@ export function Dashboard() {
     placeholderData: (previous) => previous,
   })
 
-  // A flow diagram IS the cross-account picture, so it ignores the account
-  // filter — scoping it to one account would leave nothing to draw.
-  const flows = useQuery({
-    queryKey: ['flows', range.from, range.to],
-    queryFn: () => api.get<FlowResponse>('/analytics/flows', { from: range.from, to: range.to }),
-    enabled: range.ready,
-    placeholderData: (previous) => previous,
-  })
-
-  // Cards ignore the date range too — limit/cycle is a "right now" fact,
-  // not something a past period would change.
-  const cards = useQuery({
-    queryKey: ['credit-cards'],
-    queryFn: () => api.get<{ cards: CardRow[] }>('/credit-cards'),
-  })
+  const { pjAccountId, loading: pjLoading, error: pjError, retrying: pjRetrying, retry: retryPj } = usePjAccount()
 
   if (meta.isSuccess && !meta.data.hasData) return <FirstRun />
-  if (!dashboard.data) {
+  if (!dashboard.data || pjLoading || pjError) {
     return (
       <>
         <PageHeader title={`${greetingWord(profile.data?.profile.displayName)}!`} filters={<RangeFilter hideAccountFilter />} />
         <div className="page">
-          {dashboard.isError ? (
+          {/* Sem a data do servidor o período não fecha: aviso com "tentar de novo",
+              nunca a tela vazia em janeiro (revisão de 09/10/2026). */}
+          {meta.isError ? (
             <Card>
-              <LoadError onRetry={() => dashboard.refetch()} retrying={dashboard.isFetching} />
+              <LoadError onRetry={() => meta.refetch()} retrying={meta.isFetching} />
+            </Card>
+          ) : dashboard.isError || pjError ? (
+            <Card>
+              <LoadError onRetry={() => (dashboard.isError ? dashboard.refetch() : retryPj())} retrying={dashboard.isFetching || pjRetrying} />
             </Card>
           ) : (
             <PageSkeleton cards={DASHBOARD_SKELETON_CARDS} />
@@ -229,8 +204,6 @@ export function Dashboard() {
   const {
     totals,
     deltas,
-    monthly,
-    daily,
     byCategory,
     byCategoryLeaf,
     incomeByCategory,
@@ -238,15 +211,6 @@ export function Dashboard() {
     netFlow,
     topMerchants,
   } = dashboard.data
-  const balance = (meta.data?.accounts ?? []).reduce((sum, account) => sum + account.balanceCents, 0)
-  // One bar per day beats one bar for the whole month — but only makes
-  // sense once the selection actually IS a single month.
-  // O backend (dailySeries, services/analytics.ts) só preenche `daily`
-  // quando o intervalo cabe em 31 dias — não há necessidade de checar o
-  // preset aqui: qualquer período curto (o atalho "mês atual" ou um mês
-  // específico escolhido na grade do seletor) ativa a granularidade diária.
-  const useDailyBars = daily.length > 0
-  const flowSeries = useDailyBars ? daily : monthly
 
   // Ordem fixa (revisão de UX de 26/09/2026): saudação -> ritmo do mês lado
   // a lado com o mapa de calor -> composição por TAG -> pendências
@@ -259,8 +223,12 @@ export function Dashboard() {
   // contas ao lado de receitas/despesas de uma conta só misturaria escopos.
   // Conta de investimento fica fora: o que ela guarda é carteira, não saldo
   // disponível (revisão beta de 30/09/2026), e a carteira já tem tela própria.
+  // Saldo pessoal (decisions/0045): sem a conta PJ, que vai para a linha da empresa.
   const scopedAccounts = (meta.data?.accounts ?? []).filter(
-    (account) => account.kind !== 'investment' && (range.accountId == null || account.id === range.accountId),
+    (account) =>
+      account.kind !== 'investment' &&
+      account.id !== pjAccountId &&
+      (range.accountId == null || account.id === range.accountId),
   )
   const scopedBalance = scopedAccounts.reduce((sum, account) => sum + account.balanceCents, 0)
 
@@ -285,7 +253,7 @@ export function Dashboard() {
             radar já vive no sino de notificações. */}
         <PeriodKpis range={range} totals={totals} deltas={deltas} balanceCents={scopedBalance} accounts={scopedAccounts.length} />
 
-        <PjTransferNote range={range} />
+        <CompanyLine range={range} />
 
         <Bento>
           <SpendingHeatmapCard span={6} range={range} />
@@ -342,8 +310,6 @@ export function Dashboard() {
 
         {showMore && (
           <div className="stack stack--loose">
-            <DestinationsCard range={range} />
-
             <Bento>
               <Card
                 span={6}
@@ -394,7 +360,7 @@ export function Dashboard() {
                   ))}
                 </div>
               </Card>
-              <CreditCardsSlab span={6} cards={cards.data?.cards ?? []} isError={cards.isError} />
+              <DetailLinks span={6} />
             </Bento>
 
             <Bento>
@@ -428,19 +394,6 @@ export function Dashboard() {
               </Card>
             </Bento>
 
-            <Card
-              title="Entradas e saídas no período"
-              subtitle={useDailyBars ? 'Dia a dia no período selecionado' : 'Mês a mês no período selecionado'}
-            >
-              <IncomeExpenseChart
-                data={flowSeries}
-                surface="paper"
-                height={280}
-                granularity={useDailyBars ? 'day' : 'month'}
-              />
-            </Card>
-
-            <AccountFlowSimple edges={flows.data?.edges} totals={flows.data?.totals} isLoading={!flows.data} />
           </div>
         )}
       </div>
@@ -460,18 +413,33 @@ export function Dashboard() {
  * `/dashboard` que o resto da tela já usa; meta e teto (quando o período é
  * um mês só) vêm de `/goals/{período}`, a mesma fonte de Metas do mês.
  * ================================================================== */
-/** Só o que a tela lê de cada resposta, para não duplicar os tipos inteiros. */
-type PeriodProgressLite = {
-  goal: { incomeTargetCents: number | null; spendCapCents: number | null }
-  actual: { incomeCents: number; expenseCents: number }
-  // `state` já vem calculado por specs/monthly-goals (targetState/capState)
-  // — reusado aqui, nunca recalculado com um limite novo.
-  progress: { income: { state: MeterState }; spend: { state: MeterState } }
+
+/** O que a Visão geral lê do Orçamento do mês. */
+type BudgetLite = {
+  plan: { effectivePeriod: string } | null
+  income: { typicalCents: number }
+  totals: { spentCents: number }
+  groups: Array<{ source: string; plannedCents: number }>
 }
 
-type AvailableLite = {
-  destinations: Array<{ key: string; targetCents: number | null; realizedCents: number; state: MeterState }>
+/** Conta PJ do Motor financeiro: fica fora do pessoal e vai para a linha da empresa. */
+function usePjAccount(): { pjAccountId: number | null; loading: boolean; error: boolean; retrying: boolean; retry: () => void } {
+  const engineSettings = useQuery({
+    queryKey: ['financial-engine-settings'],
+    queryFn: () => api.get<{ settings: FinancialEngineSettingsLite }>('/financial-engine/settings'),
+  })
+  // `loading` evita somar a PJ ao saldo/pendências pessoais enquanto a configuração não chega.
+  // Com erro não dá para saber qual conta é a PJ: quem usa mostra o aviso em vez de somar a PJ ao pessoal.
+  return {
+    pjAccountId: engineSettings.data?.settings.pjAccountId ?? null,
+    loading: engineSettings.isPending,
+    // Um refetch que falha com o dado antigo em cache não derruba a tela.
+    error: engineSettings.isError && engineSettings.data === undefined,
+    retrying: engineSettings.isFetching,
+    retry: () => void engineSettings.refetch(),
+  }
 }
+
 
 function greetingWord(displayName: string | null | undefined): string {
   const hour = new Date().getHours()
@@ -494,15 +462,23 @@ function PeriodKpis({
 }) {
   // Meta e teto só existem por mês — num intervalo de vários meses eles não
   // têm um número único para comparar, então simplesmente não aparecem.
+  // Teto e renda típica vêm do Orçamento (decisions/0045), só num mês fechado de período.
   const month = singleMonthOf(range)
-  const goals = useQuery({
-    queryKey: ['month-mode-goals', month, range.accountId],
-    queryFn: () => api.get<PeriodProgressLite>(`/goals/${month}`, { accountId: range.accountId ?? undefined }),
+  const budget = useQuery({
+    queryKey: ['budget', month],
+    queryFn: () => api.get<BudgetLite>(`/budget/${month}`),
     enabled: month !== null,
   })
-  const incomeTarget = month ? goals.data?.goal.incomeTargetCents ?? null : null
-  const spendCap = month ? goals.data?.goal.spendCapCents ?? null : null
-  const scope = range.accountId == null ? 'todas as contas' : 'a conta filtrada'
+  const cap = budget.data
+    ? budget.data.groups.filter((g) => g.source === 'categories').reduce((sum, g) => sum + g.plannedCents, 0)
+    : 0
+  const spendCap = month && budget.data?.plan && cap > 0 ? cap : null
+  const budgetSpent = budget.data?.totals.spentCents ?? null
+  const typicalIncome = month ? budget.data?.income.typicalCents ?? null : null
+  const scope = range.accountId == null ? 'contas pessoais (a conta PJ fica na linha da empresa)' : 'a conta filtrada'
+  // Mês corrente até hoje compara com o mesmo recorte do mês anterior (analytics.dashboard).
+  const monthToDate = month !== null && range.from === `${month}-01` && range.to.slice(0, 7) === month && range.to !== periodBounds(month).to
+  const deltaLabel = monthToDate ? `vs. 1 a ${Number(range.to.slice(8, 10))} de ${MONTHS_SHORT[Number(shiftPeriod(month!, -1).slice(5, 7)) - 1]}` : 'vs. período anterior'
 
   return (
     <div className="kpi-row">
@@ -511,9 +487,9 @@ function PeriodKpis({
         label="Resultado do período"
         value={money(totals.netCents)}
         delta={deltas.netBps}
-        foot={<span>{totals.transactionCount.toLocaleString('pt-BR')} lançamentos confirmados</span>}
+        deltaLabel={deltaLabel}
         assumptions={{
-          formula: 'Receitas menos despesas confirmadas no período. Investimentos e transferências entre contas não entram.',
+          formula: 'Receitas menos despesas confirmadas no período, nas contas pessoais. Investimentos e transferências entre contas não entram; as retiradas da PJ contam como receita, como no Orçamento.',
           receitaDoPeriodoCents: totals.incomeCents,
           gastoCents: totals.expenseCents,
           escopo: scope,
@@ -524,10 +500,12 @@ function PeriodKpis({
         value={money(totals.incomeCents)}
         tone="up"
         delta={deltas.incomeBps}
-        foot={incomeTarget != null ? <span>meta {money(incomeTarget)}</span> : undefined}
+        deltaLabel={deltaLabel}
+        foot={typicalIncome ? <span>renda típica {money(typicalIncome)}</span> : undefined}
         assumptions={{
-          formula: 'Soma dos lançamentos confirmados com TAG de receita no período.',
-          ...(incomeTarget != null ? { metaCents: incomeTarget } : {}),
+          formula: 'Receitas confirmadas das contas pessoais mais as retiradas da PJ para a PF no período (a renda pessoal do Orçamento).',
+          ...(totals.withdrawalsCents ? { retiradasDaPjCents: totals.withdrawalsCents } : {}),
+          ...(typicalIncome ? { rendaTipicaPessoalCents: typicalIncome } : {}),
           escopo: scope,
         }}
       />
@@ -536,15 +514,21 @@ function PeriodKpis({
         value={money(totals.expenseCents)}
         tone="down"
         delta={deltas.expenseBps}
+        deltaLabel={deltaLabel}
         deltaInvert
         foot={
-          spendCap != null ? (
-            <span className={totals.expenseCents > spendCap ? 'neg' : undefined}>teto {money(spendCap)}</span>
+          spendCap != null && budgetSpent !== null ? (
+            <Link to="/metas">
+              Orçamento: {bps(Math.round((budgetSpent / spendCap) * 10_000), 0)} do teto de {money(spendCap)}
+            </Link>
+          ) : month && budget.data && !budget.data.plan ? (
+            <Link to="/metas/ajustar">sem plano no Orçamento</Link>
           ) : undefined
         }
         assumptions={{
-          formula: 'Soma dos lançamentos confirmados com TAG de despesa no período. Pagamento de fatura e transferências não contam em dobro.',
-          ...(spendCap != null ? { tetoCents: spendCap } : {}),
+          formula: 'Despesas confirmadas das contas pessoais no período. Pagamento de fatura e transferências não contam em dobro.',
+          ...(spendCap != null ? { tetoDoOrcamentoCents: spendCap, gastoNoOrcamentoCents: budgetSpent } : {}),
+          diferencaParaOOrcamento: 'o Orçamento não conta as TAGs marcadas fora do orçamento',
           escopo: scope,
         }}
       />
@@ -553,7 +537,7 @@ function PeriodKpis({
         value={money(balanceCents)}
         foot={
           <>
-            <span>hoje, {accounts === 1 ? '1 conta' : `${accounts} contas`}</span>
+            <span>hoje, {accounts === 1 ? '1 conta pessoal' : `${accounts} contas pessoais`}</span>
             {/* Saldo negativo numa conta corrente quase sempre é saldo inicial
                 ou lançamento faltando, não dívida: o atalho leva a conferir. */}
             {balanceCents < 0 && (
@@ -565,8 +549,8 @@ function PeriodKpis({
         }
         assumptions={{
           formula:
-            'Saldo atual derivado dos lançamentos de cada conta corrente, a partir do saldo inicial cadastrado. Contas de investimento ficam de fora. É um retrato de hoje, não do fim do período.',
-          saldoConsolidadoCents: balanceCents,
+            'Saldo atual derivado dos lançamentos de cada conta pessoal, a partir do saldo inicial cadastrado. A conta PJ (linha da empresa) e as de investimento ficam de fora. É um retrato de hoje, não do fim do período.',
+          saldoPessoalCents: balanceCents,
           contasSomadas: accounts,
         }}
       />
@@ -651,11 +635,12 @@ function HistoryCard({ span, range }: { span?: 6 | 12; range: RangeSubset }) {
   const from = `${shiftPeriod(endPeriod, -(Number(months) - 1))}-01`
 
   const history = useQuery({
-    queryKey: ['history-monthly', from, range.to, range.accountId],
+    queryKey: ['history-monthly', from, range.to, range.accountId, 'personal'],
     queryFn: () =>
       api.get<{ series: Array<{ period: string; incomeCents: number; expenseCents: number; netCents: number }> }>(
         '/analytics/monthly',
-        { from, to: range.to, accountId: range.accountId ?? undefined },
+        // Mesma base dos KPIs acima: contas pessoais, com as retiradas da PJ como renda.
+        { from, to: range.to, accountId: range.accountId ?? undefined, scope: 'personal' },
       ),
     placeholderData: (previous) => previous,
   })
@@ -699,147 +684,9 @@ function HistoryCard({ span, range }: { span?: 6 | 12; range: RangeSubset }) {
   )
 }
 
-type Destination = { targetCents: number | null; realizedCents: number; state: MeterState }
-const NO_TARGET_DESTINATION: Destination = { targetCents: null, realizedCents: 0, state: 'no_target' }
-const DESTINATION_LABEL: Record<'investment' | 'debt' | 'reserve', string> = {
-  investment: 'Investimento',
-  debt: 'Dívida',
-  reserve: 'Reserva',
-}
-
-/**
- * Investimento, dívida e reserva: realizado contra o planejado no Motor
- * financeiro. Saiu da saudação (30/09/2026) para cá, atrás de "Mostrar mais".
- */
-function DestinationsCard({ range }: { range: RangeSubset }) {
-  const isYear = range.preset === 'max'
-  const period = range.to.slice(0, 7)
-  const year = range.anchor.slice(0, 4)
-
-  const monthAvailable = useQuery({
-    queryKey: ['month-mode-available', period],
-    queryFn: () => api.get<AvailableLite>('/financial-engine/available', { period }),
-    enabled: !isYear,
-  })
-  const yearAvailable = useQuery({
-    queryKey: ['year-mode-available', year],
-    queryFn: () => api.get<YearDestinationsLite>('/financial-engine/available-year', { year }),
-    enabled: isYear,
-  })
-
-  const isError = isYear ? yearAvailable.isError : monthAvailable.isError
-  const isLoading = isYear ? !yearAvailable.data : !monthAvailable.data
-
-  const destino = (key: 'investment' | 'debt' | 'reserve'): Destination => {
-    if (isYear) return yearAvailable.data?.[key] ?? NO_TARGET_DESTINATION
-    return monthAvailable.data?.destinations.find((d) => d.key === key) ?? NO_TARGET_DESTINATION
-  }
-
-  return (
-    <Card
-      title="Destino do dinheiro"
-      subtitle={`Realizado / planejado no Motor financeiro, ${isYear ? year : fmtPeriodLong(period)}`}
-      actions={
-        <Link to="/saude" className="btn btn--ghost btn--sm">
-          Ajustar
-        </Link>
-      }
-    >
-      {isError ? (
-        <EmptyState
-          icon="alert"
-          title="Falha ao carregar"
-          body="Não foi possível carregar os destinos agora. Tente novamente em instantes."
-        />
-      ) : isLoading ? (
-        <SkeletonBlock height={56} />
-      ) : (
-        <div className="kpi-row kpi-row--3">
-          {(['investment', 'debt', 'reserve'] as const).map((key) => {
-            const d = destino(key)
-            return (
-              <div key={key} className="stack stack--tight" style={{ minWidth: 0 }}>
-                <span className="stat__label">{DESTINATION_LABEL[key]}</span>
-                <span className="tabular" style={{ fontWeight: 600 }}>
-                  {money(d.realizedCents)}
-                  {d.targetCents != null && <span className="muted" style={{ fontWeight: 400 }}> / {money(d.targetCents)}</span>}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </Card>
-  )
-}
-
 type FinancialEngineSettingsLite = { pjAccountId: number | null; pfAccountId: number | null }
 
-/**
- * Pedido de 26/09/2026: uma frase no Painel sobre quanto da conta PJ foi
- * repassado para a PF, mesmo cálculo que a DRE já mostra (Dre.tsx,
- * `ReconciliationSlab`, "repasse em % da receita"). Só aparece quando as
- * duas contas estão configuradas no Motor financeiro E houve de fato um
- * repasse PJ→PF no período — sem isso, "0%" não diria nada de útil.
- */
-function PjTransferNote({ range }: { range: RangeSubset }) {
-  const engineSettings = useQuery({
-    queryKey: ['financial-engine-settings'],
-    queryFn: () => api.get<{ settings: FinancialEngineSettingsLite }>('/financial-engine/settings'),
-  })
-  const pjAccountId = engineSettings.data?.settings.pjAccountId ?? null
-  const pfAccountId = engineSettings.data?.settings.pfAccountId ?? null
 
-  const pjTotals = useQuery({
-    queryKey: ['dashboard', range.from, range.to, pjAccountId],
-    queryFn: () =>
-      api.get<{ totals: { incomeCents: number } }>('/dashboard', {
-        from: range.from,
-        to: range.to,
-        accountId: pjAccountId ?? undefined,
-      }),
-    enabled: pjAccountId != null,
-  })
-  // Mesma queryKey de `flows` na Dashboard() e no Dre.tsx — o React Query
-  // serve do cache já buscado por eles, nunca uma requisição extra.
-  const flows = useQuery({
-    queryKey: ['flows', range.from, range.to],
-    queryFn: () => api.get<{ edges: FlowEdge[] }>('/analytics/flows', { from: range.from, to: range.to }),
-  })
-
-  if (!pjAccountId || !pfAccountId) return null
-  if (!pjTotals.data || !flows.data) return null
-
-  const pjToPfCents = flows.data.edges.find((e) => e.fromAccountId === pjAccountId && e.toAccountId === pfAccountId)?.amountCents ?? 0
-  const pjIncomeCents = pjTotals.data.totals.incomeCents
-  if (pjIncomeCents <= 0 || pjToPfCents <= 0) return null
-
-  const shareBps = Math.round((pjToPfCents / pjIncomeCents) * 10_000)
-
-  return (
-    <Card muted>
-      <div className="row" style={{ gap: 'var(--sp-2)' }}>
-        <Icon name="info" size={16} />
-        <span>
-          Sua conta PJ transferiu <strong className="tabular">{bps(shareBps)}</strong> da receita do período (
-          {money(pjToPfCents)}) para a conta PF.
-        </span>
-      </div>
-    </Card>
-  )
-}
-
-type YearProgressLite = {
-  goal: { incomeTargetCents: number | null; spendCapCents: number | null }
-  actual: { incomeCents: number; expenseCents: number }
-  progress: { income: { state: MeterState }; spend: { state: MeterState } }
-}
-
-type YearDestinationsLite = {
-  investment: { targetCents: number; realizedCents: number; state: MeterState }
-  debt: { targetCents: number; realizedCents: number; state: MeterState }
-  reserve: { targetCents: number; realizedCents: number; state: MeterState }
-}
 
 type RangeSubset = Pick<RangeContextValue, 'preset' | 'from' | 'to' | 'anchor' | 'accountId'>
 
@@ -877,15 +724,15 @@ function MonthlyPaceCard({
 }) {
   const previousPeriod = shiftPeriod(period, -1)
   const isCurrentMonth = period === anchor.slice(0, 7)
-  const cutoffDay = isCurrentMonth ? Number(anchor.slice(8, 10)) : daysInMonthOf(period)
+  const cutoffDay = isCurrentMonth ? Number(anchor.slice(8, 10)) : Number(periodBounds(period).to.slice(8, 10))
 
   const current = useQuery({
-    queryKey: ['daily-series', period, accountId],
-    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number }> }>('/analytics/daily', { period, accountId: accountId ?? undefined }),
+    queryKey: ['daily-series', period, accountId, 'personal'],
+    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number }> }>('/analytics/daily-series', { scope: 'personal', period, accountId: accountId ?? undefined }),
   })
   const previous = useQuery({
-    queryKey: ['daily-series', previousPeriod, accountId],
-    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number }> }>('/analytics/daily', { period: previousPeriod, accountId: accountId ?? undefined }),
+    queryKey: ['daily-series', previousPeriod, accountId, 'personal'],
+    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number }> }>('/analytics/daily-series', { scope: 'personal', period: previousPeriod, accountId: accountId ?? undefined }),
   })
 
   const points: SpendingPacePoint[] = []
@@ -967,6 +814,7 @@ function AnnualPaceCard({
     queryKey: ['monthly-series', currentYear, accountId],
     queryFn: () =>
       api.get<{ series: Array<{ period: string; expenseCents: number }> }>('/analytics/monthly', {
+        scope: 'personal',
         from: `${currentYear}-01-01`,
         to: `${currentYear}-12-31`,
         accountId: accountId ?? undefined,
@@ -976,6 +824,7 @@ function AnnualPaceCard({
     queryKey: ['monthly-series', previousYear, accountId],
     queryFn: () =>
       api.get<{ series: Array<{ period: string; expenseCents: number }> }>('/analytics/monthly', {
+        scope: 'personal',
         from: `${previousYear}-01-01`,
         to: `${previousYear}-12-31`,
         accountId: accountId ?? undefined,
@@ -1064,12 +913,12 @@ function MonthlyHeatmapCard({
   accountId: number | null
 }) {
   const current = useQuery({
-    queryKey: ['daily-series', period, accountId],
-    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number; transactionCount: number }> }>('/analytics/daily', { period, accountId: accountId ?? undefined }),
+    queryKey: ['daily-series', period, accountId, 'personal'],
+    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number; transactionCount: number }> }>('/analytics/daily-series', { scope: 'personal', period, accountId: accountId ?? undefined }),
   })
 
   return (
-    <Card span={span} title="Mapa de calor" subtitle="Gasto confirmado por dia do mês">
+    <Card span={span} title="Mapa de calor" subtitle="Gasto confirmado das contas pessoais por dia do mês">
       {!current.data ? <SkeletonBlock height={220} /> : <SpendingHeatmap days={current.data.days} surface="paper" />}
     </Card>
   )
@@ -1089,6 +938,7 @@ function AnnualHeatmapCard({
     queryKey: ['monthly-series', year, accountId],
     queryFn: () =>
       api.get<{ series: Array<{ period: string; expenseCents: number }> }>('/analytics/monthly', {
+        scope: 'personal',
         from: `${year}-01-01`,
         to: `${year}-12-31`,
         accountId: accountId ?? undefined,
@@ -1102,184 +952,6 @@ function AnnualHeatmapCard({
   )
 }
 
-function daysInMonthOf(period: string): number {
-  const [y, m] = period.split('-').map(Number) as [number, number]
-  return new Date(Date.UTC(y, m, 0)).getUTCDate()
-}
-
-function CreditCardsSlab({
-  cards,
-  isError,
-  span,
-}: {
-  cards: CardRow[]
-  isError: boolean
-  span?: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12
-}) {
-  const [page, setPage] = useState(0)
-  const pageCount = cards.length + 1
-  const current = page === 0 ? null : cards[page - 1]
-
-  const limitCents = current ? current.creditLimitCents : cards.reduce((s, c) => s + c.creditLimitCents, 0)
-  const availableCents = current
-    ? current.availableLimitCents
-    : cards.reduce((s, c) => s + c.availableLimitCents, 0)
-  const usedBps = limitCents > 0 ? Math.round(((limitCents - availableCents) / limitCents) * 10_000) : 0
-
-  const go = (delta: number) => setPage((p) => (p + delta + pageCount) % pageCount)
-
-  return (
-    <Card
-      span={span}
-      title="Cartões de crédito"
-      subtitle="Limite total e disponível por cartão"
-      actions={
-        <Link to="/cartoes" className="btn btn--ghost btn--sm">
-          Gerenciar
-        </Link>
-      }
-    >
-      {isError ? (
-        <EmptyState
-          icon="alert"
-          title="Falha ao carregar"
-          body="Não foi possível carregar os cartões agora. Tente novamente em instantes."
-        />
-      ) : cards.length === 0 ? (
-        <EmptyState
-          icon="wallet"
-          title="Nenhum cartão cadastrado"
-          body="Cadastre limite, fechamento e vencimento na página Cartões."
-        />
-      ) : (
-        <div className="stack">
-          <div className="row row--between">
-            <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}>
-              <Button
-                variant="quiet"
-                size="sm"
-                icon="chevronRight"
-                onClick={() => go(-1)}
-                title="Cartão anterior"
-                disabled={pageCount <= 1}
-              />
-            </span>
-            <span className="stat__label">{current ? current.name : `Todos os cartões (${cards.length})`}</span>
-            <Button
-              variant="quiet"
-              size="sm"
-              icon="chevronRight"
-              onClick={() => go(1)}
-              title="Próximo cartão"
-              disabled={pageCount <= 1}
-            />
-          </div>
-
-          {/* Arco em vez de barra: o limite usado é um percentual contra um
-              teto, e a barra amarela de largura inteira punha cor decorativa
-              no card inteiro (revisão de design de 01/09/2026, "donut/gauge
-              para %"). O arco carrega a mesma cor de status num espaço
-              menor, com ícone e rótulo junto. */}
-          <div className="row row--between row--wrap" style={{ alignItems: 'center', gap: 'var(--sp-4)' }}>
-            <div className="stack" style={{ gap: 'var(--sp-3)', minWidth: 0 }}>
-              <StatTile label="Limite disponível" value={money(availableCents)} large />
-              <StatTile label="Limite total" value={money(limitCents)} />
-            </div>
-            <DebtServiceGauge
-              ratioBps={usedBps}
-              surface="paper"
-              bands={CARD_USAGE_BANDS}
-              caption="do limite total já comprometido"
-              emptyTitle="Sem limite cadastrado"
-              emptyBody="Informe o limite dos cartões para acompanhar quanto já está comprometido."
-            />
-          </div>
-
-          {current && (
-            <div className="row row--between" style={{ fontSize: 'var(--text-xs)' }}>
-              <span className="muted">
-                Fechamento <strong className="tabular">{fmtDate(current.nextClosingOn)}</strong>
-              </span>
-              <span className="muted">
-                Vencimento <strong className="tabular">{fmtDate(current.nextDueOn)}</strong>
-              </span>
-            </div>
-          )}
-
-          {pageCount > 1 && (
-            <div className="carousel-dots">
-              {Array.from({ length: pageCount }, (_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  className="carousel-dots__dot"
-                  aria-current={i === page}
-                  aria-label={i === 0 ? 'Todos os cartões' : cards[i - 1]?.name}
-                  onClick={() => setPage(i)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </Card>
-  )
-}
-
-/**
- * Substitui o diagrama Sankey por uma lista ranqueada dos mesmos dados
- * (`FlowEdge[]`) — revisão de UX de 26/09/2026 ("fluxo entre contas não
- * fica claro como o fluxo funciona exatamente"). `AccountFlowSankey` e
- * `shared/accountFlowGraph.ts` continuam existindo (têm cobertura própria
- * em `scripts/verify.ts`), só deixam de ser usados nesta tela.
- */
-function AccountFlowSimple({
-  edges,
-  totals,
-  isLoading,
-}: {
-  edges: FlowEdge[] | undefined
-  totals: { looseCents: number; looseCount: number } | undefined
-  isLoading: boolean
-}) {
-  return (
-    <Card
-      title="Fluxo entre contas"
-      subtitle="Transferências entre suas próprias contas, da maior para a menor"
-    >
-      {isLoading ? (
-        <SkeletonBlock height={160} />
-      ) : !edges || edges.length === 0 ? (
-        <EmptyState icon="search" title="Nada a listar" body="Sem transferências entre contas próprias no período." />
-      ) : (
-        <div className="stack stack--tight">
-          <ul className="ranked">
-            {[...edges]
-              .sort((a, b) => b.amountCents - a.amountCents)
-              .map((edge) => (
-                <li
-                  key={`${edge.fromAccountId}-${edge.toAccountId}`}
-                  className="ranked__item"
-                  style={{ gridTemplateColumns: 'minmax(0,1fr) auto auto' }}
-                >
-                  <span className="truncate">
-                    {edge.fromName} <Icon name="arrowUpRight" size={12} strokeWidth={2.2} /> {edge.toName}
-                  </span>
-                  <span className="ranked__share">{edge.count}x</span>
-                  <span className="ranked__value">{money(edge.amountCents)}</span>
-                </li>
-              ))}
-          </ul>
-          {totals && totals.looseCount > 0 && (
-            <p className="chart__note">
-              {totals.looseCount} transferência(s) sem par identificado, {money(totals.looseCents)} no total.
-            </p>
-          )}
-        </div>
-      )}
-    </Card>
-  )
-}
 
 /* ------------------------------------------------------------------ *
  * Pending — a confirmed future receipt/expense the bank hasn't posted
@@ -1315,7 +987,10 @@ function PendingSection({ flow, title }: { flow: 'income' | 'expense'; title: st
   })
 
   const rows = pending.data?.pending ?? []
-  const totalCents = rows.reduce((s, r) => s + Math.abs(r.amountCents), 0)
+  // Todas continuam na lista; o número principal é o pessoal, a empresa ao lado (decisions/0045).
+  const { pjAccountId, loading: pjLoading, error: pjError, retrying: pjRetrying, retry: retryPj } = usePjAccount()
+  const companyCents = rows.filter((r) => r.accountId === pjAccountId).reduce((s, r) => s + Math.abs(r.amountCents), 0)
+  const totalCents = rows.filter((r) => r.accountId !== pjAccountId).reduce((s, r) => s + Math.abs(r.amountCents), 0)
   const overdueCount = rows.filter((r) => r.isOverdue).length
 
   // decisions/0024: a forecast só some "sem aviso" quando o próprio próximo
@@ -1360,7 +1035,18 @@ function PendingSection({ flow, title }: { flow: 'income' | 'expense'; title: st
             </Button>
           </div>
         </div>
-        <StatTile label={flow === 'income' ? 'Ainda não caiu na conta' : 'Ainda não saiu da conta'} value={money(totalCents)} large />
+        {pending.isError || pjError ? (
+          <LoadError onRetry={() => (pending.isError ? pending.refetch() : retryPj())} retrying={pending.isFetching || pjRetrying} />
+        ) : !pending.data || pjLoading ? (
+          <SkeletonLines lines={2} />
+        ) : (
+          <StatTile
+            label={flow === 'income' ? 'Ainda não caiu nas contas pessoais' : 'Ainda não saiu das contas pessoais'}
+            value={money(totalCents)}
+            large
+            foot={companyCents > 0 ? <span className="muted">+ {money(companyCents)} na conta da empresa</span> : undefined}
+          />
+        )}
         {overdueCount > 0 && (
           <p className="chart__note">
             <span className="badge badge--critical">Atrasado</span> {overdueCount} de período(s) anterior(es) ainda{' '}
@@ -1717,7 +1403,7 @@ function PendingModal({ flow, onClose }: { flow: 'income' | 'expense'; onClose: 
   const [amount, setAmount] = useState('')
   const [accountId, setAccountId] = useState<number | null>(null)
   const [categoryId, setCategoryId] = useState<number | null>(null)
-  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [paymentDate, setPaymentDate] = useState(() => todayIso())
   const [installmentCount, setInstallmentCount] = useState('3')
   const [installmentsRealized, setInstallmentsRealized] = useState('0')
   /**
@@ -2181,12 +1867,13 @@ function FirstRun() {
             <div className="stack" style={{ maxWidth: '62ch' }}>
               <span className="stat__label">Primeiro passo</span>
               <h2 className="display" style={{ fontSize: 'var(--text-2xl)' }}>
-                Importe um extrato para começar
+                Conecte um banco ou importe um extrato para começar
               </h2>
               <p style={{ color: 'var(--on-slab-2)', fontSize: 'var(--text-base)' }}>
-                O app já conhece o formato de CSV do Itaú, Nubank (conta e cartão), Bradesco,
-                Santander e Inter: detecta o banco pelo cabeçalho, normaliza datas e valores,
-                marca duplicatas e sugere TAGs antes de gravar qualquer coisa.
+                Pelo Open Finance (Ajustes) as contas e os cartões sincronizam sozinhos. Também
+                dá para importar o CSV do Itaú, Nubank (conta e cartão), Bradesco, Santander e
+                Inter: o app detecta o banco pelo cabeçalho, marca duplicatas e sugere TAGs
+                antes de gravar qualquer coisa.
               </p>
               <div className="row" style={{ marginTop: 'var(--sp-2)' }}>
                 {/* Link com cara de botão, não um <button> dentro de um <a>: dois controles aninhados confundem teclado e leitor de tela. */}
@@ -2232,5 +1919,87 @@ function FirstRun() {
         </Bento>
       </div>
     </>
+  )
+}
+
+/**
+ * A empresa numa linha (decisions/0045): o que a PJ faturou e repassou no
+ * mês e quanto dá para retirar hoje, com o link para a Minha empresa. Fica
+ * fora dos números pessoais do topo.
+ */
+type CompanyLite = {
+  pjAccount: { name: string } | null
+  cascade: { revenueCents: number; withdrawalsCents: number }
+  withdrawable: { withdrawableCents: number } | null
+}
+
+function CompanyLine({ range }: { range: RangeSubset }) {
+  const month = singleMonthOf(range)
+  const { pjAccountId } = usePjAccount()
+  const company = useQuery({
+    queryKey: ['company-overview', month],
+    queryFn: () => api.get<CompanyLite>('/company/overview', { period: month! }),
+    enabled: month !== null && pjAccountId !== null,
+  })
+  if (pjAccountId === null) return null
+  const c = company.data
+  return (
+    <Card muted>
+      <div className="row row--between row--wrap" style={{ gap: 'var(--sp-3)' }}>
+        <span className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+          <Icon name="bank" size={16} />
+          <strong>Empresa{c?.pjAccount?.name ? ` (${c.pjAccount.name})` : ''}</strong>
+          {month === null ? (
+            <span className="muted">os números da PJ ficam fora do topo, que é pessoal</span>
+          ) : company.isError ? (
+            <span className="muted">
+              não foi possível carregar a empresa agora{' '}
+              <button type="button" className="link-button" onClick={() => company.refetch()}>
+                tentar de novo
+              </button>
+            </span>
+          ) : !c ? (
+            <span className="muted">carregando…</span>
+          ) : (
+            <span className="tabular">
+              faturou {money(c.cascade.revenueCents)} · repassou {money(c.cascade.withdrawalsCents)}
+              {c.withdrawable ? ` · retirável hoje ${money(c.withdrawable.withdrawableCents)}` : ''}
+            </span>
+          )}
+        </span>
+        <Link to="/dre" className="row" style={{ gap: 'var(--sp-1)' }}>
+          Minha empresa <Icon name="arrowRight" size={14} />
+        </Link>
+      </div>
+    </Card>
+  )
+}
+
+/** Um de cada (revisão de 09/10/2026): cada número tem uma tela dona, e aqui fica o atalho para ela. */
+function DetailLinks({ span }: { span?: 6 | 12 }) {
+  const items: Array<{ to: string; title: string; body: string; icon: IconName }> = [
+    { to: '/dividas', title: 'Cartões e dívidas', body: 'Quanto você deve, faturas que vencem e o que sai nos próximos meses', icon: 'wallet' },
+    { to: '/saude', title: 'Destino do dinheiro e saúde', body: 'Score, runway, radar de risco e o Motor financeiro', icon: 'gauge' },
+    { to: '/dre', title: 'Fluxo da empresa', body: 'Faturamento, repasse para a PF e quanto dá para retirar', icon: 'bank' },
+  ]
+  return (
+    <Card span={span} title="Em outras telas" subtitle="Cada número mora numa tela só; daqui você chega nela">
+      <div className="stack stack--tight">
+        {items.map((item) => (
+          <Link key={item.to} to={item.to} className="asset-row" style={{ alignItems: 'flex-start' }}>
+            <span className="row" style={{ gap: 'var(--sp-3)', minWidth: 0, alignItems: 'flex-start' }}>
+              <span className="icon-chip">
+                <Icon name={item.icon} size={16} />
+              </span>
+              <span className="stack" style={{ gap: 0, minWidth: 0 }}>
+                <span style={{ fontWeight: 600 }}>{item.title}</span>
+                <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{item.body}</span>
+              </span>
+            </span>
+            <Icon name="chevronRight" size={14} />
+          </Link>
+        ))}
+      </div>
+    </Card>
   )
 }

@@ -2,11 +2,12 @@ import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { invalidateInvestmentData } from '../lib/invalidate'
+import { historyNote, type NetWorth } from '../lib/health'
+import { todayIso } from '../lib/period'
 import { useMeta } from '../lib/store'
 import type { IconName } from '../components/ui/Icon'
-import { bps, centsToInput, date as fmtDate, money, parseMoneyInput, period as fmtPeriod } from '../lib/format'
+import { bps, centsToInput, date as fmtDate, money, parseMoneyInput } from '../lib/format'
 import {
-  Assumptions,
   Bento,
   Button,
   Card,
@@ -14,7 +15,6 @@ import {
   HeroFigure,
   Icon,
   Slab,
-  StatTile,
   SkeletonLines,
   useToast,
   type AssumptionBag,
@@ -36,29 +36,6 @@ import { NetWorthHistoryChart, type NetWorthPoint } from '../components/charts/N
  * carteira e dívida a cada chamada, e a série histórica reconstitui os três
  * em cada mês (`decisions` de "derivar, nunca guardar").
  */
-
-type NetWorth = {
-  balanceCents: number
-  investmentsCents: number
-  illiquidCents: number
-  financialCents: number
-  /** "Quanto você deve" pessoal: dívidas + cartões pessoais (decisions/0045) */
-  debtCents: number
-  debtBreakdown: { debtsCents: number; cardsCents: number }
-  /** patrimônio PESSOAL: contas pessoais + investimentos − dívida */
-  liquidityCents: number
-  company: { accountName: string | null; balanceCents: number; cardsCents: number; withdrawableCents: number | null } | null
-  assumptions: AssumptionBag
-}
-
-/** Quais meses do histórico são foto gravada e quais são reconstruídos (decisions/0045). */
-function historyNote(points: Array<{ period: string; source?: 'foto' | 'reconstruído' }> | undefined): string {
-  if (!points || points.length === 0) return ''
-  const firstPhoto = points.find((p) => p.source === 'foto')
-  if (!firstPhoto) return 'Ainda sem foto mensal: todos os meses são reconstruídos com os dados de hoje.'
-  const before = points.filter((p) => p.period < firstPhoto.period).length
-  return before > 0 ? `Foto mensal desde ${fmtPeriod(firstPhoto.period)}; os ${before} meses antes dela são reconstruídos.` : 'Todos os meses são fotos gravadas no fim do mês.'
-}
 
 type IlliquidItem = {
   assetId: number
@@ -338,7 +315,7 @@ function AddAssetModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
   // Data de aquisição: o degrau do bem no gráfico cai no mês certo (specs/personal-picture).
-  const today = meta.data?.today ?? new Date().toISOString().slice(0, 10)
+  const today = meta.data?.today ?? todayIso()
   const [acquiredOn, setAcquiredOn] = useState(today)
   const nameFieldId = useId()
   const valueFieldId = useId()
@@ -426,7 +403,7 @@ function RevalueModal({ item, onClose }: { item: IlliquidItem; onClose: () => vo
     mutationFn: () =>
       api.post(`/investments/assets/${item.assetId}/valuation`, {
         unitPriceCents: Math.abs(parseMoneyInput(value) ?? 0),
-        asOf: meta.data?.today ?? new Date().toISOString().slice(0, 10),
+        asOf: meta.data?.today ?? todayIso(),
       }),
     onSuccess: () => {
       toast(`Valor de ${item.name} atualizado`)

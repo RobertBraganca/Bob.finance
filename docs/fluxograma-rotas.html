@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fluxograma de rotas</title>
+<style>
+  :root {
+    --bg: #0f1013; --panel: #15171c; --panel-2: #1b1e25; --line: #2a2e38; --ink: #eceef3; --ink-2: #a3a9b8; --ink-3: #6f7686;
+    --new: #8b5cf6; --new-bg: #251d44; --chg: #d9a21b; --chg-bg: #2c2410; --same: #8b91a1; --same-bg: #1c1f26;
+    --infra: #2dd4bf; --infra-bg: #11302d; --edge: #6b7283; --edge-hi: #ffffff;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f5f8; --panel: #ffffff; --panel-2: #f1f2f6; --line: #d7dae3; --ink: #14161c; --ink-2: #4b5160; --ink-3: #7a8091;
+      --new: #6d3fe0; --new-bg: #efe9ff; --chg: #a66f00; --chg-bg: #fff3d6; --same: #5d6372; --same-bg: #eceef3;
+      --infra: #0f8f80; --infra-bg: #dcf6f2; --edge: #8a91a3; --edge-hi: #14161c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1760px; margin: 0 auto; padding: 24px 16px 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .lead { color: var(--ink-2); margin: 0 0 14px; font-size: 13px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 10px 0 12px; font-size: 13px; color: var(--ink-2); }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 2px solid; vertical-align: -1px; margin-right: 6px; }
+  .legend i.new { border-color: var(--new); background: var(--new-bg); }
+  .legend i.chg { border-color: var(--chg); background: var(--chg-bg); }
+  .legend i.same { border-color: var(--same); background: var(--same-bg); }
+  .legend i.infra { border-color: var(--infra); background: var(--infra-bg); }
+  .legend i.next { border: 2px dashed var(--ink-3); background: transparent; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .chip { border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); border-radius: 999px; padding: 6px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--new); border-color: var(--new); color: #fff; }
+  .scroller { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+  .board { position: relative; min-width: 1500px; padding: 18px 16px 22px; display: grid; grid-template-columns: 1.05fr .75fr 1.15fr 1fr .85fr .95fr; gap: 26px; }
+  .col { border: 1px dashed var(--line); border-radius: 12px; padding: 10px 10px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .col h2 { margin: 0 0 4px; font-size: 12px; color: var(--ink-2); font-weight: 600; letter-spacing: .01em; }
+  .node { position: relative; border: 2px solid var(--same); background: var(--same-bg); border-radius: 9px; padding: 8px 10px 8px; cursor: default; transition: opacity .15s, box-shadow .15s; z-index: 2; }
+  .node.new { border-color: var(--new); background: var(--new-bg); }
+  .node.chg { border-color: var(--chg); background: var(--chg-bg); }
+  .node.infra { border-color: var(--infra); background: var(--infra-bg); }
+  .node.next { border-style: dashed; border-color: var(--ink-3); background: transparent; }
+  .node .t { font-weight: 600; font-size: 13px; padding-right: 54px; word-break: break-word; }
+  .node .s { color: var(--ink-2); font-size: 11.5px; margin-top: 2px; }
+  .node .tag { position: absolute; top: -8px; right: 8px; font-size: 9px; font-weight: 700; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; color: #fff; }
+  .node.new .tag { background: var(--new); }
+  .node.chg .tag { background: var(--chg); color: #14100a; }
+  .node .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .dim { opacity: .16; }
+  .hi { box-shadow: 0 0 0 3px color-mix(in srgb, var(--edge-hi) 55%, transparent); }
+  .reads { box-shadow: 0 0 0 3px color-mix(in srgb, var(--chg) 70%, transparent); }
+  svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
+  svg.edges path { fill: none; stroke: var(--edge); stroke-width: 1.3; opacity: .55; transition: opacity .15s, stroke .15s; }
+  svg.edges path.dash { stroke-dasharray: 5 4; }
+  svg.edges path.hi { stroke: var(--edge-hi); stroke-width: 2; opacity: 1; }
+  svg.edges path.dim { opacity: .06; }
+  .note { margin-top: 14px; padding: 12px 14px; border-left: 4px solid var(--chg); background: var(--panel); border-radius: 8px; color: var(--ink-2); font-size: 13px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0 0 12px; color: var(--ink-2); font-size: 13px; }
+  .stats b { color: var(--ink); }
+  #tip { position: fixed; z-index: 50; max-width: 440px; max-height: 70vh; overflow: hidden; background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.35); pointer-events: none; display: none; font-size: 12.5px; }
+  #tip h3 { margin: 0 0 4px; font-size: 13px; }
+  #tip .pr { color: var(--ink-3); font-size: 11.5px; margin-bottom: 6px; }
+  #tip .sec { margin-top: 6px; color: var(--ink-2); }
+  #tip .sec b { color: var(--ink); }
+  #tip code { display: block; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink-2); white-space: normal; }
+  @media (max-width: 700px) { h1 { font-size: 19px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Fluxograma: do app ao banco, rota por rota</h1>
+  <p class="lead" id="lead"></p>
+  <div class="stats" id="stats"></div>
+  <div class="legend" aria-label="Legenda">
+    <span><i class="new"></i>novo nesta rodada (07 a 10/10)</span>
+    <span><i class="chg"></i>existia e foi alterado</span>
+    <span><i class="same"></i>existia, sem mudança</span>
+    <span><i class="infra"></i>infraestrutura e serviços externos</span>
+    <span><i class="next"></i>próximos marcos (ainda não existe)</span>
+  </div>
+  <div class="chips" role="group" aria-label="Filtro">
+    <button class="chip" data-f="all" aria-pressed="true">Tudo</button>
+    <button class="chip" data-f="chg" aria-pressed="false">Só o que foi alterado</button>
+    <button class="chip" data-f="new" aria-pressed="false">Só o que é novo</button>
+  </div>
+  <div class="scroller"><div class="board" id="board"></div></div>
+  <div class="note">Passe o mouse sobre uma caixa para ver o caminho dela de ponta a ponta, o que mudou e em qual PR. Cada número mora numa tela só (decisions/0045): as caixas com contorno amarelo no passar do mouse são os domínios que o domínio escolhido <strong>lê</strong>; não há seta de volta. Os contornos tracejados são o que ainda não existe.</div>
+</div>
+<div id="tip" role="tooltip"></div>
+<script>
+const D = {"screens": [{"id": "s_home", "title": "/", "sub": "Visão geral", "status": "chg", "calls": ["dashboard", "budget", "company", "cashflow", "goals", "transactions"], "direct": [], "mono": true, "tip": {"pr": "PR #15 (09/10) + ainda sem PR (10/10)", "text": "Passou a ser pessoal: receitas, despesas e saldo sem a conta PJ, teto e renda típica do Orçamento, linha da empresa, cards repetidos viraram links, comparação com o mesmo recorte do mês anterior."}, "apis": []}, {"id": "s_diario", "title": "/diario", "sub": "Próximos 7 dias e gasto do mês", "status": "chg", "calls": ["dashboard", "transactions"], "direct": [], "mono": true, "tip": {"pr": "PR #15 (09/10) + ainda sem PR (10/10)", "text": "Próximos 7 dias e saldo pessoal projetado, gasto contra o teto do Orçamento, clique no dia para ver os lançamentos; abre no mês certo ao recarregar."}, "apis": []}, {"id": "s_lanc", "title": "/lancamentos", "sub": "Lançamentos", "status": "same", "calls": ["transactions", "cashflow", "cards"], "direct": [], "mono": true, "tip": {"pr": "", "text": "Lista, filtros e edição dos lançamentos; aceita ?grupo= do Orçamento."}, "apis": []}, {"id": "s_dre", "title": "/dre", "sub": "Minha empresa (MEI)", "status": "new", "calls": ["company", "dashboard", "engine", "transactions"], "direct": [], "mono": true, "tip": {"pr": "PR #14 (08/10)", "text": "Substituiu a DRE: retirável da empresa, cascata do MEI, teto do MEI, cobertura do custo de vida, 12 meses e a DRE antiga recolhida."}, "apis": []}, {"id": "s_metas", "title": "/metas", "sub": "Orçamento (metas do mês)", "status": "new", "calls": ["goals", "budget"], "direct": [], "mono": true, "tip": {"pr": "PR #13 (07/10)", "text": "Orçamento por grupos unificado com Metas do mês: previsto x realizado por grupo de TAGs."}, "apis": []}, {"id": "s_ajustar", "title": "/metas/ajustar", "sub": "Ajustar o Orçamento", "status": "new", "calls": ["budget"], "direct": [], "mono": true, "tip": {"pr": "PR #13 (07/10)", "text": "Grupos, plano por % da renda e TAG → grupo."}, "apis": []}, {"id": "s_div", "title": "/dividas", "sub": "Endividamento", "status": "chg", "calls": ["debts", "cards", "cashflow"], "direct": [], "mono": true, "tip": {"pr": "PR #15 (09/10)", "text": "Endividamento v2: quanto você deve (dívidas + cartões), calendário de 6 meses, custo em reais, data livre, acordos e proposta, \"Usar a taxa do contrato\"."}, "apis": []}, {"id": "s_cart", "title": "/cartoes", "sub": "Cartões", "status": "chg", "calls": ["cards"], "direct": [], "mono": true, "tip": {"pr": "PR #15 (09/10)", "text": "Origem do dado (Open Finance ou à mão), fatura aberta e data da última leitura."}, "apis": []}, {"id": "s_inv", "title": "/investimentos", "sub": "Investimentos", "status": "chg", "calls": ["invest", "simulate"], "direct": [], "mono": true, "tip": {"pr": "PR #13 (07/10) + PR #14 (08/10)", "text": "Plano de compra de imóvel, calculadoras (juros compostos, renda, primeiro milhão) e Comparar alocações; reserva usa o custo de vida pessoal."}, "apis": []}, {"id": "s_pat", "title": "/patrimonio", "sub": "Patrimônio", "status": "chg", "calls": ["health", "invest"], "direct": [], "mono": true, "tip": {"pr": "PR #15 (09/10)", "text": "Patrimônio pessoal, empresa à parte, dívida igual à do Endividamento, data de aquisição do bem."}, "apis": []}, {"id": "s_saude", "title": "/saude", "sub": "Saúde financeira", "status": "chg", "calls": ["health", "engine"], "direct": [], "mono": true, "tip": {"pr": "PR #15 (09/10)", "text": "Score sem Liquidez, comprometimento único, runway pessoal, fotos mensais, Motor financeiro com custos da Minha empresa."}, "apis": []}, {"id": "s_imp", "title": "/importar", "sub": "Importar CSV", "status": "same", "calls": ["imports", "accounts"], "direct": [], "mono": true, "tip": {"pr": "", "text": "Detecta o banco, prepara o lote e confirma."}, "apis": []}, {"id": "s_cat", "title": "/categorias", "sub": "TAGs e regras", "status": "same", "calls": ["transactions", "dashboard"], "direct": [], "mono": true, "tip": {"pr": "", "text": "Categorias, regras e memória de categorização."}, "apis": []}, {"id": "s_aj", "title": "/ajustes", "sub": "Contas, bancos, Open Finance", "status": "chg", "calls": ["accounts", "openfinance", "cards", "transactions"], "direct": [], "mono": true, "tip": {"pr": "PR #15 (09/10)", "text": "Ligar cada cartão do app à conta de cartão do Meu Pluggy e sincronizar o resumo."}, "apis": []}, {"id": "s_perfil", "title": "/perfil", "sub": "Perfil", "status": "same", "calls": ["profile"], "direct": [], "mono": true, "tip": {"pr": "", "text": "Nome, tipo de conta (Pessoal ou Freelancer)."}, "apis": []}, {"id": "s_preco", "title": "/precificacao (+ orçamentos)", "sub": "Precificação e propostas", "status": "same", "calls": ["pricing"], "direct": [], "mono": true, "tip": {"pr": "", "text": "Só no perfil Freelancer. O ponto de equilíbrio passou a usar o custo fixo da Minha empresa."}, "apis": []}, {"id": "s_parc", "title": "/parceiros", "sub": "Receita de parceiros", "status": "same", "calls": ["partners"], "direct": [], "mono": true, "tip": {"pr": "", "text": "Só no perfil Freelancer."}, "apis": []}, {"id": "s_login", "title": "/login", "sub": "Entrar", "status": "same", "calls": [], "direct": ["x_auth"], "mono": true, "tip": {"pr": "", "text": "Autenticação pelo Supabase Auth; nenhuma rota abre sem sessão."}, "apis": []}, {"id": "s_cron", "title": "pg_cron 22:00 (BRT)", "sub": "rotina diária", "status": "chg", "calls": ["openfinance"], "direct": [], "mono": false, "tip": {"pr": "PR #15 (09/10)", "text": "Sincroniza contas e cartões do Open Finance e, depois, grava a foto mensal do score e do patrimônio."}, "apis": ["POST /ledger/cron/bank-sync"]}], "fns": [{"id": "f_ledger", "title": "ledger", "sub": "45 rotas · lançamentos, importação, Open Finance", "status": "chg", "tip": {"pr": "PR #15 (09/10)", "text": "Ganhou /card-connections e a foto mensal na rotina das 22:00."}}, {"id": "f_insights", "title": "insights", "sub": "138 rotas · análises, dívidas, saúde, investimentos", "status": "chg", "tip": {"pr": "PR #13 a #15 e ajustes de 10/10", "text": "Concentra a maior parte das regras: Orçamento, Minha empresa, Endividamento v2, Diário, Saúde."}}, {"id": "f_pricing", "title": "pricing", "sub": "30 rotas · cotações e propostas", "status": "chg", "tip": {"pr": "PR #15 (09/10)", "text": "O serviço não mudou, mas o ponto de equilíbrio vem do Motor financeiro (código compartilhado), que passou a usar o custo fixo da Minha empresa."}}, {"id": "f_tel", "title": "telemetry", "sub": "1 rota · eventos de uso", "status": "same", "tip": {"text": "Eventos de uso das telas."}}], "doms": [{"id": "transactions", "title": "Lançamentos, TAGs e regras", "sub": "18 rotas", "fn": "f_ledger", "status": "same", "db": ["d_core"], "ext": [], "reads": [], "next": [], "routes": ["GET /ledger/categories", "POST /ledger/categories", "PATCH /ledger/categories/:id", "DELETE /ledger/categories/:id", "GET /ledger/rules", "POST /ledger/rules", "PATCH /ledger/rules/:id", "DELETE /ledger/rules/:id", "DELETE /ledger/rules/memory/:signature", "POST /ledger/rules/recategorize", "GET /ledger/transactions", "POST /ledger/transactions/mark-reviewed", "POST /ledger/transactions", "PATCH /ledger/transactions/:id", "POST /ledger/transactions/categorize", "POST /ledger/transactions/hide", "POST /ledger/transactions/credit-card", "POST /ledger/transactions/delete"], "tip": {"pr": "", "text": "Lançamentos, categorização, regras e memória."}, "tables": ["accounts", "categories", "category_memory", "category_rules", "transactions"]}, {"id": "imports", "title": "Importação de CSV", "sub": "8 rotas", "fn": "f_ledger", "status": "same", "db": ["d_imp"], "ext": [], "reads": [], "next": [], "routes": ["POST /ledger/imports/detect", "POST /ledger/imports/stage", "GET /ledger/imports", "GET /ledger/imports/:id", "PATCH /ledger/imports/:id/rows", "POST /ledger/imports/:id/commit", "POST /ledger/imports/:id/discard", "POST /ledger/imports/:id/revert"], "tip": {"pr": "", "text": "Detectar, preparar, confirmar, descartar e desfazer lotes."}, "tables": ["import_batches", "parser_profiles", "staged_transactions"]}, {"id": "accounts", "title": "Contas e perfis de leitura", "sub": "8 rotas", "fn": "f_ledger", "status": "same", "db": ["d_core", "d_imp"], "ext": [], "reads": [], "next": [], "routes": ["GET /ledger/accounts", "POST /ledger/accounts", "PATCH /ledger/accounts/:id", "DELETE /ledger/accounts/:id", "GET /ledger/profiles", "POST /ledger/profiles", "PATCH /ledger/profiles/:id", "DELETE /ledger/profiles/:id"], "tip": {"pr": "", "text": "Contas, saldo inicial e perfis de leitura de CSV."}, "tables": ["accounts", "categories", "category_memory", "category_rules", "import_batches", "parser_profiles", "staged_transactions", "transactions"]}, {"id": "openfinance", "title": "Open Finance", "sub": "11 rotas", "fn": "f_ledger", "status": "chg", "db": ["d_of"], "ext": ["x_pluggy"], "reads": ["cards", "health"], "next": ["m_card"], "routes": ["GET /ledger/bank-connections", "GET /ledger/bank-connections/discover", "POST /ledger/bank-connections", "DELETE /ledger/bank-connections/:id", "POST /ledger/bank-connections/:id/sync", "POST /ledger/bank-connections/sync-all", "GET /ledger/card-connections", "POST /ledger/card-connections", "DELETE /ledger/card-connections/:id", "POST /ledger/card-connections/:id/sync", "POST /ledger/cron/bank-sync"], "tip": {"pr": "PR #15 (09/10)", "text": "Sincroniza contas correntes e agora o resumo dos cartões (limite, fatura aberta, faturas fechadas, parcelas futuras); a rotina diária grava a foto mensal."}, "tables": ["bank_connections", "card_bills", "card_connections", "card_months", "credit_card_snapshots"]}, {"id": "dashboard", "title": "Visão geral e análises", "sub": "10 rotas", "fn": "f_insights", "status": "chg", "db": ["d_core"], "ext": [], "reads": ["budget", "debts", "company", "cashflow"], "next": [], "routes": ["GET /insights/meta", "GET /insights/dashboard", "GET /insights/analytics/flows", "GET /insights/analytics/monthly", "GET /insights/analytics/dre", "GET /insights/analytics/dre/formal", "GET /insights/analytics/category-spending", "GET /insights/analytics/categories", "GET /insights/analytics/daily-series", "GET /insights/analytics/daily"], "tip": {"pr": "PR #15 (09/10) + ainda sem PR (10/10)", "text": "Dashboard e séries aceitam scope=personal (sem a PJ, com as retiradas como renda); o Diário (dailyView) calcula próximos dias e saldo projetado."}, "tables": ["accounts", "categories", "category_memory", "category_rules", "transactions"]}, {"id": "goals", "title": "Metas do mês e avisos", "sub": "10 rotas", "fn": "f_insights", "status": "chg", "db": ["d_goals"], "ext": [], "reads": ["budget", "dashboard"], "next": ["m_cat"], "routes": ["GET /insights/goals/:period", "PUT /insights/goals/:period", "PUT /insights/goals/:period/caps/:categoryId", "DELETE /insights/goals/:period/caps/:categoryId", "POST /insights/goals/:period/copy-from/:source", "GET /insights/goals/:period/suggestions", "GET /insights/goals/:period/gap-in-projects", "GET /insights/goals-history", "GET /insights/goals-year/:year", "GET /insights/home/banners"], "tip": {"pr": "PR #15 (09/10) + ainda sem PR (10/10)", "text": "Os avisos do sino usam o teto do Orçamento e a projeção do Diário; os tetos por categoria medem o gasto pessoal."}, "tables": ["budget_groups", "budget_plans", "category_caps", "monthly_goals"]}, {"id": "budget", "title": "Orçamento por grupos", "sub": "6 rotas", "fn": "f_insights", "status": "new", "db": ["d_goals"], "ext": [], "reads": ["invest", "debts"], "next": ["m_map"], "routes": ["GET /insights/budget/settings", "GET /insights/budget/:period", "POST /insights/budget/groups", "PATCH /insights/budget/groups/:id", "PUT /insights/budget/plan", "PUT /insights/budget/categories"], "tip": {"pr": "PR #13 (07/10)", "text": "Grupos de TAGs, plano por % da renda, renda típica pessoal, custo de vida pessoal e teto do mês; parcelas pagas na fatura entram pela TAG da dívida."}, "tables": ["budget_groups", "budget_plans", "category_caps", "monthly_goals"]}, {"id": "company", "title": "Minha empresa (MEI)", "sub": "3 rotas", "fn": "f_insights", "status": "new", "db": ["d_health"], "ext": [], "reads": ["budget", "cashflow", "invest"], "next": [], "routes": ["GET /insights/company/overview", "GET /insights/company/settings", "PUT /insights/company/settings"], "tip": {"pr": "PR #14 (08/10)", "text": "Retirável, cascata do MEI (DAS, custos, retiradas), teto do MEI e cobertura; as retiradas PJ → PF vêm de withdrawals."}, "tables": ["financial_engine_settings", "financial_health_settings", "monthly_closing_reviews", "monthly_snapshots"]}, {"id": "debts", "title": "Dívidas e acordos", "sub": "13 rotas", "fn": "f_insights", "status": "chg", "db": ["d_debt"], "ext": [], "reads": ["budget", "cards", "cashflow"], "next": [], "routes": ["GET /insights/debts", "POST /insights/debts", "PATCH /insights/debts/:id", "DELETE /insights/debts/:id", "POST /insights/debts/:id/snapshot", "GET /insights/debts/payments", "POST /insights/debts/payments", "DELETE /insights/debts/payments/:id", "GET /insights/debts/projection", "GET /insights/debts/reconciliation", "GET /insights/debts/overview-v2", "POST /insights/debts/:id/use-implied-rate", "POST /insights/debts/:id/renegotiation"], "tip": {"pr": "PR #15 (09/10)", "text": "Endividamento v2: total com cartões, comprometimento, calendário, custo, taxa do contrato, renegociação, dívida paga na fatura do cartão."}, "tables": ["debt_payments", "debt_renegotiations", "debt_snapshots", "debts"]}, {"id": "cards", "title": "Cartões de crédito", "sub": "6 rotas", "fn": "f_insights", "status": "chg", "db": ["d_cards", "d_of"], "ext": [], "reads": ["openfinance"], "next": [], "routes": ["GET /insights/credit-cards", "POST /insights/credit-cards", "PATCH /insights/credit-cards/:id", "DELETE /insights/credit-cards/:id", "POST /insights/credit-cards/:id/snapshot", "GET /insights/credit-cards/:id/invoices"], "tip": {"pr": "PR #15 (09/10)", "text": "Limite, ciclo e disponibilidade, agora com a origem (Open Finance ou à mão), fatura aberta e parcelas projetadas."}, "tables": ["bank_connections", "card_bills", "card_connections", "card_months", "credit_card_snapshots", "credit_cards"]}, {"id": "cashflow", "title": "Fluxo de caixa e pendências", "sub": "15 rotas", "fn": "f_insights", "status": "same", "db": ["d_cash"], "ext": [], "reads": [], "next": [], "routes": ["GET /insights/cash-flow/forecasts", "POST /insights/cash-flow/forecasts", "PATCH /insights/cash-flow/forecasts/:id", "DELETE /insights/cash-flow/forecasts/:id", "GET /insights/cash-flow/installments", "GET /insights/subscriptions/candidates", "POST /insights/subscriptions/dismiss", "POST /insights/subscriptions/confirm", "GET /insights/cash-flow/projection", "GET /insights/cash-flow/pending", "DELETE /insights/cash-flow/pending/:id", "GET /insights/cash-flow/reconciliation-candidates", "POST /insights/cash-flow/pending/:id/confirm-match", "POST /insights/cash-flow/pending/:id/settle", "POST /insights/cash-flow/reconciliation-candidates/dismiss"], "tip": {"pr": "", "text": "Previsões, parcelas, conciliação e assinaturas."}, "tables": ["cash_flow_forecasts", "reconciliation_dismissals", "skipped_occurrences", "subscription_dismissals"]}, {"id": "invest", "title": "Investimentos e plano de imóvel", "sub": "45 rotas", "fn": "f_insights", "status": "chg", "db": ["d_inv"], "ext": ["x_brapi"], "reads": ["budget"], "next": [], "routes": ["GET /insights/investments", "GET /insights/investments/illiquid", "GET /insights/investments/trades", "GET /insights/investments/summary", "GET /insights/investments/performance", "POST /insights/investments/assets", "PATCH /insights/investments/assets/:id", "DELETE /insights/investments/assets/:id", "POST /insights/investments/trades", "PATCH /insights/investments/trades/:id", "DELETE /insights/investments/trades/:id", "POST /insights/investments/assets/:id/valuation", "POST /insights/investments/assets/:id/refresh-quote", "POST /insights/investments/quotes/refresh-all", "POST /insights/investments/goals", "PATCH /insights/investments/goals/:id", "DELETE /insights/investments/goals/:id", "GET /insights/investments/property-plans/defaults", "GET /insights/investments/property-plans/:goalId", "POST /insights/investments/property-plans", "PATCH /insights/investments/property-plans/:goalId", "PUT /insights/investments/property-plans/:goalId/assets", "POST /insights/investments/property-plans/:goalId/purchase", "GET /insights/investments/goals/:id/projection", "GET /insights/investments/profitability", "POST /insights/investments/benchmarks/refresh", "GET /insights/investments/allocation-deviation", "PUT /insights/investments/allocation", "GET /insights/criteria", "POST /insights/criteria", "PATCH /insights/criteria/:id", "DELETE /insights/criteria/:id", "GET /insights/investments/assets/:id/note", "PUT /insights/investments/assets/:assetId/criteria/:criteriaId", "DELETE /insights/investments/assets/:assetId/criteria/:criteriaId", "GET /insights/investments/allocation/:assetClass", "GET /insights/investments/contribution-plan", "GET /insights/investments/reserve", "PUT /insights/investments/reserve", "PUT /insights/investments/passive-income-settings", "GET /insights/investments/proventos/resumo", "GET /insights/investments/proventos/evolucao", "GET /insights/investments/proventos/historico", "GET /insights/investments/proventos", "POST /insights/investments/reserve/contribute"], "tip": {"pr": "PR #13 (07/10) + PR #14 (08/10)", "text": "Carteira, metas, reserva (custo de vida pessoal), plano de compra de imóvel e cotações pela BRAPI."}, "tables": ["asset_criteria_answers", "asset_trades", "asset_valuations", "assets", "benchmark_returns", "criteria", "emergency_reserve_settings", "investment_goals", "passive_income_settings", "property_plans", "target_allocations"]}, {"id": "health", "title": "Saúde financeira e patrimônio", "sub": "10 rotas", "fn": "f_insights", "status": "chg", "db": ["d_health"], "ext": [], "reads": ["debts", "budget", "company", "invest"], "next": [], "routes": ["GET /insights/financial-health/score", "GET /insights/financial-health/score-history", "GET /insights/financial-health/net-worth-history", "GET /insights/financial-health/closing-checklist", "POST /insights/financial-health/closing-checklist", "GET /insights/financial-health/runway", "GET /insights/financial-health/net-worth", "GET /insights/financial-health/risk-radar", "GET /insights/financial-health/settings", "PUT /insights/financial-health/settings"], "tip": {"pr": "PR #15 (09/10)", "text": "Score, radar, runway, patrimônio pessoal e empresa à parte, fotos mensais; lê o número de cada tela dona."}, "tables": ["financial_engine_settings", "financial_health_settings", "monthly_closing_reviews", "monthly_snapshots"]}, {"id": "engine", "title": "Motor financeiro", "sub": "6 rotas", "fn": "f_insights", "status": "chg", "db": ["d_health"], "ext": [], "reads": ["company", "cards", "invest", "cashflow"], "next": [], "routes": ["GET /insights/financial-engine/available", "GET /insights/financial-engine/available-year", "GET /insights/financial-engine/records", "GET /insights/financial-engine/break-even", "GET /insights/financial-engine/settings", "PUT /insights/financial-engine/settings"], "tip": {"pr": "PR #15 (09/10) + ainda sem PR (10/10)", "text": "Destino do dinheiro e ponto de equilíbrio: custos PJ da Minha empresa e faturas abertas dos cartões."}, "tables": ["financial_engine_settings", "financial_health_settings", "monthly_closing_reviews", "monthly_snapshots"]}, {"id": "simulate", "title": "Simulador", "sub": "3 rotas", "fn": "f_insights", "status": "same", "db": [], "ext": [], "reads": ["health", "debts", "invest"], "next": [], "routes": ["POST /insights/simulate/one-time-expense", "POST /insights/simulate/debt-payoff", "POST /insights/simulate/decumulation"], "tip": {"pr": "", "text": "Simulações de gasto único, quitação e decumulação; nada grava."}, "tables": []}, {"id": "pricing", "title": "Precificação e propostas", "sub": "30 rotas", "fn": "f_pricing", "status": "same", "db": ["d_pricing"], "ext": [], "reads": ["engine"], "next": [], "routes": ["GET /pricing/settings", "PUT /pricing/settings", "GET /pricing/multipliers", "POST /pricing/multipliers", "PATCH /pricing/multipliers/:id", "DELETE /pricing/multipliers/:id", "POST /pricing/simulate", "GET /pricing/quotes/analytics", "GET /pricing/quotes", "POST /pricing/quotes", "GET /pricing/quotes/:id", "PATCH /pricing/quotes/:id", "DELETE /pricing/quotes/:id", "PATCH /pricing/quotes/:id/status", "POST /pricing/quotes/:id/approve", "GET /pricing/proposals", "GET /pricing/proposals/summary", "GET /pricing/proposals/item-suggestions", "GET /pricing/proposals/client-suggestions", "GET /pricing/proposals/quote-options", "GET /pricing/proposal-issuer", "PUT /pricing/proposal-issuer", "POST /pricing/proposals", "GET /pricing/proposals/:id", "PATCH /pricing/proposals/:id", "POST /pricing/proposals/:id/status", "POST /pricing/proposals/:id/mark-sent", "POST /pricing/proposals/:id/approve", "POST /pricing/proposals/:id/duplicate", "DELETE /pricing/proposals/:id"], "tip": {"pr": "", "text": "Cotações, múltiplos, propostas e emissor."}, "tables": ["pricing_multiplier_options", "pricing_settings", "project_quotes", "proposal_issuer_settings", "service_proposal_items", "service_proposals"]}, {"id": "partners", "title": "Parceiros", "sub": "9 rotas", "fn": "f_insights", "status": "same", "db": ["d_partners"], "ext": [], "reads": [], "next": [], "routes": ["GET /insights/partners", "GET /insights/partners/evolution", "GET /insights/partners/commissions", "POST /insights/partners/platforms", "PATCH /insights/partners/platforms/:id", "DELETE /insights/partners/platforms/:id", "POST /insights/partners/commissions", "DELETE /insights/partners/commissions/:id", "POST /insights/partners/platforms/:id/withdraw"], "tip": {"pr": "", "text": "Plataformas, comissões e saques."}, "tables": ["partner_commissions", "partner_platforms"]}, {"id": "profile", "title": "Perfil e telemetria", "sub": "3 rotas (insights + telemetry)", "fn": "f_insights", "status": "same", "db": ["d_profile"], "ext": [], "reads": [], "next": [], "routes": ["GET /insights/profile", "PUT /insights/profile", "POST /telemetry/events"], "tip": {"pr": "", "text": "Perfil do usuário e eventos de uso."}, "tables": ["profile_settings", "usage_events"]}], "dbs": [{"id": "d_core", "title": "Lançamentos e contas", "sub": "5 tabelas", "status": "same", "tables": ["accounts", "categories", "category_rules", "category_memory", "transactions"], "tip": {"pr": "", "text": ""}}, {"id": "d_imp", "title": "Importação", "sub": "3 tabelas", "status": "same", "tables": ["parser_profiles", "import_batches", "staged_transactions"], "tip": {"pr": "", "text": ""}}, {"id": "d_of", "title": "Open Finance e cartões ligados", "sub": "5 tabelas", "status": "chg", "tables": ["bank_connections", "card_connections", "card_bills", "card_months", "credit_card_snapshots"], "tip": {"pr": "PR #15 (09/10)", "text": "card_connections, card_bills e card_months são novas (resumo dos cartões); credit_card_snapshots recebe o disponível medido pelo banco."}}, {"id": "d_goals", "title": "Metas e Orçamento", "sub": "4 tabelas", "status": "chg", "tables": ["monthly_goals", "category_caps", "budget_groups", "budget_plans"], "tip": {"pr": "PR #13 (07/10)", "text": "budget_groups e budget_plans são novas; monthly_goals e category_caps continuam."}}, {"id": "d_debt", "title": "Dívidas", "sub": "4 tabelas", "status": "chg", "tables": ["debts", "debt_snapshots", "debt_payments", "debt_renegotiations"], "tip": {"pr": "PR #15 (09/10)", "text": "debt_renegotiations é nova; debts ganhou category_id, closed_reason e paid_via_card_id."}}, {"id": "d_cards", "title": "Cartões", "sub": "2 tabelas", "status": "same", "tables": ["credit_cards", "credit_card_snapshots"], "tip": {"pr": "", "text": ""}}, {"id": "d_cash", "title": "Fluxo de caixa", "sub": "4 tabelas", "status": "same", "tables": ["cash_flow_forecasts", "reconciliation_dismissals", "subscription_dismissals", "skipped_occurrences"], "tip": {"pr": "", "text": ""}}, {"id": "d_inv", "title": "Investimentos", "sub": "11 tabelas", "status": "chg", "tables": ["assets", "asset_trades", "asset_valuations", "benchmark_returns", "investment_goals", "property_plans", "target_allocations", "criteria", "asset_criteria_answers", "emergency_reserve_settings", "passive_income_settings"], "tip": {"pr": "PR #13 (07/10)", "text": "property_plans é nova (plano de compra de imóvel)."}}, {"id": "d_health", "title": "Saúde, empresa e motor", "sub": "4 tabelas", "status": "chg", "tables": ["financial_health_settings", "monthly_closing_reviews", "financial_engine_settings", "monthly_snapshots"], "tip": {"pr": "PR #15 (09/10)", "text": "monthly_snapshots é nova (foto mensal do score e do patrimônio); as colunas de empresa ficam em financial_engine_settings."}}, {"id": "d_pricing", "title": "Precificação", "sub": "6 tabelas", "status": "same", "tables": ["pricing_settings", "pricing_multiplier_options", "project_quotes", "service_proposals", "service_proposal_items", "proposal_issuer_settings"], "tip": {"pr": "", "text": ""}}, {"id": "d_partners", "title": "Parceiros", "sub": "2 tabelas", "status": "same", "tables": ["partner_platforms", "partner_commissions"], "tip": {"pr": "", "text": ""}}, {"id": "d_profile", "title": "Perfil e telemetria", "sub": "2 tabelas", "status": "same", "tables": ["profile_settings", "usage_events"], "tip": {"pr": "", "text": ""}}], "exts": [{"id": "x_pluggy", "title": "Meu Pluggy (Open Finance)", "sub": "contas, cartões, faturas, lançamentos", "status": "infra", "tip": {"text": "Somente leitura. As credenciais ficam no servidor; nenhuma compra de cartão vira lançamento."}}, {"id": "x_brapi", "title": "BRAPI", "sub": "cotações de ativos", "status": "infra", "tip": {"text": "Cotações da carteira."}}, {"id": "x_auth", "title": "Supabase Auth", "sub": "sessão e login", "status": "infra", "tip": {"text": "Todas as Edge Functions exigem sessão (ou o segredo da rotina diária)."}}], "marcos": [{"id": "m_map", "title": "Mapa TAG → grupo do Orçamento", "sub": "31 sugestões, nada salvo", "status": "next", "tip": {"text": "O mapeamento sugerido ainda não foi confirmado; sem ele, 29 TAGs ficam em \"Sem grupo\"."}}, {"id": "m_cat", "title": "Aviso de teto por categoria pelo Orçamento", "sub": "o sino ainda mede o teto antigo da categoria", "status": "next", "tip": {"text": "Os tetos por categoria das Metas do mês ainda alimentam um aviso do sino."}}, {"id": "m_card", "title": "Compras do cartão como lançamentos", "sub": "fora de escopo (decisions/0044)", "status": "next", "tip": {"text": "Hoje só o resumo do cartão entra; as compras não viram lançamento."}}], "stats": {"screens": 18, "routes": 214, "doms": 18, "tables": 51, "ledger": 45, "insights": 138, "pricing": 30, "telemetry": 1}};
+const COLS = [
+  ['Entradas (telas e rotinas)', 'screens'],
+  ['Edge Functions (API)', 'fns'],
+  ['Domínios', 'doms'],
+  ['Banco (Postgres)', 'dbs'],
+  ['Externos', 'exts'],
+  ['Próximos marcos', 'marcos'],
+];
+const STATUS_TAG = { new: 'NOVO', chg: 'ALTERADO' };
+const board = document.getElementById('board');
+const byId = {};
+const nodeEls = {};
+const all = [];
+function reg(list, col, kindStatusDefault) {
+  list.forEach((n) => { n.col = col; byId[n.id] = n; all.push(n); });
+}
+reg(D.screens, 0); reg(D.fns, 1); reg(D.doms, 2); reg(D.dbs, 3); reg(D.exts, 4); reg(D.marcos, 5);
+
+document.getElementById('lead').textContent =
+  'Todas as telas, as ' + D.stats.routes + ' rotas das Edge Functions, os domínios que as atendem e as tabelas que cada um toca.';
+document.getElementById('stats').innerHTML =
+  '<span><b>' + D.stats.screens + '</b> telas</span>' +
+  '<span><b>' + D.stats.routes + '</b> rotas de API (ledger ' + D.stats.ledger + ' · insights ' + D.stats.insights + ' · pricing ' + D.stats.pricing + ' · telemetry ' + D.stats.telemetry + ')</span>' +
+  '<span><b>' + D.stats.doms + '</b> domínios</span>' +
+  '<span><b>' + D.stats.tables + '</b> tabelas</span>';
+
+COLS.forEach(([title, key]) => {
+  const col = document.createElement('div');
+  col.className = 'col';
+  col.innerHTML = '<h2>' + title + '</h2>';
+  D[key].forEach((n) => {
+    const el = document.createElement('div');
+    el.className = 'node ' + (n.status || 'same');
+    el.dataset.id = n.id;
+    el.tabIndex = 0;
+    const tag = STATUS_TAG[n.status] ? '<span class="tag">' + STATUS_TAG[n.status] + '</span>' : '';
+    el.innerHTML = tag + '<div class="t' + (n.mono ? ' mono' : '') + '">' + n.title + '</div>' + (n.sub ? '<div class="s">' + n.sub + '</div>' : '');
+    col.appendChild(el);
+    nodeEls[n.id] = el;
+  });
+  board.appendChild(col);
+});
+
+// arestas
+const edges = [];
+const add = (a, b, dash) => { if (byId[a] && byId[b] && !edges.some((e) => e.a === a && e.b === b)) edges.push({ a, b, dash: !!dash }); };
+D.screens.forEach((s) => {
+  const fns = new Set((s.calls || []).map((d) => byId[d] && byId[d].fn).filter(Boolean));
+  fns.forEach((f) => add(s.id, f));
+  (s.direct || []).forEach((x) => add(s.id, x));
+});
+D.doms.forEach((d) => {
+  add(d.fn, d.id);
+  (d.db || []).forEach((x) => add(d.id, x));
+  (d.ext || []).forEach((x) => add(d.id, x));
+  (d.next || []).forEach((x) => add(d.id, x, true));
+});
+
+const svgNS = 'http://www.w3.org/2000/svg';
+const svg = document.createElementNS(svgNS, 'svg');
+svg.setAttribute('class', 'edges');
+board.insertBefore(svg, board.firstChild);
+const pathEls = [];
+function draw() {
+  svg.innerHTML = '';
+  pathEls.length = 0;
+  const base = board.getBoundingClientRect();
+  edges.forEach((e) => {
+    const A = nodeEls[e.a].getBoundingClientRect();
+    const B = nodeEls[e.b].getBoundingClientRect();
+    const x1 = A.right - base.left, y1 = A.top + A.height / 2 - base.top;
+    const x2 = B.left - base.left, y2 = B.top + B.height / 2 - base.top;
+    const dx = Math.max(40, (x2 - x1) * 0.5);
+    const p = document.createElementNS(svgNS, 'path');
+    p.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + (x1 + dx) + ',' + y1 + ' ' + (x2 - dx) + ',' + y2 + ' ' + x2 + ',' + y2);
+    if (e.dash) p.setAttribute('class', 'dash');
+    svg.appendChild(p);
+    pathEls.push({ e, p });
+  });
+  applyState();
+}
+
+// filtro e destaque
+let filter = 'all';
+let hover = null;
+function related(id) {
+  const n = byId[id];
+  const set = new Set([id]);
+  const reads = new Set();
+  const dom = (d) => { set.add(d); const x = byId[d]; set.add(x.fn); (x.db || []).forEach((v) => set.add(v)); (x.ext || []).forEach((v) => set.add(v)); (x.next || []).forEach((v) => set.add(v)); };
+  if (n.col === 0) {
+    (n.calls || []).forEach(dom);
+    (n.direct || []).forEach((v) => set.add(v));
+  } else if (n.col === 1) {
+    D.doms.filter((d) => d.fn === id).forEach((d) => { dom(d.id); D.screens.filter((s) => (s.calls || []).includes(d.id)).forEach((s) => set.add(s.id)); });
+  } else if (n.col === 2) {
+    dom(id);
+    D.screens.filter((s) => (s.calls || []).includes(id)).forEach((s) => set.add(s.id));
+    (n.reads || []).forEach((r) => reads.add(r));
+  } else {
+    D.doms.filter((d) => (d.db || []).includes(id) || (d.ext || []).includes(id) || (d.next || []).includes(id)).forEach((d) => {
+      set.add(d.id); set.add(d.fn);
+      D.screens.filter((s) => (s.calls || []).includes(d.id)).forEach((s) => set.add(s.id));
+    });
+    D.screens.filter((s) => (s.direct || []).includes(id)).forEach((s) => set.add(s.id));
+  }
+  return { set, reads };
+}
+function applyState() {
+  const rel = hover ? related(hover) : null;
+  all.forEach((n) => {
+    const el = nodeEls[n.id];
+    const matches = filter === 'all' || n.status === filter;
+    const inRel = !rel || rel.set.has(n.id) || rel.reads.has(n.id);
+    el.classList.toggle('dim', !matches || !inRel);
+    el.classList.toggle('hi', !!rel && rel.set.has(n.id) && n.id === hover);
+    el.classList.toggle('reads', !!rel && rel.reads.has(n.id));
+  });
+  pathEls.forEach(({ e, p }) => {
+    const A = byId[e.a], B = byId[e.b];
+    const matches = filter === 'all' || (A.status === filter && B.status === filter);
+    const inRel = !rel || (rel.set.has(e.a) && rel.set.has(e.b));
+    p.classList.toggle('dim', !matches || !inRel);
+    p.classList.toggle('hi', !!rel && inRel && matches);
+  });
+}
+document.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => {
+  filter = c.dataset.f;
+  document.querySelectorAll('.chip').forEach((x) => x.setAttribute('aria-pressed', String(x === c)));
+  applyState();
+}));
+
+// tooltip
+const tip = document.getElementById('tip');
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+function showTip(n, ev) {
+  const t = n.tip || {};
+  let h = '<h3>' + esc(n.title) + '</h3>';
+  const st = { new: 'novo nesta rodada', chg: 'existia e foi alterado', same: 'existia, sem mudança', infra: 'infraestrutura', next: 'próximo marco, ainda não existe' }[n.status || 'same'];
+  h += '<div class="pr">' + st + (t.pr ? ' · ' + esc(t.pr) : '') + '</div>';
+  if (t.text) h += '<div>' + esc(t.text) + '</div>';
+  if (n.routes && n.routes.length) {
+    const max = 34;
+    h += '<div class="sec"><b>' + n.routes.length + ' rota(s)</b></div><code>' + n.routes.slice(0, max).map(esc).join('<br>') + (n.routes.length > max ? '<br>… +' + (n.routes.length - max) + ' rotas' : '') + '</code>';
+  }
+  if (n.tables && n.tables.length) h += '<div class="sec"><b>Tabelas:</b> ' + esc(n.tables.join(', ')) + '</div>';
+  if (n.reads && n.reads.length) h += '<div class="sec"><b>Lê de:</b> ' + esc(n.reads.map((r) => byId[r].title).join(', ')) + '</div>';
+  if (n.apis && n.apis.length) h += '<div class="sec"><b>Chama:</b> ' + esc(n.apis.join(', ')) + '</div>';
+  tip.innerHTML = h;
+  tip.style.display = 'block';
+  moveTip(ev);
+}
+function moveTip(ev) {
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if (x + w > window.innerWidth - 8) x = ev.clientX - w - pad;
+  if (y + h > window.innerHeight - 8) y = Math.max(8, window.innerHeight - h - 8);
+  tip.style.left = Math.max(8, x) + 'px';
+  tip.style.top = y + 'px';
+}
+Object.keys(nodeEls).forEach((id) => {
+  const el = nodeEls[id];
+  el.addEventListener('mouseenter', (ev) => { hover = id; applyState(); showTip(byId[id], ev); });
+  el.addEventListener('mousemove', moveTip);
+  el.addEventListener('mouseleave', () => { hover = null; applyState(); tip.style.display = 'none'; });
+  el.addEventListener('focus', () => { hover = id; applyState(); const r = el.getBoundingClientRect(); showTip(byId[id], { clientX: r.right, clientY: r.top }); });
+  el.addEventListener('blur', () => { hover = null; applyState(); tip.style.display = 'none'; });
+});
+window.addEventListener('resize', draw);
+requestAnimationFrame(() => requestAnimationFrame(draw));
+</script>
+</body>
+</html>

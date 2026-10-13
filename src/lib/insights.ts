@@ -63,7 +63,7 @@ export type InsightItem = {
   title: string
   description: string
   assumptions: AssumptionBag
-  /** só o Radar de risco e o lembrete de fechamento apontam pra fora do Painel — os banners de gasto já estão na própria tela. */
+  /** o link leva à tela dona do número (hoje só o radar e o fechamento, que apontam para a Saúde). */
   linkTo?: string
 }
 

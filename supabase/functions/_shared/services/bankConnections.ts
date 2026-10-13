@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
 import { accounts, bankConnections, cardConnections, categories, importBatches, stagedTransactions, transactions } from '../db/schema.ts'
 import { dedupeHash, merchantSignature, normalizeDescription } from '../core/normalize.ts'
+import { addDays, saoPauloDate, todayIso } from '../core/dates.ts'
 import * as pluggy from './pluggy.ts'
 import { autoCommitClearRows, stageRows, type StageRow } from './imports.ts'
 
@@ -11,17 +12,6 @@ import { syncAllCards } from './cardSync.ts'
  * Fase 1: só contas correntes. Cada sincronização vira um lote de
  * importação revisável, como um CSV; nada entra direto no ledger.
  */
-
-/** Data no fuso do Brasil: a Pluggy manda horário real em UTC, e um gasto às 22h não pode cair no dia seguinte. */
-function saoPauloDate(iso: string | Date): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(iso))
-}
-
-function shiftDays(isoDate: string, days: number): string {
-  const d = new Date(`${isoDate}T12:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
-}
 
 /** "Nu Pagamentos S.A. - Instituição de Pagamento (Conta Pré-paga)" vira "Nubank". */
 function bankName(raw: string): string {
@@ -109,7 +99,7 @@ export async function createConnection(input: { accountId: number; providerItemI
       .from(transactions)
       .where(and(eq(transactions.accountId, input.accountId), eq(transactions.source, 'csv'), eq(transactions.pending, false)))
   )[0]?.last
-  const syncFrom = lastCsv ?? shiftDays(saoPauloDate(new Date()), -365)
+  const syncFrom = lastCsv ?? addDays(todayIso(), -365)
 
   const row = (
     await db
@@ -158,7 +148,7 @@ export async function syncConnection(id: number) {
   if (!conn) throw new Error('conexão não encontrada')
 
   try {
-    const today = saoPauloDate(new Date())
+    const today = todayIso()
     const fetched = await pluggy.listTransactions(conn.providerAccountId, conn.syncFrom, today)
     const posted = fetched
       .filter((t) => t.status === 'POSTED')

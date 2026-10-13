@@ -31,3 +31,6 @@ src/assets/negociacao-*.xlsx
 # Relatórios da skill beta-user: citam saldos, receitas e dívidas reais do
 # usuário, mesmo critério de data/ acima. Ficam só na máquina.
 docs/beta-reviews/
+
+# gerado por `deno check` local
+supabase/functions/*/deno.lock

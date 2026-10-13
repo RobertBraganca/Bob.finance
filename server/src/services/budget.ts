@@ -2,7 +2,7 @@ import { asc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { budgetGroups, budgetPlans, categories, debts } from '../db/schema'
 import { installmentsCents } from '../core/propertyPlan'
-import { addMonths, periodBounds, todayIso } from '../core/dates'
+import { addMonths, dayRange, monthsBetween, periodBounds, todayIso } from '../core/dates'
 import { medianCents } from '../core/money'
 import {
   FULL_BPS,
@@ -14,7 +14,6 @@ import {
   planFor,
   suggestGroup,
   type Allocation,
-  type BudgetGroupSource,
   type BudgetPlanRow,
   type CategoryNode,
 } from '../core/budget'
@@ -100,12 +99,6 @@ async function incomeByMonth(fromPeriod: string, toPeriod: string, scope: Accoun
 type ExpenseRow = { period: string; categoryId: number; pending: boolean; cents: number; n: number }
 type TradeRow = { period: string; toGoal: boolean; cents: number; n: number }
 
-const monthIndexOf = (anchor: string, period: string) => {
-  const [ay, am] = anchor.split('-').map(Number) as [number, number]
-  const [py, pm] = period.split('-').map(Number) as [number, number]
-  return (py - ay) * 12 + (pm - am)
-}
-
 /**
  * Parcela de dívida paga na fatura de um cartão (specs/personal-picture): não
  * vira lançamento em conta nenhuma, então entra aqui pela TAG da dívida e
@@ -128,7 +121,7 @@ async function cardDebtRows(fromPeriod: string, toPeriod: string): Promise<Expen
       ? installmentsCents({ principalCents: d.principalCents, aprBps: d.aprBps, installmentCount: d.installmentCount, amortization: d.amortization, monthlyFeesCents: d.monthlyFeesCents })
       : null
     for (let period = fromPeriod; period <= toPeriod; period = addMonths(period, 1)) {
-      const k = monthIndexOf(anchor, period)
+      const k = monthsBetween(anchor, period)
       if (k < 0 || (d.installmentCount !== null && k >= d.installmentCount)) continue
       if (d.endPeriod && period > d.endPeriod) continue
       if (has.has(`${d.id}|${period}`)) continue
@@ -227,10 +220,13 @@ function actualsFor(
   return { byGroup, ungrouped }
 }
 
-/** Mediana da renda dos 6 meses fechados antes de `period`, só meses com alguma renda. */
+/** Meses fechados que formam a renda e o custo de vida típicos (a borda de baixo da faixa de 6 a 12 meses do crédito). */
+export const TYPICAL_WINDOW_MONTHS = 6
+
+/** Mediana da renda dos meses fechados antes de `period`, só meses com alguma renda. */
 function typicalIncome(period: string, incomes: Map<string, number>): number {
   const values: number[] = []
-  for (let i = 1; i <= 6; i++) {
+  for (let i = 1; i <= TYPICAL_WINDOW_MONTHS; i++) {
     const v = incomes.get(addMonths(period, -i)) ?? 0
     if (v > 0) values.push(v)
   }
@@ -244,10 +240,35 @@ function typicalIncome(period: string, incomes: Map<string, number>): number {
  */
 export async function typicalPersonalIncome(period = currentPeriod()): Promise<{ typicalCents: number; sampleMonths: number }> {
   const scope = await accountScope()
-  const incomes = await incomeByMonth(addMonths(period, -6), period, scope)
+  const incomes = await incomeByMonth(addMonths(period, -TYPICAL_WINDOW_MONTHS), period, scope)
   let sampleMonths = 0
-  for (let i = 1; i <= 6; i++) if ((incomes.get(addMonths(period, -i)) ?? 0) > 0) sampleMonths++
+  for (let i = 1; i <= TYPICAL_WINDOW_MONTHS; i++) if ((incomes.get(addMonths(period, -i)) ?? 0) > 0) sampleMonths++
   return { typicalCents: typicalIncome(period, incomes), sampleMonths }
+}
+
+/**
+ * Gasto por dia na MESMA base do Orçamento (contas pessoais, TAGs de despesa, sem as "fora do
+ * orçamento"): o ritmo da projeção do mês precisa medir o que o teto mede. Um dia por posição.
+ */
+export async function budgetDailySpend(from: string, to: string): Promise<number[]> {
+  const scope = await accountScope()
+  const days = dayRange(from, to)
+  if (scope.personal.length === 0) return days.map(() => 0)
+  const cats = await categoryMap()
+  const rows = await db.execute<{ day: string; categoryId: number; cents: number }>(sql`
+    select t.posted_on as day, t.category_id as "categoryId", -coalesce(sum(t.amount_cents), 0) as cents
+    from transactions t
+    join categories c on c.id = t.category_id
+    where c.kind = 'expense' and t.pending = false and t.ignored = false
+      and t.account_id in (${idList(scope.personal)})
+      and t.posted_on between ${from} and ${to}
+    group by 1, 2`)
+  const byDay = new Map<string, number>()
+  for (const r of rows) {
+    if (effectiveGroupOf(Number(r.categoryId), cats).excluded) continue
+    byDay.set(r.day, (byDay.get(r.day) ?? 0) + Number(r.cents))
+  }
+  return days.map((d) => Math.max(0, byDay.get(d) ?? 0))
 }
 
 /**
@@ -258,7 +279,7 @@ export async function typicalPersonalIncome(period = currentPeriod()): Promise<{
  */
 export async function typicalPersonalSpending(period = currentPeriod()): Promise<{ typicalCents: number; sampleMonths: number }> {
   const scope = await accountScope()
-  const [cats, rows] = await Promise.all([categoryMap(), expenseRows(addMonths(period, -6), addMonths(period, -1), scope.personal)])
+  const [cats, rows] = await Promise.all([categoryMap(), expenseRows(addMonths(period, -TYPICAL_WINDOW_MONTHS), addMonths(period, -1), scope.personal)])
   const byMonth = new Map<string, number>()
   for (const r of rows) {
     if (r.pending || effectiveGroupOf(r.categoryId, cats).excluded) continue
@@ -268,28 +289,69 @@ export async function typicalPersonalSpending(period = currentPeriod()): Promise
   return { typicalCents: medianCents(values), sampleMonths: values.length }
 }
 
+/** Teto de gasto do mês: soma do previsto dos grupos de gasto; sem plano (ou soma zero) não há teto. */
+function spendCapOf(b: { plan: unknown; groups: Array<{ source: string; plannedCents: number }> }): number | null {
+  const cap = b.groups.filter((g) => g.source === 'categories').reduce((sum, g) => sum + g.plannedCents, 0)
+  return b.plan && cap > 0 ? cap : null
+}
+
 /**
  * Teto de gasto do mês (specs/personal-picture): o previsto dos grupos de
  * categorias do plano (sem os grupos de aporte), contra o gasto do mês nas
  * contas pessoais. `capCents` nulo quando não há plano ou renda.
  */
-export async function monthSpendingVsCap(period: string): Promise<{ spentCents: number; capCents: number | null; incomeCents: number }> {
+export async function monthSpendingVsCap(period: string): Promise<{ spentCents: number; capCents: number | null; incomeCents: number; pendingCents: number }> {
   const b = await budgetFor(period)
-  const cap = b.groups.filter((g) => g.source === 'categories').reduce((sum, g) => sum + g.plannedCents, 0)
-  return { spentCents: b.totals.spentCents, capCents: b.plan && cap > 0 ? cap : null, incomeCents: b.income.cents }
+  return { spentCents: b.totals.spentCents, capCents: spendCapOf(b), incomeCents: b.income.cents, pendingCents: b.totals.pendingSpendCents }
 }
 
-export async function budgetFor(period: string) {
+/** O que `budgetFor` lê do banco, para um intervalo de meses: vários meses saem de uma carga só. */
+type BudgetInputs = {
+  scope: AccountScope
+  groups: GroupRow[]
+  plans: BudgetPlanRow[]
+  cats: Map<number, CategoryNode & { name: string }>
+  incomes: Map<string, number>
+  expenses: ExpenseRow[]
+  trades: TradeRow[]
+}
+
+async function loadBudgetInputs(firstPeriod: string, lastPeriod: string): Promise<BudgetInputs> {
   await ensureSeed()
   const scope = await accountScope()
   const [groups, plans, cats, incomes, expenses, trades] = await Promise.all([
     allGroups(),
     allPlans(),
     categoryMap(),
-    incomeByMonth(addMonths(period, -6), period, scope),
-    expenseRows(period, period, scope.personal),
-    tradeRows(period, period),
+    // A renda típica de cada mês olha os meses anteriores a ele (TYPICAL_WINDOW_MONTHS).
+    incomeByMonth(addMonths(firstPeriod, -TYPICAL_WINDOW_MONTHS), lastPeriod, scope),
+    expenseRows(firstPeriod, lastPeriod, scope.personal),
+    tradeRows(firstPeriod, lastPeriod),
   ])
+  return { scope, groups, plans, cats, incomes, expenses, trades }
+}
+
+export async function budgetFor(period: string) {
+  return budgetFromInputs(period, await loadBudgetInputs(period, period))
+}
+
+/**
+ * Gasto e teto de vários meses com UMA carga do banco (o histórico do score
+ * fazia ~13 consultas por mês; revisão de 10/10/2026).
+ */
+export async function spendingVsCapForPeriods(periods: string[]): Promise<Map<string, { spentCents: number; capCents: number | null; pendingCents: number }>> {
+  const out = new Map<string, { spentCents: number; capCents: number | null; pendingCents: number }>()
+  if (periods.length === 0) return out
+  const sorted = [...periods].sort()
+  const inputs = await loadBudgetInputs(sorted[0]!, sorted[sorted.length - 1]!)
+  for (const period of periods) {
+    const b = budgetFromInputs(period, inputs)
+    out.set(period, { spentCents: b.totals.spentCents, capCents: spendCapOf(b), pendingCents: b.totals.pendingSpendCents })
+  }
+  return out
+}
+
+function budgetFromInputs(period: string, { scope, groups, plans, cats, incomes, expenses, trades }: BudgetInputs) {
   const plan = planFor(period, plans)
   const income = budgetIncome({
     receivedCents: incomes.get(period) ?? 0,
@@ -324,6 +386,8 @@ export async function budgetFor(period: string) {
       contributedCents,
       remainingCents: income.cents - spentCents - contributedCents,
       spentShareBps: income.cents > 0 ? Math.round((spentCents / income.cents) * FULL_BPS) : null,
+      // O que ainda vai sair no mês, na mesma base do gasto (grupos de gasto + sem grupo, parcelas no cartão inclusas).
+      pendingSpendCents: lines.filter((l) => l.source === 'categories').reduce((sum, l) => sum + l.pendingCents, 0) + actuals.ungrouped.pendingCents,
     },
     groups: lines,
     ungrouped: actuals.ungrouped,
@@ -332,7 +396,7 @@ export async function budgetFor(period: string) {
       formula: 'previsto = renda do mês × % do grupo; realizado = despesas confirmadas das TAGs do grupo, ou compras de ativos nos grupos de aporte',
       contas: scope.pjAccountId === null ? 'todas as contas (nenhuma conta PJ configurada no Motor)' : 'todas as contas, menos a conta PJ do Motor financeiro',
       renda: income.estimated
-        ? 'renda típica (mediana de 6 meses fechados), porque a renda do mês ainda não entrou toda'
+        ? `renda típica (mediana de ${TYPICAL_WINDOW_MONTHS} meses fechados), porque a renda do mês ainda não entrou toda`
         : 'receitas confirmadas do mês, mais o repasse da conta PJ lançado como transferência',
       foraDoOrcamento: 'lançamentos sem TAG, transferências, investimentos e TAGs marcadas "fora do orçamento"',
       aportes: 'Metas: compras em ativos separados para uma meta; Liberdade Financeira: compras nos demais ativos (reserva inclusa). Vendas não abatem.',
@@ -351,7 +415,7 @@ export async function budgetSettings() {
     allGroups(),
     allPlans(),
     categoryMap(),
-    incomeByMonth(addMonths(first, -6), period, scope),
+    incomeByMonth(addMonths(first, -TYPICAL_WINDOW_MONTHS), period, scope),
     expenseRows(first, last, scope.personal),
     tradeRows(first, last),
   ])
