@@ -60,7 +60,7 @@ Registro e organização, nunca recomendação (decisions/0010).
    depois de cada campo, com destaque quando algo diverge (valor diferente,
    data muito distante).
 6. O usuário confirma, edita ou cancela cada card.
-7. `POST /assistant/apply` recebe **só** `{ proposalId, confirmedActionIds[] }`.
+7. `POST /assistant/apply` recebe `{ proposalId, confirmedActionIds[], edits? }` (`edits`: só data, valor e comentário, por ação). Pode haver vários `apply` da mesma proposta (Confirmar por card), cada um com seu `undoToken`.
    O servidor aplica o que ele mesmo guardou (nunca o corpo do navegador), numa
    única transação, e grava o antes/depois.
 8. A resposta traz o resultado e um `undoToken`. `POST /assistant/undo`
@@ -76,7 +76,7 @@ A proposta expira em 15 minutos. Frase ambígua gera `questions` e nenhuma açã
 | `create_transaction` | `flow` income/expense, `description`, `amountCents`, `postedOn`, `accountId`, `categoryId?`, `pending`, `notes?` | `transactions` |
 | `diary_entry` | `postedOn`, `description`, `amountCents`, `accountId`, `categoryId?` | mesmo caminho do lançamento rápido do Diário |
 | `record_trade` | `assetId`, `kind` buy/sell, `quantity`, `unitPriceCents`, `tradedOn`, `feesCents?` | `investments` |
-| `reserve_contribution` | `amountCents`, `contributedOn`, `assetId?` | `investments` (aporte na reserva) |
+| `reserve_contribution` | `amountCents`, `tradedOn`, `kind?` (buy/sell) | `investments` (`contributeToReserve`) |
 
 Cada ação se valida contra o banco antes de virar card: o `pendingId` existe e
 está pendente, o `assetId` existe e não está arquivado, a conta existe, o valor

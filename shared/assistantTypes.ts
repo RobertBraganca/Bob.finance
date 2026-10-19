@@ -158,10 +158,37 @@ export type AssistantMessageResponse = {
   expiresAt?: string
 }
 
-export const assistantApplyRequest = z.object({
-  proposalId: z.string().uuid(),
-  confirmedActionIds: z.array(z.string().min(1)).min(1).max(MAX_ACTIONS_PER_PROPOSAL),
-})
+/**
+ * O que o usuário pode corrigir num card antes de confirmar ("Editar"). Só estes
+ * campos, e só valem se a ação os tem: o servidor aplica sobre a ação GUARDADA e a
+ * revalida (nunca grava uma ação mandada pelo navegador).
+ */
+export const assistantEditSchema = z
+  .object({
+    postedOn: isoDate.optional(),
+    tradedOn: isoDate.optional(),
+    amountCents: positiveCents.optional(),
+    /** `update_pending` e `create_transaction` */
+    notes: z.string().trim().min(1).max(500).optional(),
+    /** `add_note` */
+    note: z.string().trim().min(1).max(500).optional(),
+  })
+  .strict()
+export type AssistantEdit = z.infer<typeof assistantEditSchema>
+
+/**
+ * Pode haver VÁRIOS `apply` da mesma proposta, cada um com ações diferentes
+ * (Confirmar por card): cada aplicação devolve o próprio `undoToken`, e uma ação
+ * já aplicada não se aplica de novo. `.strict()`: campo desconhecido é erro, não
+ * é ignorado em silêncio.
+ */
+export const assistantApplyRequest = z
+  .object({
+    proposalId: z.string().uuid(),
+    confirmedActionIds: z.array(z.string().min(1)).min(1).max(MAX_ACTIONS_PER_PROPOSAL),
+    edits: z.record(z.string().min(1), assistantEditSchema).optional(),
+  })
+  .strict()
 export type AssistantApplyRequest = z.infer<typeof assistantApplyRequest>
 
 export type AssistantApplyResponse = {
