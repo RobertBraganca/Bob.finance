@@ -23,10 +23,9 @@ export function accountScope(): Promise<AccountScope> {
 }
 
 async function computeAccountScope(): Promise<AccountScope> {
-  const [settings, rows] = await Promise.all([
-    db.select({ pj: financialEngineSettings.pjAccountId }).from(financialEngineSettings).limit(1),
-    db.select({ id: accounts.id }).from(accounts),
-  ])
+  // Em sequência: o pooler de transação das Edge Functions trava com fan-out concorrente.
+  const settings = await db.select({ pj: financialEngineSettings.pjAccountId }).from(financialEngineSettings).limit(1)
+  const rows = await db.select({ id: accounts.id }).from(accounts)
   const pjAccountId = settings[0]?.pj ?? null
   return { personal: rows.map((r) => r.id).filter((id) => id !== pjAccountId), pjAccountId }
 }
@@ -57,8 +56,8 @@ export async function pjWithdrawals(
     return s
   }
   // Somado pelo lado que recebe: é ele que diz se o dinheiro virou receita.
-  const [toPersonal, fromPersonal] = await Promise.all([
-    db.execute<{ period: string; cents: number }>(sql`
+  // As duas consultas em sequência (pooler das Edge Functions); cada uma tem um EXISTS correlacionado.
+  const toPersonal = await db.execute<{ period: string; cents: number }>(sql`
       select substr(t.posted_on, 1, 7) as period, coalesce(sum(t.amount_cents), 0) as cents
       from transactions t
       left join categories c on c.id = t.category_id
@@ -74,8 +73,8 @@ export async function pjWithdrawals(
             and o.posted_on between ${legFrom} and ${legTo}
             and abs(o.posted_on::date - t.posted_on::date) <= 1
         )
-      group by 1`),
-    db.execute<{ period: string; cents: number }>(sql`
+      group by 1`)
+  const fromPersonal = await db.execute<{ period: string; cents: number }>(sql`
       select substr(t.posted_on, 1, 7) as period, coalesce(sum(t.amount_cents), 0) as cents
       from transactions t
       left join categories c on c.id = t.category_id
@@ -91,8 +90,7 @@ export async function pjWithdrawals(
             and o.posted_on between ${legFrom} and ${legTo}
             and abs(o.posted_on::date - t.posted_on::date) <= 1
         )
-      group by 1`),
-  ])
+      group by 1`)
   for (const row of toPersonal) slot(row.period).toPersonalCents += Number(row.cents)
   for (const row of fromPersonal) slot(row.period).fromPersonalCents += Number(row.cents)
   return out

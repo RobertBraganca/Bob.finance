@@ -79,18 +79,17 @@ async function incomeByMonth(fromPeriod: string, toPeriod: string, scope: Accoun
   const to = periodBounds(toPeriod).end
   const out = new Map<string, number>()
   if (scope.personal.length === 0) return out
-  const [income, transfers] = await Promise.all([
-    db.execute<{ period: string; cents: number }>(sql`
+  // Em sequência (pooler de transação das Edge Functions).
+  const income = await db.execute<{ period: string; cents: number }>(sql`
       select substr(t.posted_on, 1, 7) as period, coalesce(sum(t.amount_cents), 0) as cents
       from transactions t
       join categories c on c.id = t.category_id
       where c.kind = 'income' and t.pending = false and t.ignored = false
         and t.account_id in (${idList(scope.personal)})
         and t.posted_on between ${from} and ${to}
-      group by 1`),
-    // O repasse PJ → PF não lançado como receita: a mesma função de "Minha empresa".
-    pjWithdrawals(fromPeriod, toPeriod, scope),
-  ])
+      group by 1`)
+  // O repasse PJ → PF não lançado como receita: a mesma função de "Minha empresa".
+  const transfers = await pjWithdrawals(fromPeriod, toPeriod, scope)
   for (const row of income) out.set(row.period, Number(row.cents))
   for (const [period, t] of transfers) out.set(period, (out.get(period) ?? 0) + t.toPersonalCents)
   return out
@@ -319,15 +318,15 @@ type BudgetInputs = {
 async function loadBudgetInputs(firstPeriod: string, lastPeriod: string): Promise<BudgetInputs> {
   await ensureSeed()
   const scope = await accountScope()
-  const [groups, plans, cats, incomes, expenses, trades] = await Promise.all([
-    allGroups(),
-    allPlans(),
-    categoryMap(),
-    // A renda típica de cada mês olha os meses anteriores a ele (TYPICAL_WINDOW_MONTHS).
-    incomeByMonth(addMonths(firstPeriod, -TYPICAL_WINDOW_MONTHS), lastPeriod, scope),
-    expenseRows(firstPeriod, lastPeriod, scope.personal),
-    tradeRows(firstPeriod, lastPeriod),
-  ])
+  // Em sequência, não Promise.all: com o pooler de transação das Edge Functions, este fan-out
+  // (somado ao de incomeByMonth e expenseRows) deixava a rota sem resposta.
+  const groups = await allGroups()
+  const plans = await allPlans()
+  const cats = await categoryMap()
+  // A renda típica de cada mês olha os meses anteriores a ele (TYPICAL_WINDOW_MONTHS).
+  const incomes = await incomeByMonth(addMonths(firstPeriod, -TYPICAL_WINDOW_MONTHS), lastPeriod, scope)
+  const expenses = await expenseRows(firstPeriod, lastPeriod, scope.personal)
+  const trades = await tradeRows(firstPeriod, lastPeriod)
   return { scope, groups, plans, cats, incomes, expenses, trades }
 }
 
@@ -411,14 +410,13 @@ export async function budgetSettings() {
   const first = addMonths(period, -6)
   const last = addMonths(period, -1)
   const scope = await accountScope()
-  const [groups, plans, cats, incomes, expenses, trades] = await Promise.all([
-    allGroups(),
-    allPlans(),
-    categoryMap(),
-    incomeByMonth(addMonths(first, -TYPICAL_WINDOW_MONTHS), period, scope),
-    expenseRows(first, last, scope.personal),
-    tradeRows(first, last),
-  ])
+  // Em sequência (pooler de transação das Edge Functions), como em loadBudgetInputs.
+  const groups = await allGroups()
+  const plans = await allPlans()
+  const cats = await categoryMap()
+  const incomes = await incomeByMonth(addMonths(first, -TYPICAL_WINDOW_MONTHS), period, scope)
+  const expenses = await expenseRows(first, last, scope.personal)
+  const trades = await tradeRows(first, last)
   const months = Array.from({ length: 6 }, (_, i) => addMonths(first, i)).map((m) => {
     const a = actualsFor(m, groups, expenses, trades, cats)
     return { incomeCents: incomes.get(m) ?? 0, actuals: new Map([...a.byGroup].map(([id, v]) => [id, v.actualCents])) }

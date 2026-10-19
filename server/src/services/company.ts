@@ -149,14 +149,14 @@ async function computeCompanyOverview(period: string) {
   const das = await dasCategoryIds(row)
   const first = addMonths(period, -11)
   const isCurrent = period === currentPeriod()
-  const [months, transfers, spending, balances, reserve, last] = await Promise.all([
-    pjMonths(pjAccountId, first, period, das.ids),
-    pjWithdrawals(first, period, scope),
-    monthlySpending(first, period),
-    accountBalances(),
-    reserveStatus(),
-    lastDasPaid(pjAccountId, das.ids),
-  ])
+  // Em sequência: com o pooler de transação das Edge Functions, estas seis leituras
+  // concorrentes (mais as de dentro de cada uma) deixavam a rota sem resposta.
+  const months = await pjMonths(pjAccountId, first, period, das.ids)
+  const transfers = await pjWithdrawals(first, period, scope)
+  const spending = await monthlySpending(first, period)
+  const balances = await accountBalances()
+  const reserve = await reserveStatus()
+  const last = await lastDasPaid(pjAccountId, das.ids)
   const monthOf = (p: string): PjMonth => months.get(p) ?? { revenueCents: 0, dasCents: 0, costsCents: 0, hasMovement: false }
   const withdrawalsOf = (p: string) => {
     const t = transfers.get(p)

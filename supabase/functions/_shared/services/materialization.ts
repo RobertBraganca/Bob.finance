@@ -50,7 +50,8 @@ async function signature(): Promise<string> {
 async function run(): Promise<void> {
   const before = await signature()
   if (before === lastSignature) return
-  await Promise.all([materializeAll(), materializeAllDebts()])
+  await materializeAll()
+  await materializeAllDebts()
   // Depois de criar linhas, a contagem de pendências vinculadas mudou: a
   // assinatura guardada é a do estado JÁ gerado, senão a próxima leitura
   // rodaria tudo de novo à toa.
