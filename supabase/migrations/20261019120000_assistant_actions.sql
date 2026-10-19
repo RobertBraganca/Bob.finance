@@ -2,7 +2,9 @@
 --
 -- Só uma tabela e um tipo novos: nenhuma linha existente muda. Guarda a frase,
 -- a proposta do modelo, o que o `apply` gravou (com antes/depois, de onde sai o
--- Desfazer) e o estado. A expiração (15 min) é calculada por `created_at`, sem
+-- Desfazer) e o estado. Uma proposta pode ter VÁRIOS apply (Confirmar por card):
+-- `applied` é uma lista de entradas, cada uma com o `batch` (o undoToken do apply)
+-- e `undone`; sem coluna nem índice de token (a tabela é minúscula). A expiração (15 min) é calculada por `created_at`, sem
 -- coluna própria. Mesmo padrão das outras tabelas: RLS ligado e sem política,
 -- então a API REST pública não a alcança; as Edge Functions acessam pelo Postgres.
 -- Idempotente.
@@ -19,7 +21,6 @@ create table if not exists assistant_actions (
   phrase text not null,
   proposal jsonb not null,
   applied jsonb,
-  undo_token uuid,
   status assistant_action_status not null default 'proposed',
   created_at timestamptz not null default now(),
   applied_at timestamptz,
@@ -27,7 +28,6 @@ create table if not exists assistant_actions (
 );
 
 create unique index if not exists assistant_actions_proposal_uq on assistant_actions (proposal_id);
-create unique index if not exists assistant_actions_undo_token_uq on assistant_actions (undo_token) where undo_token is not null;
 create index if not exists assistant_actions_created_idx on assistant_actions (created_at);
 
 alter table assistant_actions enable row level security;

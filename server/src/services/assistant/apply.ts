@@ -5,7 +5,9 @@ import { assetTrades, assets, assistantActions, transactions } from '../../db/sc
 import {
   MAX_ACTIONS_PER_PROPOSAL,
   PROPOSAL_TTL_MINUTES,
+  assistantActionSchema,
   type AssistantActionType,
+  type AssistantEdit,
   type AssistantApplyResponse,
   type AssistantProposal,
   type AssistantUndoResponse,
@@ -23,11 +25,13 @@ import { appendNote } from './format'
  *
  * Regras que este arquivo garante:
  *  - o `apply` só grava ações que o SERVIDOR guardou em `assistant_actions`; ids
- *    confirmados que não estão na proposta são ignorados;
+ *    confirmados que não estão na proposta são ignorados; as edições do usuário
+ *    valem só sobre a ação guardada e só nos campos permitidos;
  *  - cada ação é revalidada contra o banco (`describeAction`) antes de gravar;
  *  - tudo numa única transação: uma ação inválida desfaz as outras;
- *  - o antes/depois de cada registro fica em `applied`, e o `undo` só reverte
- *    enquanto o registro continuar igual ao "depois" gravado.
+ *  - uma proposta aceita vários apply (um por card), cada um um lote com o seu
+ *    `undoToken`; o antes/depois de cada registro fica em `applied`, e o `undo`
+ *    só reverte um lote enquanto os registros continuarem iguais ao "depois".
  *
  * Todas as funções aceitam um `executor` opcional (a transação do chamador), para
  * os testes rodarem dentro de uma transação que termina em rollback. Quando o
@@ -61,8 +65,8 @@ type TradeImage = {
   feesCents: number
 }
 
-/** Uma ação aplicada, com o antes e o depois: a fonte do Desfazer. */
-export type AppliedEntry =
+/** O que `applyAction` devolve de uma ação gravada: o registro e o antes/depois. */
+type AppliedCore =
   | {
       actionId: string
       type: AssistantActionType
@@ -85,6 +89,19 @@ export type AppliedEntry =
       createdAssetId?: number
     }
 
+/**
+ * Uma ação aplicada, com o antes e o depois: a fonte do Desfazer. `batch` é o
+ * undoToken do apply que a gravou (um apply = um lote); `undone` marca o que o
+ * Desfazer do lote já reverteu; `action` é a ação como foi gravada (a EDITADA,
+ * quando houve edição, com `edited: true`).
+ */
+export type AppliedEntry = AppliedCore & {
+  batch: string
+  undone: boolean
+  edited?: true
+  action: ProposedAction
+}
+
 export type StoredProposal = {
   proposalId: string
   conversationId: string | null
@@ -92,13 +109,28 @@ export type StoredProposal = {
   summary: string
   actions: ProposedAction[]
   questions: string[]
-  /** `proposed` vencida aparece como `expired` aqui (a leitura não grava) */
+  /**
+   * `proposed` enquanto restar ação sem aplicar; `applied` quando todas as ações
+   * estão aplicadas (e não desfeitas); `undone` quando todas as entradas foram
+   * desfeitas. `proposed` vencida sem nada aplicado aparece como `expired`
+   * (a leitura não grava).
+   */
   status: 'proposed' | 'applied' | 'undone' | 'expired'
+  /** passou de PROPOSAL_TTL_MINUTES: não aceita ação nova, mas o Desfazer segue valendo */
+  expired: boolean
   createdAt: string
   /** ISO com fuso */
   expiresAt: string
-  undoToken: string | null
+  /** uma entrada por ação aplicada, de todos os lotes; nulo antes do primeiro apply */
   applied: AppliedEntry[] | null
+}
+
+/** Estado da proposta a partir das entradas (a expiração é à parte). */
+function statusOf(actions: ProposedAction[], entries: AppliedEntry[]): 'proposed' | 'applied' | 'undone' {
+  const active = new Set(entries.filter((e) => !e.undone).map((e) => e.actionId))
+  if (actions.length > 0 && actions.every((a) => active.has(a.id))) return 'applied'
+  if (entries.length > 0 && active.size === 0) return 'undone'
+  return 'proposed'
 }
 
 const isoOf = (column: unknown) =>
@@ -189,10 +221,14 @@ function toStored(
     summary: proposal.summary,
     actions: proposal.actions,
     questions: proposal.questions,
-    status: row.status === 'proposed' && expired ? 'expired' : row.status,
+    // Vencida sem nenhuma ação aplicada: `expired`. Com algo aplicado, o estado das entradas vale.
+    status:
+      row.status === 'proposed' && expired && !((row.applied as AppliedEntry[] | null) ?? []).some((e) => !e.undone)
+        ? 'expired'
+        : row.status,
+    expired,
     createdAt: row.createdAt,
     expiresAt,
-    undoToken: row.undoToken,
     applied: (row.applied as AppliedEntry[] | null) ?? null,
   }
 }
@@ -214,7 +250,7 @@ export async function getProposal(proposalId: string, executor: DbExecutor = db)
  * ------------------------------------------------------------------ */
 
 /** Grava UMA ação (já validada) e devolve o antes/depois. Usa só o `tx` recebido. */
-async function applyAction(action: ProposedAction, tx: DbExecutor): Promise<AppliedEntry> {
+async function applyAction(action: ProposedAction, tx: DbExecutor): Promise<AppliedCore> {
   switch (action.type) {
     case 'update_pending': {
       const current = await requirePending(action.pendingId, tx)
@@ -318,70 +354,130 @@ async function applyAction(action: ProposedAction, tx: DbExecutor): Promise<Appl
 }
 
 /**
+ * Campos que o usuário pode corrigir no card, por tipo de ação. O que não está
+ * aqui a ação não tem (ou não aceita edição) e a edição é recusada.
+ */
+const EDITABLE_FIELDS: Record<AssistantActionType, ReadonlyArray<keyof AssistantEdit>> = {
+  update_pending: ['postedOn', 'amountCents', 'notes'],
+  add_note: ['note'],
+  create_transaction: ['postedOn', 'amountCents', 'notes'],
+  diary_entry: ['postedOn', 'amountCents'],
+  record_trade: ['tradedOn'],
+  reserve_contribution: ['tradedOn', 'amountCents'],
+}
+
+/**
+ * Aplica a edição SOBRE A AÇÃO GUARDADA (nunca uma ação mandada pelo navegador),
+ * só nos campos permitidos do tipo; campo que a ação não tem é `invalid_action`.
+ * O resultado passa pelo schema do contrato antes de seguir (e o `apply` ainda
+ * o revalida contra o banco).
+ */
+function applyEdit(action: ProposedAction, edit: AssistantEdit): { action: ProposedAction; edited: boolean } {
+  const allowed = EDITABLE_FIELDS[action.type]
+  const fields = (Object.keys(edit) as Array<keyof AssistantEdit>).filter((key) => edit[key] !== undefined)
+  for (const field of fields) {
+    if (!allowed.includes(field)) {
+      throw new AssistantError('invalid_action', `A ação ${action.id} (${action.type}) não tem o campo "${field}" para editar.`)
+    }
+  }
+  if (fields.length === 0) return { action, edited: false }
+  const parsed = assistantActionSchema.safeParse({ ...action, ...edit })
+  if (!parsed.success) {
+    throw new AssistantError('invalid_action', `A edição da ação ${action.id} não é válida: ${parsed.error.issues[0]?.message ?? 'valor inválido'}.`)
+  }
+  return { action: { ...parsed.data, id: action.id }, edited: true }
+}
+
+/**
  * Aplica as ações CONFIRMADAS da proposta guardada, numa transação só (tudo ou
- * nada). Ids confirmados que não estão na proposta são ignorados; se nenhum está,
- * a chamada é recusada. Recusa também `proposal_not_found`, `proposal_expired` e
- * `already_applied`.
+ * nada). Pode haver VÁRIOS apply por proposta, cada um com ações diferentes: cada
+ * aplicação é um lote com o próprio `undoToken`, e uma ação já aplicada (e não
+ * desfeita) não se aplica de novo (`already_applied`).
+ *
+ *  - Ids confirmados que não estão na proposta são ignorados; se nenhum está, a
+ *    chamada é recusada (`invalid_action`).
+ *  - `edits` (por id de ação) corrige campos permitidos sobre a ação guardada; id
+ *    de edição fora das ações confirmadas, ou campo que a ação não tem, é
+ *    `invalid_action`. Fica gravada a ação editada, com `edited: true`.
+ *  - A expiração só bloqueia aplicar ação nova; o Desfazer de um lote já aplicado
+ *    segue valendo.
+ *  - Recusa também `proposal_not_found` e `proposal_expired`.
  */
 export async function applyProposal(
   proposalId: string,
   confirmedActionIds: string[],
+  edits?: Record<string, AssistantEdit>,
   executor: DbExecutor = db,
 ): Promise<AssistantApplyResponse> {
   const first = await getProposal(proposalId, executor)
-  if (first.status === 'applied' || first.status === 'undone') {
-    throw new AssistantError('already_applied', 'Esta proposta já foi aplicada. Envie a frase de novo se quiser repetir.')
-  }
-  if (first.status === 'expired') {
-    // Marca fora da transação de aplicar (que não vai existir) e recusa.
-    await executor
-      .update(assistantActions)
-      .set({ status: 'expired' })
-      .where(and(eq(assistantActions.proposalId, proposalId), eq(assistantActions.status, 'proposed')))
-    throw new AssistantError('proposal_expired', 'A proposta expirou. Envie a frase de novo.')
-  }
-
   const confirmed = new Set(confirmedActionIds)
   const selected = first.actions.filter((action) => confirmed.has(action.id))
   if (selected.length === 0) {
     throw new AssistantError('invalid_action', 'Nenhuma das ações confirmadas faz parte desta proposta.')
   }
+  const selectedIds = new Set(selected.map((a) => a.id))
+  for (const editedId of Object.keys(edits ?? {})) {
+    if (!selectedIds.has(editedId)) {
+      throw new AssistantError('invalid_action', `A edição da ação ${editedId} não vale: ela não está entre as ações confirmadas desta proposta.`)
+    }
+  }
+  // Edita e valida o formato antes de abrir a transação.
+  const ready = selected.map((action) => ({ original: action, ...applyEdit(action, edits?.[action.id] ?? {}) }))
+
+  const firstActive = new Set((first.applied ?? []).filter((e) => !e.undone).map((e) => e.actionId))
+  if (ready.some((r) => firstActive.has(r.original.id))) {
+    throw new AssistantError('already_applied', 'Esta ação já foi aplicada. Desfaça antes, ou envie a frase de novo.')
+  }
+  if (first.expired) {
+    // Marca fora da transação de aplicar (o rollback de um erro a desfaria). Sem nada
+    // aplicado a proposta vira `expired`; o que já foi aplicado continua desfazível.
+    if (firstActive.size === 0) {
+      await executor
+        .update(assistantActions)
+        .set({ status: 'expired' })
+        .where(and(eq(assistantActions.proposalId, proposalId), eq(assistantActions.status, 'proposed')))
+    }
+    throw new AssistantError('proposal_expired', 'A proposta expirou. Envie a frase de novo.')
+  }
 
   return executor.transaction(async (tx) => {
-    // Trava a linha: dois "Confirmar" ao mesmo tempo não aplicam duas vezes.
+    // Trava a linha: dois "Confirmar" ao mesmo tempo não aplicam a mesma ação duas vezes.
     const locked = (
       await tx
-        .select({ status: assistantActions.status, expired: expiredSql })
+        .select({ row: assistantActions, expired: expiredSql })
         .from(assistantActions)
         .where(eq(assistantActions.proposalId, proposalId))
         .for('update')
     )[0]
     if (!locked) throw new AssistantError('proposal_not_found', 'Proposta não encontrada. Envie a frase de novo.')
-    if (locked.status !== 'proposed') {
-      throw new AssistantError('already_applied', 'Esta proposta já foi aplicada. Envie a frase de novo se quiser repetir.')
+    const previous = (locked.row.applied as AppliedEntry[] | null) ?? []
+    const active = new Set(previous.filter((e) => !e.undone).map((e) => e.actionId))
+    if (ready.some((r) => active.has(r.original.id))) {
+      throw new AssistantError('already_applied', 'Esta ação já foi aplicada. Desfaça antes, ou envie a frase de novo.')
     }
     if (locked.expired) throw new AssistantError('proposal_expired', 'A proposta expirou. Envie a frase de novo.')
 
+    const batch = randomUUID()
     const entries: AppliedEntry[] = []
-    for (const action of selected) {
-      // Revalida contra o estado de agora (inclusive o que as ações anteriores já gravaram).
+    for (const { action, edited } of ready) {
+      // Revalida a ação (editada, se houve) contra o estado de agora, inclusive o que as anteriores gravaram.
       await describeAction(action, tx)
-      entries.push(await applyAction(action, tx))
+      const core = await applyAction(action, tx)
+      entries.push({ ...core, batch, undone: false, action, ...(edited ? { edited: true as const } : {}) })
     }
 
-    const undoToken = randomUUID()
+    const all = [...previous, ...entries]
     const updated = (
       await tx
         .update(assistantActions)
-        .set({ status: 'applied', applied: entries, undoToken, appliedAt: sql`now()` })
-        .where(and(eq(assistantActions.proposalId, proposalId), eq(assistantActions.status, 'proposed')))
+        .set({ status: statusOf(first.actions, all), applied: all, appliedAt: sql`now()` })
+        .where(eq(assistantActions.id, locked.row.id))
         .returning({ appliedAt: isoOf(assistantActions.appliedAt) })
-    )[0]
-    if (!updated) throw new AssistantError('already_applied', 'Esta proposta já foi aplicada. Envie a frase de novo se quiser repetir.')
+    )[0]!
 
     return {
       applied: entries.map((e) => ({ actionId: e.actionId, table: e.table, recordId: e.recordId })),
-      undoToken,
+      undoToken: batch,
       appliedAt: updated.appliedAt,
     }
   })
@@ -437,28 +533,39 @@ async function undoEntry(entry: AppliedEntry, tx: DbExecutor): Promise<void> {
 }
 
 /**
- * Desfaz uma aplicação pela imagem "antes". Criação de lançamento desfaz apagando;
- * compra, venda e aporte desfazem apagando a operação; atualização de pendência e
- * comentário restauram os campos. Recusa (`undo_refused`) se qualquer registro
- * mudou depois, e nada é desfeito pela metade.
+ * Desfaz UM lote (um apply) pela imagem "antes": só as entradas daquele `undoToken`,
+ * marcadas `undone: true` no fim. Criação de lançamento desfaz apagando; compra,
+ * venda e aporte desfazem apagando a operação; atualização de pendência e
+ * comentário restauram os campos. Recusa (`undo_refused`) se o lote já foi desfeito
+ * ou se qualquer registro mudou depois, e nada é desfeito pela metade. Token
+ * inexistente: `proposal_not_found`. A expiração da proposta não bloqueia o Desfazer.
  */
 export async function undoApplied(undoToken: string, executor: DbExecutor = db): Promise<AssistantUndoResponse> {
   return executor.transaction(async (tx) => {
     const row = (
-      await tx.select().from(assistantActions).where(eq(assistantActions.undoToken, undoToken)).for('update')
+      await tx
+        .select()
+        .from(assistantActions)
+        .where(sql`${assistantActions.applied} @> ${JSON.stringify([{ batch: undoToken }])}::jsonb`)
+        .for('update')
     )[0]
     if (!row) throw new AssistantError('proposal_not_found', 'Não achei nada para desfazer com esse código.')
-    if (row.status === 'undone') refuse('Esta aplicação já foi desfeita.')
-    if (row.status !== 'applied') refuse('Esta proposta não foi aplicada; não há o que desfazer.')
 
-    const entries = (row.applied as AppliedEntry[] | null) ?? []
+    const all = (row.applied as AppliedEntry[] | null) ?? []
+    const batch = all.filter((e) => e.batch === undoToken)
+    if (batch.length === 0 || batch.every((e) => e.undone)) refuse('Esta aplicação já foi desfeita.')
+
     // Do último para o primeiro: o que uma ação gravou em cima da outra sai na ordem certa.
-    for (const entry of [...entries].reverse()) await undoEntry(entry, tx)
+    for (const entry of [...batch].reverse()) {
+      if (!entry.undone) await undoEntry(entry, tx)
+    }
 
+    const next = all.map((e) => (e.batch === undoToken ? { ...e, undone: true } : e))
+    const actions = (row.proposal as { actions: ProposedAction[] }).actions
     await tx
       .update(assistantActions)
-      .set({ status: 'undone', undoneAt: sql`now()` })
+      .set({ status: statusOf(actions, next), applied: next, undoneAt: sql`now()` })
       .where(eq(assistantActions.id, row.id))
-    return { undone: entries.length }
+    return { undone: batch.length }
   })
 }
