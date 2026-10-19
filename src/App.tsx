@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/shell/Shell'
+import { AssistantPanel } from './components/assistant/AssistantPanel'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from './components/ui/sidebar'
 import { Card, Icon, PageSkeleton } from './components/ui'
 import { telemetry } from './lib/telemetry'
@@ -39,6 +40,15 @@ const ProposalDetailPage = lazy(() => import('./pages/proposals/ProposalDetailPa
 const PartnersPage = lazy(() => import('./pages/Partners').then((m) => ({ default: m.PartnersPage })))
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })))
 const ProfilePage = lazy(() => import('./pages/Profile').then((m) => ({ default: m.ProfilePage })))
+
+/**
+ * Rota de desenvolvimento do assistente (`/dev/assistente`): só existe no
+ * `vite dev`. Em produção `import.meta.env.DEV` é `false` na compilação, então
+ * o `import()` abaixo e o chunk dele não entram no build.
+ */
+const AssistantDevPage = import.meta.env.DEV
+  ? lazy(() => import('./pages/dev/AssistantDev').then((m) => ({ default: m.AssistantDevPage })))
+  : null
 
 /** Fallback do Suspense enquanto o chunk da rota baixa — só aparece na
  * primeira visita a cada tela (chunk fica em cache do navegador depois).
@@ -233,6 +243,8 @@ function AuthedApp() {
           </RouteErrorBoundary>
         </div>
       </SidebarInset>
+      {/* Botão fixo + painel do assistente: um só, em todas as telas autenticadas. */}
+      <AssistantPanel />
     </SidebarProvider>
   )
 }
@@ -241,6 +253,16 @@ export function App() {
   usePageViewTelemetry()
   usePageTitle()
   const { session, loading } = useAuth()
+  const location = useLocation()
+
+  // Só em desenvolvimento: painel do assistente isolado, sem login (ver acima).
+  if (import.meta.env.DEV && AssistantDevPage && location.pathname === '/dev/assistente') {
+    return (
+      <Suspense fallback={null}>
+        <AssistantDevPage />
+      </Suspense>
+    )
+  }
 
   // Nada renderiza (nem a tela de login) até saber se já existe uma sessão
   // salva — evita o flash de "login" antes do redirect silencioso de quem
