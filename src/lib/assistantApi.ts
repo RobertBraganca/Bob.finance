@@ -55,6 +55,8 @@ export type AssistantFailure = {
   message: string
   /** Vale a pena oferecer "Tentar de novo" com a mesma frase. */
   retryable: boolean
+  /** Motivo técnico vindo do servidor (ex.: a API recusou a chave), quando houver. */
+  detail?: string
 }
 
 const FAILURE_MESSAGE: Record<AssistantFailureCode, string> = {
@@ -88,7 +90,9 @@ export function failureOf(code: AssistantFailureCode): AssistantFailure {
 /** Transforma qualquer falha de rede ou de API na mensagem em português da tela. */
 export function toAssistantFailure(error: unknown): AssistantFailure {
   if (error instanceof ApiError) {
-    if (error.code && KNOWN_CODES.has(error.code)) return failureOf(error.code as AssistantErrorCode)
+    if (error.code && KNOWN_CODES.has(error.code)) {
+      return { ...failureOf(error.code as AssistantErrorCode), ...(error.detail ? { detail: error.detail } : {}) }
+    }
     // Função ainda não publicada ou fora do ar: o servidor não deu um `code`.
     if ([404, 502, 503, 504].includes(error.status)) return failureOf('unavailable')
     if (error.status === 429) return failureOf('rate_limited')

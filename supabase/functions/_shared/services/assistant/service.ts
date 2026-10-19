@@ -46,6 +46,22 @@ function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
   return Promise.race([work, deadline]).finally(() => clearTimeout(timer))
 }
 
+/** O motivo, em português, de o modelo não ter respondido. */
+function unavailableDetail(error: AssistantUnavailableError): string {
+  switch (error.reason) {
+    case 'no_key':
+      return 'a chave do assistente (ASSISTANT_API_KEY) não chegou à função'
+    case 'timeout':
+      return 'o modelo demorou demais para responder'
+    case 'network':
+      return 'a função não conseguiu falar com a API do modelo'
+    case 'bad_response':
+      return 'a API do modelo devolveu uma resposta inesperada'
+    case 'http':
+      return `a API do modelo respondeu HTTP ${error.status ?? '?'}${error.detail ? ` (${error.detail})` : ''}`
+  }
+}
+
 export type HandleMessageOptions = {
   /** segredo da função (`ASSISTANT_API_KEY`); ausente vira `unavailable`, sem gravar nada */
   apiKey: string | undefined
@@ -91,7 +107,10 @@ export async function handleMessage(
     )
   } catch (error) {
     if (error instanceof AssistantUnavailableError) {
-      throw new AssistantError('unavailable', 'O assistente está indisponível agora. Nada foi alterado.')
+      const detail = unavailableDetail(error)
+      // Sem a chave nem o corpo da resposta: só o motivo e o status.
+      console.error('assistant: modelo indisponível', error.reason, error.status ?? '', error.detail ?? '')
+      throw new AssistantError('unavailable', 'O assistente está indisponível agora. Nada foi alterado.', undefined, detail)
     }
     throw error
   }
@@ -129,10 +148,15 @@ export async function handleMessage(
 }
 
 /** Corpo e status HTTP de um erro esperado do assistente; null quando não é um deles. */
-export function assistantHttpError(error: unknown): { status: number; body: { error: string; code: string } } | null {
-  if (error instanceof AssistantError) return { status: error.status, body: { error: error.message, code: error.code } }
+export function assistantHttpError(error: unknown): { status: number; body: { error: string; code: string; detail?: string } } | null {
+  if (error instanceof AssistantError) {
+    return { status: error.status, body: { error: error.message, code: error.code, ...(error.detail ? { detail: error.detail } : {}) } }
+  }
   if (error instanceof AssistantUnavailableError) {
-    return { status: 503, body: { error: 'O assistente está indisponível agora. Nada foi alterado.', code: 'unavailable' } }
+    return {
+      status: 503,
+      body: { error: 'O assistente está indisponível agora. Nada foi alterado.', code: 'unavailable', detail: unavailableDetail(error) },
+    }
   }
   return null
 }

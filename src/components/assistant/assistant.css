@@ -479,6 +479,13 @@ body:has(.assistant-fab) .toasts {
   flex: none;
   margin-top: 2px;
 }
+/* Motivo técnico da falha (ex.: a API recusou a chave): legível, sem chamar mais atenção que a mensagem. */
+.assistant-alert__detail {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
 .assistant-alert__list {
   display: flex;
   flex-direction: column;
