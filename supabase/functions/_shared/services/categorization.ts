@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
-import { db } from '../db/client.ts'
+import { db, type DbExecutor } from '../db/client.ts'
 import { categories, categoryMemory, categoryRules, transactions } from '../db/schema.ts'
 import { AUTO_PROMOTE_AT, Categorizer, type MemoryRow, type RuleRow } from '../categorize/engine.ts'
 import { merchantSignature, normalizeDescription } from '../core/normalize.ts'
@@ -47,12 +47,17 @@ export type LearnResult = {
  * real rule happens once the same correction has been confirmed
  * AUTO_PROMOTE_AT times, so one-off overrides never harden into rules.
  */
-export async function learnCorrection(description: string, categoryId: number): Promise<LearnResult | null> {
+export async function learnCorrection(
+  description: string,
+  categoryId: number,
+  /** transação do chamador (padrão: o `db` global) */
+  executor: DbExecutor = db,
+): Promise<LearnResult | null> {
   const signature = merchantSignature(description)
   if (!signature) return null
 
   const existing = (
-    await db
+    await executor
       .select()
       .from(categoryMemory)
       .where(and(eq(categoryMemory.signature, signature), eq(categoryMemory.categoryId, categoryId)))
@@ -64,30 +69,30 @@ export async function learnCorrection(description: string, categoryId: number): 
   if (existing) {
     hits = existing.hits + 1
     promotedRuleId = existing.promotedRuleId
-    await db
+    await executor
       .update(categoryMemory)
       .set({ hits, lastSeenAt: sql`now_iso()` })
       .where(eq(categoryMemory.id, existing.id))
   } else {
     hits = 1
     promotedRuleId = null
-    await db.insert(categoryMemory).values({ signature, categoryId, hits })
+    await executor.insert(categoryMemory).values({ signature, categoryId, hits })
   }
 
   // A correction that contradicts a previous one for the same merchant loses
   // weight, so the memory converges on the user's latest intent.
-  await db
+  await executor
     .update(categoryMemory)
     .set({ hits: sql`greatest(1, ${categoryMemory.hits} - 1)` })
     .where(and(eq(categoryMemory.signature, signature), sql`${categoryMemory.categoryId} <> ${categoryId}`))
 
   let promoted = false
   if (hits >= AUTO_PROMOTE_AT && promotedRuleId === null) {
-    const rule = await promoteToRule(signature, categoryId)
+    const rule = await promoteToRule(signature, categoryId, executor)
     if (rule) {
       promotedRuleId = rule
       promoted = true
-      await db
+      await executor
         .update(categoryMemory)
         .set({ promotedRuleId: rule })
         .where(and(eq(categoryMemory.signature, signature), eq(categoryMemory.categoryId, categoryId)))
@@ -113,12 +118,16 @@ export async function learnCorrection(description: string, categoryId: number): 
  */
 export const LEARNED_RULE_PRIORITY = 50
 export const EXPLICIT_RULE_PRIORITY = 20
-export async function promoteToRule(signature: string, categoryId: number): Promise<number | null> {
+export async function promoteToRule(
+  signature: string,
+  categoryId: number,
+  executor: DbExecutor = db,
+): Promise<number | null> {
   const pattern = normalizeDescription(signature)
   if (!pattern) return null
 
   const existing = (
-    await db
+    await executor
       .select()
       .from(categoryRules)
       .where(
@@ -133,13 +142,13 @@ export async function promoteToRule(signature: string, categoryId: number): Prom
 
   if (existing) {
     if (existing.categoryId !== categoryId) {
-      await db.update(categoryRules).set({ categoryId }).where(eq(categoryRules.id, existing.id))
+      await executor.update(categoryRules).set({ categoryId }).where(eq(categoryRules.id, existing.id))
     }
     return existing.id
   }
 
   const inserted = (
-    await db
+    await executor
       .insert(categoryRules)
       .values({
         categoryId,
