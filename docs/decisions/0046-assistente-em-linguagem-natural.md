@@ -30,6 +30,12 @@ conselho (decisions/0010).
   segredo da função (`ASSISTANT_API_KEY`), nunca vai ao navegador nem ao banco.
 - Modelo barato (Haiku) primeiro; o maior (Sonnet) uma vez só, quando o barato não
   entrega uma proposta válida ou só pergunta numa frase clara.
+- **Provedor** (20/10/2026): o serviço fala o formato da API de mensagens e um adaptador
+  traduz para o Gemini (Google AI Studio, camada gratuita), porque a chave da
+  Anthropic exige conta paga. O provedor sai do formato da chave (`sk-ant-` é Anthropic,
+  o resto é Gemini) ou de `ASSISTANT_PROVIDER`; os modelos padrão do Gemini são
+  `gemini-2.5-flash` e `gemini-2.5-pro`, trocáveis por `ASSISTANT_MODEL_CHEAP` e
+  `ASSISTANT_MODEL_STRONG` (sempre os dois). Com o Gemini, as frases vão ao Google.
 
 ## Consequências
 - Uma função Edge nova (`assistant`) e uma tabela nova (`assistant_actions`:

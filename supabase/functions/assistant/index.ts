@@ -6,15 +6,16 @@ import { ZodError } from 'zod'
 import { requireAdmin } from '../_shared/auth.ts'
 import { assistantApplyRequest, assistantMessageRequest, assistantUndoRequest } from '../_shared/core/assistantTypes.ts'
 import { applyProposal, undoApplied } from '../_shared/services/assistant/apply.ts'
-import { assistantHttpError, handleMessage } from '../_shared/services/assistant/service.ts'
+import { assistantHttpError, handleMessage, optionsFromEnv } from '../_shared/services/assistant/service.ts'
 
 /**
  * Assistente em linguagem natural (docs/specs/assistente/spec.md). Porta de
  * server/src/routes/assistant.ts (Fastify) para Hono. O modelo só lê e propõe;
  * `apply` grava o que o servidor guardou, depois do Confirmar.
  *
- * Segredo da função: `ASSISTANT_API_KEY` (supabase secrets set). Sem ele a rota
- * responde `unavailable` e nada é gravado.
+ * Segredos da função: `ASSISTANT_API_KEY` (chave da Anthropic `sk-ant-…` ou do Gemini), e,
+ * se quiser, `ASSISTANT_PROVIDER` e `ASSISTANT_MODEL_CHEAP`/`ASSISTANT_MODEL_STRONG`.
+ * Sem a chave a rota responde `unavailable` e nada é gravado.
  */
 const app = new Hono().basePath('/assistant')
 
@@ -31,7 +32,7 @@ app.onError((error, c) => {
 })
 
 app.post('/message', async (c) =>
-  c.json(await handleMessage(assistantMessageRequest.parse(await c.req.json()), { apiKey: Deno.env.get('ASSISTANT_API_KEY') })),
+  c.json(await handleMessage(assistantMessageRequest.parse(await c.req.json()), optionsFromEnv((name) => Deno.env.get(name)))),
 )
 
 app.post('/apply', async (c) => {

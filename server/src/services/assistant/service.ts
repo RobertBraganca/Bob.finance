@@ -8,7 +8,7 @@ import {
 import { createProposal } from './apply'
 import { describeAction } from './cards'
 import { AssistantError } from './errors'
-import { AssistantUnavailableError, proposeFromText, type AssistantTools, type ModelCaller } from './intent'
+import { AssistantUnavailableError, proposeFromText, type AssistantProvider, type AssistantTools, type ModelCaller } from './intent'
 import { listContext, searchPending, searchTransactions } from './matcher'
 
 /**
@@ -68,7 +68,26 @@ export type HandleMessageOptions = {
   /** só para teste */
   callModel?: ModelCaller
   models?: { cheap: string; strong: string }
+  provider?: AssistantProvider
   today?: string
+}
+
+/**
+ * Opções do modelo a partir das variáveis da função (segredos): `ASSISTANT_API_KEY`
+ * (obrigatória), `ASSISTANT_PROVIDER` (`anthropic` ou `gemini`; sem ela vale o formato da
+ * chave) e `ASSISTANT_MODEL_CHEAP` / `ASSISTANT_MODEL_STRONG` (trocam os modelos padrão).
+ * `get` é `process.env[k]` no Node e `Deno.env.get(k)` no Edge.
+ */
+export function optionsFromEnv(get: (name: string) => string | undefined): HandleMessageOptions {
+  const provider = get('ASSISTANT_PROVIDER')?.trim().toLowerCase()
+  const cheap = get('ASSISTANT_MODEL_CHEAP')?.trim()
+  const strong = get('ASSISTANT_MODEL_STRONG')?.trim()
+  return {
+    apiKey: get('ASSISTANT_API_KEY')?.trim(),
+    ...(provider === 'anthropic' || provider === 'gemini' ? { provider } : {}),
+    // Os dois ou nenhum: um modelo só trocado deixaria o outro de outro provedor.
+    ...(cheap && strong ? { models: { cheap, strong } } : {}),
+  }
 }
 
 /** Liga as ferramentas de leitura do modelo ao banco (via `matcher`). */
@@ -102,6 +121,7 @@ export async function handleMessage(
         tools: databaseTools(ctx),
         callModel: options.callModel,
         models: options.models,
+        provider: options.provider,
       }),
       MESSAGE_DEADLINE_MS,
     )

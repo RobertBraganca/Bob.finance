@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { assistantApplyRequest, assistantMessageRequest, assistantUndoRequest } from '../core/assistantTypes'
 import { applyProposal, undoApplied } from '../services/assistant/apply'
-import { assistantHttpError, handleMessage } from '../services/assistant/service'
+import { assistantHttpError, handleMessage, optionsFromEnv } from '../services/assistant/service'
 
 /**
  * Assistente em linguagem natural (docs/specs/assistente/spec.md). O modelo só lê
@@ -20,7 +20,7 @@ async function guarded<T>(reply: FastifyReply, work: () => Promise<T>) {
 
 export async function assistantRoutes(app: FastifyInstance) {
   app.post('/assistant/message', async (req, reply) =>
-    guarded(reply, () => handleMessage(assistantMessageRequest.parse(req.body), { apiKey: process.env.ASSISTANT_API_KEY })),
+    guarded(reply, () => handleMessage(assistantMessageRequest.parse(req.body), optionsFromEnv((name) => process.env[name]))),
   )
 
   app.post('/assistant/apply', async (req, reply) =>
