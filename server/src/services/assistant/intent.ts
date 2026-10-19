@@ -69,11 +69,14 @@ export class AssistantUnavailableError extends Error {
   readonly reason: UnavailableReason
   /** status HTTP da API do modelo, quando houve resposta */
   readonly status?: number
-  constructor(message: string, reason: UnavailableReason, status?: number) {
+  /** tipo e mensagem do erro que a API devolveu (já sem a chave); só diagnóstico */
+  readonly detail?: string
+  constructor(message: string, reason: UnavailableReason, status?: number, detail?: string) {
     super(message)
     this.name = 'AssistantUnavailableError'
     this.reason = reason
     this.status = status
+    this.detail = detail
   }
 }
 
@@ -165,6 +168,34 @@ export type AnthropicCallerOptions = {
   fetchImpl?: typeof fetch
 }
 
+/**
+ * Do corpo de erro da API só sai `error.type` e `error.message` (ex.:
+ * "authentication_error: invalid x-api-key"), cortados em 160 caracteres e SEM
+ * nada que pareça a chave. É o que diz ao usuário por que o modelo falhou
+ * (chave recusada, modelo inexistente, saldo) em vez de um "indisponível" mudo.
+ */
+export async function describeApiError(res: Response, apiKey: string): Promise<string | undefined> {
+  let raw: string
+  try {
+    raw = (await res.text()).slice(0, 4000)
+  } catch {
+    return undefined
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+  const error = (parsed as { error?: { type?: unknown; message?: unknown } } | null)?.error
+  const type = typeof error?.type === 'string' ? error.type : null
+  const message = typeof error?.message === 'string' ? error.message : null
+  if (!type && !message) return undefined
+  let text = [type, message].filter(Boolean).join(': ')
+  if (apiKey) text = text.split(apiKey).join('[chave]')
+  return text.replace(/sk-ant-[A-Za-z0-9_-]+/g, '[chave]').replace(/\s+/g, ' ').slice(0, 160)
+}
+
 export function createAnthropicCaller(opts: AnthropicCallerOptions): ModelCaller {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const doFetch = opts.fetchImpl ?? fetch
@@ -186,8 +217,13 @@ export function createAnthropicCaller(opts: AnthropicCallerOptions): ModelCaller
           signal: controller.signal,
         })
         if (!res.ok) {
-          // Só o status: o corpo do erro não é repassado.
-          throw new AssistantUnavailableError(`O modelo respondeu com erro (HTTP ${res.status}).`, 'http', res.status)
+          // O corpo do erro só entra como diagnóstico (tipo e mensagem, sem a chave).
+          throw new AssistantUnavailableError(
+            `O modelo respondeu com erro (HTTP ${res.status}).`,
+            'http',
+            res.status,
+            await describeApiError(res, opts.apiKey),
+          )
         }
         body = await res.json()
       } catch (error) {

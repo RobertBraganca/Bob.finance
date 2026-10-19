@@ -728,7 +728,7 @@ describe('assistente: vários apply por proposta e edits (rollback)', { skip }, 
 })
 
 describe('assistente: nada ficou no banco real', { skip }, () => {
-  test('sem dados [teste] e sem a tabela assistant_actions (migração não aplicada)', async () => {
+  test('sem dados [teste] no banco real (nem em assistant_actions, que a migração já criou)', async () => {
     const { db } = loaded!.client
     const count = async (table: string, column: string) =>
       Number(
@@ -737,8 +737,9 @@ describe('assistente: nada ficou no banco real', { skip }, () => {
     assert.equal(await count('transactions', 'description'), 0)
     assert.equal(await count('assets', 'name'), 0)
     assert.equal(await count('accounts', 'name'), 0)
-    const rows = (await db.execute(sql`select to_regclass('public.assistant_actions') as t`)) as unknown as Array<{ t: string | null }>
-    assert.equal(rows[0]!.t, null, 'assistant_actions não pode existir: a migração só se aplica com autorização')
+    // A tabela existe desde a migração 20261019120000; os testes gravam só dentro de transação com rollback.
+    const exists = (await db.execute(sql`select to_regclass('public.assistant_actions') as t`)) as unknown as Array<{ t: string | null }>
+    if (exists[0]!.t !== null) assert.equal(await count('assistant_actions', 'phrase'), 0, 'nenhuma proposta [teste] pode ter ficado no banco real')
   })
 })
 

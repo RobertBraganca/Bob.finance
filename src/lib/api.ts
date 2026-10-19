@@ -29,6 +29,8 @@ export class ApiError extends Error {
     readonly issues?: unknown,
     /** Código estável do erro (ex. `proposal_expired` do assistente); ausente na maioria das rotas. */
     readonly code?: string,
+    /** Motivo técnico e seguro de mostrar (ex.: por que o assistente falhou); ausente na maioria das rotas. */
+    readonly detail?: string,
   ) {
     super(message)
   }
@@ -103,6 +105,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       response.status,
       payload?.issues,
       typeof payload?.code === 'string' ? payload.code : undefined,
+      typeof payload?.detail === 'string' ? payload.detail : undefined,
     )
   }
   return payload as T

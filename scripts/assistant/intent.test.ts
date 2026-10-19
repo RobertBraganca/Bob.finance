@@ -871,6 +871,27 @@ test('cliente padrão: HTTP 500 vira unavailable com o status, sem a chave nem o
   })
 })
 
+test('cliente padrão: o corpo de erro da API vira diagnóstico (tipo e mensagem), sem a chave', async () => {
+  const body = JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key sk-ant-test-secret' } })
+  const fetchImpl = (async () => new Response(body, { status: 401 })) as unknown as typeof fetch
+  await assert.rejects(createAnthropicCaller({ apiKey: 'sk-ant-test-secret', fetchImpl })(REQ), (error: unknown) => {
+    const e = error as AssistantUnavailableError
+    assert.equal(e.status, 401)
+    assert.match(e.detail ?? '', /authentication_error/)
+    assert.ok(!(e.detail ?? '').includes('sk-ant-test-secret'), 'a chave não pode aparecer no diagnóstico')
+    assert.ok(!e.message.includes('sk-ant-test-secret'))
+    return true
+  })
+})
+
+test('cliente padrão: corpo de erro que não é JSON não vira diagnóstico', async () => {
+  const fetchImpl = (async () => new Response('<html>erro sk-ant-test-secret</html>', { status: 502 })) as unknown as typeof fetch
+  await assert.rejects(createAnthropicCaller({ apiKey: 'sk-ant-test-secret', fetchImpl })(REQ), (error: unknown) => {
+    assert.equal((error as AssistantUnavailableError).detail, undefined)
+    return true
+  })
+})
+
 test('cliente padrão: 401 e 429 também viram unavailable (nada de retry)', async () => {
   for (const status of [401, 429, 529]) {
     let calls = 0

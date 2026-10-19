@@ -18,11 +18,14 @@ const STATUS_BY_CODE: Record<AssistantErrorCode, number> = {
 export class AssistantError extends Error {
   readonly code: AssistantErrorCode
   readonly status: number
+  /** motivo técnico e seguro de mostrar (sem segredo), para o usuário saber o que consertar */
+  readonly detail?: string
 
-  constructor(code: AssistantErrorCode, message: string, status: number = STATUS_BY_CODE[code]) {
+  constructor(code: AssistantErrorCode, message: string, status: number = STATUS_BY_CODE[code], detail?: string) {
     super(message)
     this.name = 'AssistantError'
     this.code = code
     this.status = status
+    this.detail = detail
   }
 }

@@ -206,6 +206,7 @@ function ItemView({ item, chat }: { item: ChatItem; chat: Chat }) {
           <Icon name="alert" size={14} />
           <span>{item.failure.message}</span>
         </p>
+        {item.failure.detail && <p className="assistant-alert__detail">Motivo: {item.failure.detail}</p>}
         {item.retryText && (
           <div className="assistant-actions">
             <Button icon="refresh" onClick={() => chat.retry(item.id, item.retryText!)} disabled={chat.thinking}>
