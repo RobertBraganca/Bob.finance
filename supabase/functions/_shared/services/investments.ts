@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
-import { db } from '../db/client.ts'
+import { db, type DbExecutor } from '../db/client.ts'
 import {
   assetTrades,
   assetValuations,
@@ -335,21 +335,21 @@ export const RESERVE_ASSET_NAME = 'Reserva de emergência'
 /** Its unit price is pinned at R$1,00/"cota" — quantity in reais *is* the amount, so no valuation step is ever needed. */
 const RESERVE_UNIT_PRICE_CENTS = 100
 
-export async function ensureReserveAsset(): Promise<number> {
+export async function ensureReserveAsset(executor: DbExecutor = db): Promise<number> {
   const existing = (
-    await db
+    await executor
       .select({ id: assets.id, countsTowardReserve: assets.countsTowardReserve })
       .from(assets)
       .where(eq(assets.name, RESERVE_ASSET_NAME))
   )[0]
   if (existing) {
     if (!existing.countsTowardReserve) {
-      await db.update(assets).set({ countsTowardReserve: true }).where(eq(assets.id, existing.id))
+      await executor.update(assets).set({ countsTowardReserve: true }).where(eq(assets.id, existing.id))
     }
     return existing.id
   }
   const created = (
-    await db
+    await executor
       .insert(assets)
       .values({ name: RESERVE_ASSET_NAME, assetClass: 'cash', countsTowardReserve: true })
       .returning({ id: assets.id })
@@ -358,11 +358,15 @@ export async function ensureReserveAsset(): Promise<number> {
 }
 
 /** One buy (or sell, to record a withdrawal) trade against the dedicated reserve asset — creating it on first use. */
-export async function contributeToReserve(input: { amountCents: number; tradedOn: string; kind?: 'buy' | 'sell' }) {
-  const assetId = await ensureReserveAsset()
+export async function contributeToReserve(
+  input: { amountCents: number; tradedOn: string; kind?: 'buy' | 'sell' },
+  /** transação do chamador (padrão: o `db` global); usada pelo `apply` do assistente */
+  executor: DbExecutor = db,
+) {
+  const assetId = await ensureReserveAsset(executor)
   const amountCents = Math.abs(input.amountCents)
   const trade = (
-    await db
+    await executor
       .insert(assetTrades)
       .values({
         assetId,
@@ -1630,9 +1634,12 @@ export async function createTrade(input: {
   feesCents?: number
   dividendType?: string | null
   exDate?: string | null
-}) {
+},
+/** transação do chamador (padrão: o `db` global); usada pelo `apply` do assistente */
+executor: DbExecutor = db,
+) {
   return (
-    await db
+    await executor
       .insert(assetTrades)
       .values({
         ...input,

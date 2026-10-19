@@ -27,6 +27,8 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly issues?: unknown,
+    /** Código estável do erro (ex. `proposal_expired` do assistente); ausente na maioria das rotas. */
+    readonly code?: string,
   ) {
     super(message)
   }
@@ -37,8 +39,11 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | und
 
 const LEDGER_PREFIXES = ['/accounts', '/profiles', '/imports', '/categories', '/rules', '/transactions', '/bank-connections']
 
-function functionFor(path: string): 'pricing' | 'ledger' | 'insights' {
+function functionFor(path: string): 'pricing' | 'ledger' | 'insights' | 'assistant' {
   if (path === '/pricing' || path.startsWith('/pricing/')) return 'pricing'
+  // Assistente em linguagem natural (specs/assistente): função Edge própria,
+  // `${SUPABASE_URL}/functions/v1/assistant${path}` (mesma regra de `ledger`).
+  if (path === '/assistant' || path.startsWith('/assistant/')) return 'assistant'
   if (LEDGER_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}?`)))
     return 'ledger'
   return 'insights'
@@ -93,7 +98,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // their own per-call onError toast at the call site; auto-toasting
     // those here too would double up the same failure.
     if (!init?.method && !isStartupRace) emitToast(`Falha ao carregar dado: ${message}`, 'error')
-    throw new ApiError(message, response.status, payload?.issues)
+    throw new ApiError(
+      message,
+      response.status,
+      payload?.issues,
+      typeof payload?.code === 'string' ? payload.code : undefined,
+    )
   }
   return payload as T
 }

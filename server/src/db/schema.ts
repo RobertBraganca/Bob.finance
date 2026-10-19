@@ -9,7 +9,9 @@ import {
   pgEnum,
   pgTable,
   text,
+  timestamp,
   uniqueIndex,
+  uuid,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 
@@ -129,6 +131,7 @@ export const amortizationSystemEnum = pgEnum('amortization_system', ['sac', 'pri
 /** Por que a dívida saiu da lista (specs/debt-v2): quitada, virou um acordo ou encerrada à mão. */
 export const debtClosedReasonEnum = pgEnum('debt_closed_reason', ['paid', 'renegotiated', 'manual'])
 export const propertyPlanStatusEnum = pgEnum('property_plan_status', ['planning', 'purchased'])
+export const assistantActionStatusEnum = pgEnum('assistant_action_status', ['proposed', 'applied', 'undone', 'expired'])
 /** De onde vem o realizado de um grupo do orçamento (decisions/0042). */
 export const budgetGroupSourceEnum = pgEnum('budget_group_source', ['categories', 'goal_contributions', 'other_contributions'])
 export const pricingDimensionEnum = pgEnum('pricing_dimension', [
@@ -1524,5 +1527,38 @@ export const bankConnections = pgTable(
   (t) => [
     uniqueIndex('bank_connections_provider_account_uq').on(t.provider, t.providerAccountId),
     index('bank_connections_account_idx').on(t.accountId),
+  ],
+)
+
+/* ------------------------------------------------------------------ *
+ * Assistente em linguagem natural (docs/specs/assistente, seção C)
+ *
+ * Uma linha por proposta: a frase, o que o modelo propôs, o que o `apply`
+ * gravou (com o antes/depois de cada ação) e o estado. É a auditoria e a
+ * fonte do Desfazer; o servidor aplica SÓ o que está aqui, nunca o corpo do
+ * navegador. Sem coluna nova em `transactions`: o comentário usa `notes`.
+ * ------------------------------------------------------------------ */
+export const assistantActions = pgTable(
+  'assistant_actions',
+  {
+    id: id(),
+    proposalId: uuid('proposal_id').notNull(),
+    conversationId: uuid('conversation_id'),
+    phrase: text('phrase').notNull(),
+    /** { summary, actions: ProposedAction[], questions: string[] } */
+    proposal: jsonb('proposal').notNull(),
+    /**
+     * entradas aplicadas, cada uma com o antes e o depois, o `batch` (o undoToken do
+     * apply que a gravou) e `undone`; vários apply por proposta somam entradas; nulo até o primeiro
+     */
+    applied: jsonb('applied'),
+    status: assistantActionStatusEnum('status').notNull().default('proposed'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+    appliedAt: timestamp('applied_at', { withTimezone: true, mode: 'string' }),
+    undoneAt: timestamp('undone_at', { withTimezone: true, mode: 'string' }),
+  },
+  (t) => [
+    uniqueIndex('assistant_actions_proposal_uq').on(t.proposalId),
+    index('assistant_actions_created_idx').on(t.createdAt),
   ],
 )

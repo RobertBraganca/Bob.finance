@@ -63,4 +63,12 @@ const client = postgres({
 
 export const db = drizzle(client, { schema })
 export type DB = typeof db
+
+/**
+ * O que um serviço de escrita aceita como conexão: o `db` global ou a transação
+ * (`tx`) de um `db.transaction`. Os serviços que o assistente usa ganharam um
+ * último parâmetro opcional desse tipo (padrão: `db`), para o `apply` gravar
+ * várias ações numa transação só, tudo ou nada. Quem não passa nada não muda.
+ */
+export type DbExecutor = DB | Parameters<Parameters<DB['transaction']>[0]>[0]
 export { schema }
