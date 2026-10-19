@@ -1547,9 +1547,11 @@ export const assistantActions = pgTable(
     phrase: text('phrase').notNull(),
     /** { summary, actions: ProposedAction[], questions: string[] } */
     proposal: jsonb('proposal').notNull(),
-    /** ações aplicadas, cada uma com o antes e o depois; nulo até o apply */
+    /**
+     * entradas aplicadas, cada uma com o antes e o depois, o `batch` (o undoToken do
+     * apply que a gravou) e `undone`; vários apply por proposta somam entradas; nulo até o primeiro
+     */
     applied: jsonb('applied'),
-    undoToken: uuid('undo_token'),
     status: assistantActionStatusEnum('status').notNull().default('proposed'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
     appliedAt: timestamp('applied_at', { withTimezone: true, mode: 'string' }),
@@ -1557,7 +1559,6 @@ export const assistantActions = pgTable(
   },
   (t) => [
     uniqueIndex('assistant_actions_proposal_uq').on(t.proposalId),
-    uniqueIndex('assistant_actions_undo_token_uq').on(t.undoToken).where(sql`${t.undoToken} is not null`),
     index('assistant_actions_created_idx').on(t.createdAt),
   ],
 )

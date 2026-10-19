@@ -285,7 +285,7 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
         ]),
         tx,
       )
-      const response = await applyProposal(created.proposalId, ['a1', 'a2', 'a3', 'a4'], tx)
+      const response = await applyProposal(created.proposalId, ['a1', 'a2', 'a3', 'a4'], undefined, tx)
       assert.equal(response.applied.length, 4)
       assert.match(response.undoToken, /^[0-9a-f-]{36}$/)
       assert.ok(!Number.isNaN(Date.parse(response.appliedAt)))
@@ -312,13 +312,13 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
 
       const stored = await getProposal(created.proposalId, tx)
       assert.equal(stored.status, 'applied')
-      assert.equal(stored.undoToken, response.undoToken)
+      assert.ok(stored.applied!.every((e) => e.batch === response.undoToken && e.undone === false), 'cada entrada guarda o lote e undone=false')
       assert.equal(stored.applied!.length, 4)
       const first = stored.applied![0] as { before: { postedOn: string }; after: { postedOn: string } }
       assert.equal(first.before.postedOn, day(3), 'antes gravado')
       assert.equal(first.after.postedOn, day(10), 'depois gravado')
 
-      await rejectsWith('already_applied', () => applyProposal(created.proposalId, ['a1'], tx))
+      await rejectsWith('already_applied', () => applyProposal(created.proposalId, ['a1'], undefined, tx))
     }))
 
   test('apply: compra, venda e aporte na reserva gravam a operação', () =>
@@ -336,7 +336,7 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
         ]),
         tx,
       )
-      const response = await applyProposal(created.proposalId, ['a1', 'a2', 'a3'], tx)
+      const response = await applyProposal(created.proposalId, ['a1', 'a2', 'a3'], undefined, tx)
       assert.deepEqual(response.applied.map((a) => a.table), ['asset_trades', 'asset_trades', 'asset_trades'])
       const trade = (await tx.select().from(assetTrades).where(sql`${assetTrades.id} = ${response.applied[0]!.recordId}`))[0]!
       assert.equal(trade.kind, 'buy')
@@ -366,7 +366,7 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
         ]),
         tx,
       )
-      await rejectsWith('invalid_action', () => applyProposal(created.proposalId, ['a1', 'a2', 'a3'], tx))
+      await rejectsWith('invalid_action', () => applyProposal(created.proposalId, ['a1', 'a2', 'a3'], undefined, tx))
       const row = (await tx.select().from(transactions).where(sql`${transactions.id} = ${income.id}`))[0]!
       assert.equal(row.postedOn, day(3), 'a primeira ação foi desfeita')
       assert.equal(row.notes, null)
@@ -375,7 +375,6 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
       const stored = await getProposal(created.proposalId, tx)
       assert.equal(stored.status, 'proposed')
       assert.equal(stored.applied, null)
-      assert.equal(stored.undoToken, null)
     }))
 
   test('apply: ignora ids que não estão na proposta guardada', () =>
@@ -392,7 +391,7 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
         ]),
         tx,
       )
-      const response = await applyProposal(created.proposalId, ['a1', 'a99', randomUUID()], tx)
+      const response = await applyProposal(created.proposalId, ['a1', 'a99', randomUUID()], undefined, tx)
       assert.deepEqual(response.applied.map((a) => a.actionId), ['a1'])
       const i = (await tx.select().from(transactions).where(sql`${transactions.id} = ${income.id}`))[0]!
       const e = (await tx.select().from(transactions).where(sql`${transactions.id} = ${expense.id}`))[0]!
@@ -400,7 +399,7 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
       assert.equal(e.notes, 'combinado', 'a ação não confirmada não gravou')
 
       const other = await createProposal(`${TAG} frase`, null, proposalOf([{ type: 'add_note', transactionId: income.id, note: 'x' }]), tx)
-      await rejectsWith('invalid_action', () => applyProposal(other.proposalId, ['a99'], tx))
+      await rejectsWith('invalid_action', () => applyProposal(other.proposalId, ['a99'], undefined, tx))
       const again = (await tx.select().from(transactions).where(sql`${transactions.id} = ${income.id}`))[0]!
       assert.equal(again.notes, 'confirmada', 'nada novo gravado')
     }))
@@ -416,13 +415,13 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
         .set({ createdAt: sql`now() - interval '20 minutes'` })
         .where(sql`${assistantActions.proposalId} = ${created.proposalId}`)
       assert.equal((await getProposal(created.proposalId, tx)).status, 'expired')
-      await rejectsWith('proposal_expired', () => applyProposal(created.proposalId, ['a1'], tx))
+      await rejectsWith('proposal_expired', () => applyProposal(created.proposalId, ['a1'], undefined, tx))
       const row = (await tx.select().from(transactions).where(sql`${transactions.id} = ${income.id}`))[0]!
       assert.equal(row.notes, null, 'expirada não grava')
       const stored = (await tx.select().from(assistantActions).where(sql`${assistantActions.proposalId} = ${created.proposalId}`))[0]!
       assert.equal(stored.status, 'expired', 'o status foi marcado')
 
-      await rejectsWith('proposal_not_found', () => applyProposal(randomUUID(), ['a1'], tx))
+      await rejectsWith('proposal_not_found', () => applyProposal(randomUUID(), ['a1'], undefined, tx))
     }))
 
   test('notas: acrescentam ao comentário existente, nunca substituem', () =>
@@ -440,7 +439,7 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
         ]),
         tx,
       )
-      await applyProposal(created.proposalId, ['a1', 'a2', 'a3'], tx)
+      await applyProposal(created.proposalId, ['a1', 'a2', 'a3'], undefined, tx)
       const e = (await tx.select().from(transactions).where(sql`${transactions.id} = ${expense.id}`))[0]!
       assert.equal(e.notes, 'combinado · segunda nota · terceira nota')
       const i = (await tx.select().from(transactions).where(sql`${transactions.id} = ${income.id}`))[0]!
@@ -471,7 +470,7 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
         ]),
         tx,
       )
-      const applied = await applyProposal(created.proposalId, ['a1', 'a2', 'a3', 'a4', 'a5'], tx)
+      const applied = await applyProposal(created.proposalId, ['a1', 'a2', 'a3', 'a4', 'a5'], undefined, tx)
       assert.equal((await snapshot(income.id)).needsReview, false)
 
       const result = await undoApplied(applied.undoToken, tx)
@@ -516,7 +515,7 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
         ]),
         tx,
       )
-      const applied = await applyProposal(created.proposalId, ['a1', 'a2', 'a3'], tx)
+      const applied = await applyProposal(created.proposalId, ['a1', 'a2', 'a3'], undefined, tx)
       // O usuário muda a pendência da nota na tela depois de aplicado.
       await updateTransaction(expense.id, { notes: 'editado a mao' }, 'only', tx)
 
@@ -545,7 +544,7 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
         proposalOf([{ type: 'diary_entry', flow: 'expense', description: `${TAG} Cafe`, amountCents: 700, postedOn: day(0), accountId: account.id }]),
         tx,
       )
-      const applied = await applyProposal(one.proposalId, ['a1'], tx)
+      const applied = await applyProposal(one.proposalId, ['a1'], undefined, tx)
       await updateTransaction(applied.applied[0]!.recordId, { amountCents: -900 }, 'only', tx)
       await rejectsWith('undo_refused', () => undoApplied(applied.undoToken, tx))
 
@@ -555,9 +554,176 @@ describe('assistente: dados em transação com rollback', { skip }, () => {
         proposalOf([{ type: 'diary_entry', flow: 'expense', description: `${TAG} Cha`, amountCents: 500, postedOn: day(0), accountId: account.id }]),
         tx,
       )
-      const appliedTwo = await applyProposal(two.proposalId, ['a1'], tx)
+      const appliedTwo = await applyProposal(two.proposalId, ['a1'], undefined, tx)
       await tx.delete(transactions).where(sql`${transactions.id} = ${appliedTwo.applied[0]!.recordId}`)
       await rejectsWith('undo_refused', () => undoApplied(appliedTwo.undoToken, tx))
+    }))
+})
+
+describe('assistente: vários apply por proposta e edits (rollback)', { skip }, () => {
+  test('dois apply com ações diferentes, Desfazer de um só e status proposed -> applied -> undone', () =>
+    inRollback(async (tx) => {
+      const { income, expense } = await seed(tx)
+      const { createProposal, applyProposal, undoApplied, getProposal } = loaded!.apply
+      const { transactions } = loaded!.schema
+      const row = async (id: number) => (await tx.select().from(transactions).where(sql`${transactions.id} = ${id}`))[0]!
+      const created = await createProposal(
+        `${TAG} frase`,
+        null,
+        proposalOf([
+          { type: 'update_pending', pendingId: income.id, postedOn: day(10), notes: 'cartao 1' },
+          { type: 'add_note', transactionId: expense.id, note: 'cartao 2' },
+        ]),
+        tx,
+      )
+      assert.equal((await getProposal(created.proposalId, tx)).status, 'proposed')
+
+      const first = await applyProposal(created.proposalId, ['a1'], undefined, tx)
+      assert.deepEqual(first.applied.map((a) => a.actionId), ['a1'])
+      assert.equal((await getProposal(created.proposalId, tx)).status, 'proposed', 'resta ação sem aplicar')
+      // A mesma ação não se aplica de novo, nem junto com outra.
+      await rejectsWith('already_applied', () => applyProposal(created.proposalId, ['a1'], undefined, tx))
+      await rejectsWith('already_applied', () => applyProposal(created.proposalId, ['a1', 'a2'], undefined, tx))
+      assert.equal((await row(expense.id)).notes, 'combinado', 'a recusa não gravou a outra ação')
+
+      const second = await applyProposal(created.proposalId, ['a2'], undefined, tx)
+      assert.notEqual(second.undoToken, first.undoToken)
+      const stored = await getProposal(created.proposalId, tx)
+      assert.equal(stored.status, 'applied', 'todas as ações aplicadas')
+      assert.deepEqual(stored.applied!.map((e) => [e.actionId, e.batch, e.undone]), [
+        ['a1', first.undoToken, false],
+        ['a2', second.undoToken, false],
+      ])
+      assert.equal((await row(expense.id)).notes, 'combinado · cartao 2')
+
+      // Desfaz só o lote do segundo card.
+      assert.deepEqual(await undoApplied(second.undoToken, tx), { undone: 1 })
+      assert.equal((await row(expense.id)).notes, 'combinado')
+      assert.equal((await row(income.id)).postedOn, day(10), 'o primeiro lote segue aplicado')
+      const afterOne = await getProposal(created.proposalId, tx)
+      assert.equal(afterOne.status, 'proposed')
+      assert.deepEqual(afterOne.applied!.map((e) => e.undone), [false, true])
+      await rejectsWith('undo_refused', () => undoApplied(second.undoToken, tx))
+
+      // Uma ação desfeita pode ser aplicada de novo (novo lote).
+      const third = await applyProposal(created.proposalId, ['a2'], undefined, tx)
+      assert.notEqual(third.undoToken, second.undoToken)
+      assert.equal((await getProposal(created.proposalId, tx)).status, 'applied')
+
+      // Desfaz tudo: undone.
+      await undoApplied(third.undoToken, tx)
+      await undoApplied(first.undoToken, tx)
+      assert.equal((await row(income.id)).postedOn, day(3))
+      assert.equal((await getProposal(created.proposalId, tx)).status, 'undone')
+    }))
+
+  test('proposta expirada ainda deixa desfazer um lote já aplicado, mas não aplicar ação nova', () =>
+    inRollback(async (tx) => {
+      const { income, expense } = await seed(tx)
+      const { createProposal, applyProposal, undoApplied, getProposal } = loaded!.apply
+      const { assistantActions, transactions } = loaded!.schema
+      const created = await createProposal(
+        `${TAG} frase`,
+        null,
+        proposalOf([
+          { type: 'add_note', transactionId: income.id, note: 'a tempo' },
+          { type: 'add_note', transactionId: expense.id, note: 'tarde demais' },
+        ]),
+        tx,
+      )
+      const first = await applyProposal(created.proposalId, ['a1'], undefined, tx)
+      await tx
+        .update(assistantActions)
+        .set({ createdAt: sql`now() - interval '20 minutes'` })
+        .where(sql`${assistantActions.proposalId} = ${created.proposalId}`)
+
+      const expired = await getProposal(created.proposalId, tx)
+      assert.equal(expired.expired, true)
+      assert.equal(expired.status, 'proposed', 'com algo aplicado o estado das entradas vale, não `expired`')
+      await rejectsWith('proposal_expired', () => applyProposal(created.proposalId, ['a2'], undefined, tx))
+      assert.equal((await tx.select().from(transactions).where(sql`${transactions.id} = ${expense.id}`))[0]!.notes, 'combinado')
+
+      assert.deepEqual(await undoApplied(first.undoToken, tx), { undone: 1 })
+      assert.equal((await tx.select().from(transactions).where(sql`${transactions.id} = ${income.id}`))[0]!.notes, null)
+      assert.equal((await getProposal(created.proposalId, tx)).status, 'undone')
+    }))
+
+  test('edits válidos: data nova no update_pending, valor e comentário; fica gravada a ação editada', () =>
+    inRollback(async (tx) => {
+      const { income, account } = await seed(tx)
+      const { createProposal, applyProposal, getProposal } = loaded!.apply
+      const { transactions } = loaded!.schema
+      const created = await createProposal(
+        `${TAG} frase`,
+        null,
+        proposalOf([
+          { type: 'update_pending', pendingId: income.id, postedOn: day(10) },
+          { type: 'create_transaction', flow: 'expense', description: `${TAG} Papel`, amountCents: 3_500, postedOn: day(1), accountId: account.id, pending: false },
+          { type: 'reserve_contribution', amountCents: 10_000, tradedOn: day(0) },
+        ]),
+        tx,
+      )
+      const response = await applyProposal(
+        created.proposalId,
+        ['a1', 'a2', 'a3'],
+        { a1: { postedOn: day(12), notes: '50% finais' }, a2: { amountCents: 4_200, notes: 'editado no card' }, a3: { amountCents: 20_000, tradedOn: day(-1) } },
+        tx,
+      )
+      const income2 = (await tx.select().from(transactions).where(sql`${transactions.id} = ${income.id}`))[0]!
+      assert.equal(income2.postedOn, day(12), 'a data editada vale, não a da proposta')
+      assert.equal(income2.notes, '50% finais')
+      const created2 = (await tx.select().from(transactions).where(sql`${transactions.id} = ${response.applied[1]!.recordId}`))[0]!
+      assert.equal(created2.amountCents, -4_200)
+      assert.equal(created2.notes, 'editado no card')
+      const { assetTrades } = loaded!.schema
+      const reserve = (await tx.select().from(assetTrades).where(sql`${assetTrades.id} = ${response.applied[2]!.recordId}`))[0]!
+      assert.equal(reserve.quantity, 200)
+      assert.equal(reserve.tradedOn, day(-1))
+
+      const stored = await getProposal(created.proposalId, tx)
+      const entries = stored.applied!
+      assert.equal(entries[0]!.edited, true)
+      assert.equal((entries[0]!.action as { postedOn: string }).postedOn, day(12), 'grava a ação editada, não a original')
+      assert.equal((stored.actions[0] as { postedOn: string }).postedOn, day(10), 'a proposta guardada segue com a original')
+    }))
+
+  test('edits inválidos: campo que a ação não tem, id não confirmado, valor ruim; nada grava', () =>
+    inRollback(async (tx) => {
+      const { income, expense, asset, account } = await seed(tx)
+      const { createProposal, applyProposal, getProposal } = loaded!.apply
+      const { transactions } = loaded!.schema
+      const created = await createProposal(
+        `${TAG} frase`,
+        null,
+        proposalOf([
+          { type: 'update_pending', pendingId: income.id, postedOn: day(10) },
+          { type: 'add_note', transactionId: expense.id, note: 'nota' },
+          { type: 'record_trade', assetId: asset.id, kind: 'buy', quantity: 1, unitPriceCents: 100, tradedOn: day(0) },
+          { type: 'diary_entry', flow: 'expense', description: `${TAG} Cafe`, amountCents: 500, postedOn: day(0), accountId: account.id },
+        ]),
+        tx,
+      )
+      const bad = (confirmed: string[], edits: Record<string, Record<string, unknown>>) =>
+        rejectsWith('invalid_action', () => applyProposal(created.proposalId, confirmed, edits as never, tx))
+      await bad(['a1'], { a1: { tradedOn: day(1) } }) // update_pending não tem tradedOn
+      await bad(['a2'], { a2: { postedOn: day(1) } }) // add_note só tem note
+      await bad(['a3'], { a3: { amountCents: 1_000 } }) // record_trade não aceita amountCents
+      await bad(['a4'], { a4: { notes: 'sem comentário no diário' } })
+      await bad(['a1'], { a2: { note: 'a2 não foi confirmada' } }) // id que não está entre os confirmados
+      await bad(['a1'], { zzz: { postedOn: day(1) } }) // id que não existe
+      await bad(['a1'], { a1: { postedOn: '2026-02-31' } }) // data impossível: revalidação
+      await bad(['a1', 'a2'], { a1: { postedOn: day(11) }, a2: { postedOn: day(1) } }) // um inválido derruba o lote todo
+
+      assert.equal((await tx.select().from(transactions).where(sql`${transactions.id} = ${income.id}`))[0]!.postedOn, day(3), 'nada foi gravado')
+      assert.equal((await tx.select().from(transactions).where(sql`${transactions.id} = ${expense.id}`))[0]!.notes, 'combinado')
+      const stored = await getProposal(created.proposalId, tx)
+      assert.equal(stored.status, 'proposed')
+      assert.equal(stored.applied, null)
+
+      // Edição vazia vale, e uma edição válida em a2 (note) passa.
+      const ok = await applyProposal(created.proposalId, ['a1', 'a2'], { a1: {}, a2: { note: 'nota editada' } }, tx)
+      assert.equal(ok.applied.length, 2)
+      assert.equal((await tx.select().from(transactions).where(sql`${transactions.id} = ${expense.id}`))[0]!.notes, 'combinado · nota editada')
     }))
 })
 
