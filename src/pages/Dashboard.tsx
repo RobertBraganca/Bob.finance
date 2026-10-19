@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -10,6 +10,7 @@ import {
   useUserProfile,
   type Account,
   type RangeContextValue,
+  type RangePreset,
 } from '../lib/store'
 import { periodBounds, shiftPeriod, singleMonthOf, todayIso } from '../lib/period'
 import { AccountModal, BalanceCheckModal } from './Settings'
@@ -140,6 +141,83 @@ const DASHBOARD_SKELETON_CARDS: Array<{ span: 6 | 12; variant: 'lines' | 'stats'
   { span: 12, variant: 'lines', height: 180 },
 ]
 
+/* ------------------------------------------------------------------ *
+ * Consultas da Visão geral, definidas uma vez para o card que as mostra e para
+ * o pré-carregamento. Antes, cada card só pedia os dados depois que o
+ * `/dashboard` voltava (a tela ficava atrás do esqueleto), e os 3,5 s da carga
+ * eram três etapas de cerca de 1 s em fila. Agora tudo sai junto.
+ * ------------------------------------------------------------------ */
+type DailySeriesResponse = { days: Array<{ day: string; expenseCents: number; transactionCount: number }> }
+
+const budgetQuery = (month: string) => ({
+  queryKey: ['budget', month],
+  queryFn: () => api.get<BudgetLite>(`/budget/${month}`),
+})
+const companyQuery = (month: string) => ({
+  queryKey: ['company-overview', month],
+  queryFn: () => api.get<CompanyLite>('/company/overview', { period: month }),
+})
+const dailySeriesQuery = (period: string, accountId: number | null) => ({
+  queryKey: ['daily-series', period, accountId, 'personal'],
+  queryFn: () => api.get<DailySeriesResponse>('/analytics/daily-series', { scope: 'personal', period, accountId: accountId ?? undefined }),
+})
+const historyQuery = (from: string, to: string, accountId: number | null) => ({
+  queryKey: ['history-monthly', from, to, accountId, 'personal'],
+  queryFn: () =>
+    api.get<{ series: Array<{ period: string; incomeCents: number; expenseCents: number; netCents: number }> }>(
+      '/analytics/monthly',
+      // Mesma base dos KPIs: contas pessoais, com as retiradas da PJ como renda.
+      { from, to, accountId: accountId ?? undefined, scope: 'personal' },
+    ),
+})
+const pendingQuery = (flow: 'income' | 'expense', from: string, to: string) => ({
+  queryKey: ['cash-flow-pending', flow, from, to],
+  queryFn: () => api.get<{ pending: PendingRow[] }>('/cash-flow/pending', { flow, from, to }),
+})
+const forecastsQuery = () => ({
+  queryKey: ['cash-flow-forecasts'],
+  queryFn: () => api.get<{ forecasts: ForecastEntry[] }>('/cash-flow/forecasts'),
+})
+const needsReviewQuery = () => ({
+  queryKey: ['transactions', 'needs-review'],
+  queryFn: () =>
+    api.get<{ rows: AutoEntry[]; total: number }>('/transactions', {
+      needsReview: true,
+      includeHidden: true,
+      sort: 'date_desc',
+      limit: AUTO_ENTRIES_SHOWN,
+    }),
+})
+const reconciliationQuery = () => ({
+  queryKey: ['reconciliation-candidates'],
+  queryFn: () => api.get<{ candidates: ReconciliationCandidate[] }>('/cash-flow/reconciliation-candidates'),
+})
+const subscriptionQuery = () => ({
+  queryKey: ['subscription-candidates'],
+  queryFn: () => api.get<{ candidates: SubscriptionCandidate[] }>('/subscriptions/candidates'),
+})
+
+/** Dispara as consultas dos cards de uma vez, assim que o período é conhecido (a que falhar aqui é refeita pelo próprio card). */
+function useOverviewPrefetch(range: { ready: boolean; preset: RangePreset; from: string; to: string; anchor: string }) {
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    if (!range.ready) return
+    const month = singleMonthOf(range)
+    const forward = range.preset === 'custom' ? range : forwardBoundsFor(range.preset, range.anchor)
+    const jobs = [
+      pendingQuery('income', forward.from, forward.to),
+      pendingQuery('expense', forward.from, forward.to),
+      forecastsQuery(),
+      needsReviewQuery(),
+      reconciliationQuery(),
+      subscriptionQuery(),
+      historyQuery(`${shiftPeriod(range.to.slice(0, 7), -5)}-01`, range.to, null),
+      ...(month ? [budgetQuery(month), companyQuery(month), dailySeriesQuery(month, null), dailySeriesQuery(shiftPeriod(month, -1), null)] : []),
+    ]
+    for (const job of jobs) void queryClient.prefetchQuery(job as { queryKey: unknown[]; queryFn: () => Promise<unknown> })
+  }, [queryClient, range.ready, range.preset, range.from, range.to, range.anchor]) // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 export function Dashboard() {
   // O Painel é sempre a visão consolidada: a barra dele não tem filtro de
   // conta (30/09/2026), então um filtro escolhido em outra tela não pode
@@ -176,6 +254,7 @@ export function Dashboard() {
   })
 
   const { pjAccountId, loading: pjLoading, error: pjError, retrying: pjRetrying, retry: retryPj } = usePjAccount()
+  useOverviewPrefetch(range)
 
   if (meta.isSuccess && !meta.data.hasData) return <FirstRun />
   if (!dashboard.data || pjLoading || pjError) {
@@ -464,11 +543,7 @@ function PeriodKpis({
   // têm um número único para comparar, então simplesmente não aparecem.
   // Teto e renda típica vêm do Orçamento (decisions/0045), só num mês fechado de período.
   const month = singleMonthOf(range)
-  const budget = useQuery({
-    queryKey: ['budget', month],
-    queryFn: () => api.get<BudgetLite>(`/budget/${month}`),
-    enabled: month !== null,
-  })
+  const budget = useQuery({ ...budgetQuery(month ?? ''), enabled: month !== null })
   const cap = budget.data
     ? budget.data.groups.filter((g) => g.source === 'categories').reduce((sum, g) => sum + g.plannedCents, 0)
     : 0
@@ -635,13 +710,7 @@ function HistoryCard({ span, range }: { span?: 6 | 12; range: RangeSubset }) {
   const from = `${shiftPeriod(endPeriod, -(Number(months) - 1))}-01`
 
   const history = useQuery({
-    queryKey: ['history-monthly', from, range.to, range.accountId, 'personal'],
-    queryFn: () =>
-      api.get<{ series: Array<{ period: string; incomeCents: number; expenseCents: number; netCents: number }> }>(
-        '/analytics/monthly',
-        // Mesma base dos KPIs acima: contas pessoais, com as retiradas da PJ como renda.
-        { from, to: range.to, accountId: range.accountId ?? undefined, scope: 'personal' },
-      ),
+    ...historyQuery(from, range.to, range.accountId),
     placeholderData: (previous) => previous,
   })
 
@@ -726,14 +795,8 @@ function MonthlyPaceCard({
   const isCurrentMonth = period === anchor.slice(0, 7)
   const cutoffDay = isCurrentMonth ? Number(anchor.slice(8, 10)) : Number(periodBounds(period).to.slice(8, 10))
 
-  const current = useQuery({
-    queryKey: ['daily-series', period, accountId, 'personal'],
-    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number }> }>('/analytics/daily-series', { scope: 'personal', period, accountId: accountId ?? undefined }),
-  })
-  const previous = useQuery({
-    queryKey: ['daily-series', previousPeriod, accountId, 'personal'],
-    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number }> }>('/analytics/daily-series', { scope: 'personal', period: previousPeriod, accountId: accountId ?? undefined }),
-  })
+  const current = useQuery(dailySeriesQuery(period, accountId))
+  const previous = useQuery(dailySeriesQuery(previousPeriod, accountId))
 
   const points: SpendingPacePoint[] = []
   let currentDeltaBps: number | null = null
@@ -912,10 +975,7 @@ function MonthlyHeatmapCard({
   period: string
   accountId: number | null
 }) {
-  const current = useQuery({
-    queryKey: ['daily-series', period, accountId, 'personal'],
-    queryFn: () => api.get<{ days: Array<{ day: string; expenseCents: number; transactionCount: number }> }>('/analytics/daily-series', { scope: 'personal', period, accountId: accountId ?? undefined }),
-  })
+  const current = useQuery(dailySeriesQuery(period, accountId))
 
   return (
     <Card span={span} title="Mapa de calor" subtitle="Gasto confirmado das contas pessoais por dia do mês">
@@ -976,15 +1036,11 @@ function PendingSection({ flow, title }: { flow: 'income' | 'expense'; title: st
   const { from, to } = range.preset === 'custom' ? range : forwardBoundsFor(range.preset, range.anchor)
 
   const pending = useQuery({
-    queryKey: ['cash-flow-pending', flow, from, to],
-    queryFn: () => api.get<{ pending: PendingRow[] }>('/cash-flow/pending', { flow, from, to }),
+    ...pendingQuery(flow, from, to),
     enabled: range.ready,
     placeholderData: (previous) => previous,
   })
-  const forecasts = useQuery({
-    queryKey: ['cash-flow-forecasts'],
-    queryFn: () => api.get<{ forecasts: ForecastEntry[] }>('/cash-flow/forecasts'),
-  })
+  const forecasts = useQuery(forecastsQuery())
 
   const rows = pending.data?.pending ?? []
   // Todas continuam na lista; o número principal é o pessoal, a empresa ao lado (decisions/0045).
@@ -1629,16 +1685,7 @@ function AutoEntriesSection() {
   const toast = useToast()
   const queryClient = useQueryClient()
 
-  const entries = useQuery({
-    queryKey: ['transactions', 'needs-review'],
-    queryFn: () =>
-      api.get<{ rows: AutoEntry[]; total: number }>('/transactions', {
-        needsReview: true,
-        includeHidden: true,
-        sort: 'date_desc',
-        limit: AUTO_ENTRIES_SHOWN,
-      }),
-  })
+  const entries = useQuery(needsReviewQuery())
 
   const markReviewed = useMutation({
     mutationFn: (ids?: number[]) => api.post<{ updated: number }>('/transactions/mark-reviewed', ids ? { ids } : {}),
@@ -1703,10 +1750,7 @@ function ReconciliationSection() {
   const toast = useToast()
   const queryClient = useQueryClient()
 
-  const candidates = useQuery({
-    queryKey: ['reconciliation-candidates'],
-    queryFn: () => api.get<{ candidates: ReconciliationCandidate[] }>('/cash-flow/reconciliation-candidates'),
-  })
+  const candidates = useQuery(reconciliationQuery())
 
   const confirm = useMutation({
     mutationFn: ({ pendingId, matchId }: { pendingId: number; matchId: number }) =>
@@ -1791,10 +1835,7 @@ function SubscriptionsSection() {
   const toast = useToast()
   const queryClient = useQueryClient()
 
-  const candidates = useQuery({
-    queryKey: ['subscription-candidates'],
-    queryFn: () => api.get<{ candidates: SubscriptionCandidate[] }>('/subscriptions/candidates'),
-  })
+  const candidates = useQuery(subscriptionQuery())
 
   const confirm = useMutation({
     mutationFn: (signature: string) => api.post('/subscriptions/confirm', { signature }),
@@ -1936,11 +1977,7 @@ type CompanyLite = {
 function CompanyLine({ range }: { range: RangeSubset }) {
   const month = singleMonthOf(range)
   const { pjAccountId } = usePjAccount()
-  const company = useQuery({
-    queryKey: ['company-overview', month],
-    queryFn: () => api.get<CompanyLite>('/company/overview', { period: month! }),
-    enabled: month !== null && pjAccountId !== null,
-  })
+  const company = useQuery({ ...companyQuery(month ?? ''), enabled: month !== null && pjAccountId !== null })
   if (pjAccountId === null) return null
   const c = company.data
   return (
