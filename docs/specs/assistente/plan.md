@@ -1,7 +1,12 @@
 # Plano: Assistente em linguagem natural (specs/assistente)
 
-Status: aguardando escolha do método de execução (19/10/2026). A spec foi
-aprovada no mesmo dia. Nada implementado.
+Status: etapas 0 a 7 implementadas em 19/10/2026 na branch `feat/assistente`
+(subagentes em paralelo, juntados e testados: 143 testes, `tsc`, `deno check` e
+build verdes; leituras sob Deno com a configuração do Edge). **Falta, com a sua
+autorização:** aplicar a migração `20261019120000_assistant_actions`, criar o
+segredo `ASSISTANT_API_KEY`, publicar a função `assistant` e rodar frases reais
+com `[teste]` (etapa 8). A tela só foi vista com o mock; a rota
+`GET /assistant/history` ficou fora da primeira versão (a conversa vive na sessão).
 
 Cada etapa deixa o app funcionando sozinha e termina em verificação. Paradas
 para a sua autorização estão marcadas com **Autorização**. Seguem as regras do
