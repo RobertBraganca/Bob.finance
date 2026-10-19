@@ -1549,3 +1549,28 @@ enxugar telas repetidas, textos técnicos e menu.
   duplicados removidos). Sem mudança de dados.
 - Fluxograma de rotas: `docs/fluxograma-rotas.html`.
 - Publicar `ledger`, `insights` e `pricing`.
+
+## 18/10/2026 — Rotas do Edge travando (fan-out no pooler de transação)
+
+- Sintoma em produção: `/budget/:periodo`, `/home/banners`, `/financial-health/score`,
+  `/financial-health/runway`, o patrimônio e "Minha empresa" ficavam sem resposta
+  (45 s+), enquanto o resto respondia em ~1 s. Em Node (Fastify) nada disso aparecia.
+- Causa: `Promise.all` com várias consultas na carga do Orçamento
+  (`loadBudgetInputs`, `budgetSettings`, `incomeByMonth`), em `companyOverview`,
+  `pjWithdrawals`, `accountScope` e `materialization.run`. O pooler de transação do
+  Supabase deixa a rota sem resposta com esse fan-out. Os `Promise.all` que a revisão
+  de 12/10 tinha aceitado como dívida antiga eram esses.
+- Conserto: tudo em sequência. Lição: **no Edge, nunca `Promise.all` de consultas**.
+- Como reproduzir sem publicar: rodar o serviço sob Deno com a configuração de
+  conexão do Edge (host/usuário/senha do `.env` como `APPDB_*`, porta 6543, `max: 5`),
+  `deno run -A --config supabase/functions/insights/deno.json <script>`, uma leitura
+  por processo com limite de 30 s. Antes: `budgetFor`, `budgetSettings`, `runway`,
+  `netWorth` e `companyOverview` sem resposta; depois: 20 leituras em 0,5 a 3 s.
+- Armadilha de deploy: a pasta local estava no `main` antigo (PR #12) e as funções
+  subiram sem as rotas novas (404). Antes de publicar: `git switch main && git pull`
+  e conferir `git log -1`.
+- Ainda com `Promise.all` (funcionavam, mas são candidatos se travarem): `goals`
+  (versão Deno já sequencial), `cardSync.cardSummaries`, `cashFlow`, `creditCards`,
+  `criteria`, `debt` (paydown), `dre`, `financialEngine` (resumo PJ), `investments`,
+  `partners`, `propertyPlans`, `transactions`.
+
