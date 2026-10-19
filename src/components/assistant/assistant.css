@@ -1,0 +1,552 @@
+/* ==================================================================
+   Assistente em linguagem natural (docs/specs/assistente, etapa 7).
+   Só tokens do sistema (tokens.css): nada de cor ou fonte nova, e os dois
+   temas saem das mesmas variáveis. Classes com prefixo `assistant-` para
+   não colidir com o resto. Movimento: a regra global de base.css já zera
+   as durações sob prefers-reduced-motion; aqui só se tira o deslocamento.
+   ================================================================== */
+
+/* ---- Botão fixo --------------------------------------------------- */
+.assistant-fab {
+  position: fixed;
+  right: var(--sp-5);
+  bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+  z-index: var(--z-drawer);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 48px;
+  padding: 0 var(--sp-5) 0 var(--sp-4);
+  border-radius: var(--r-pill);
+  /* #FF0000 com texto branco dá 4,0:1, abaixo dos 4,5:1 do texto pequeno;
+     o passo --brand-hover (#CC0000) do próprio sistema dá 5,9:1. */
+  background: var(--brand-hover);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  box-shadow: var(--shadow-pop);
+  transition:
+    filter var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-out);
+}
+.assistant-fab:hover {
+  filter: brightness(0.9);
+}
+.assistant-fab:active {
+  transform: scale(0.97);
+}
+.assistant-fab:focus-visible {
+  outline: 2px solid var(--ink-1);
+  outline-offset: 3px;
+}
+@media (max-width: 767.98px) {
+  .assistant-fab {
+    width: 52px;
+    height: 52px;
+    padding: 0;
+  }
+  .assistant-fab__label {
+    /* Continua no nome acessível (aria-label); só some da tela. */
+    display: none;
+  }
+}
+/* Os avisos (toasts) ficam acima do botão em vez de por cima dele. */
+body:has(.assistant-fab) .toasts {
+  bottom: calc(var(--sp-5) + 64px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ---- Painel -------------------------------------------------------- */
+.assistant-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: rgba(17, 18, 20, 0.42);
+  animation: overlay-in 180ms var(--ease-out);
+  overscroll-behavior: contain;
+}
+.assistant-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(460px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink-1);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+  animation: assistant-in var(--dur-base) var(--ease-out);
+  /* dvh: o teclado e a barra de endereço do celular não cortam o campo. */
+  height: 100vh;
+  height: 100dvh;
+}
+@keyframes assistant-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .assistant-panel {
+    animation: overlay-in 1ms linear;
+  }
+}
+/* Tela cheia no celular. */
+@media (max-width: 767.98px) {
+  .assistant-panel {
+    width: 100%;
+    border-left: 0;
+  }
+}
+.assistant-panel :focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* Alvos de toque de 44px dentro do painel. */
+.assistant-panel .btn {
+  min-height: 44px;
+}
+.assistant-panel .btn--icon {
+  width: 44px;
+}
+.assistant-panel .btn--primary {
+  background: var(--brand-hover);
+}
+.assistant-panel .btn--primary:hover:not(:disabled) {
+  background: var(--brand-hover);
+  filter: brightness(0.9);
+}
+
+.assistant-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+}
+.assistant-head__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.assistant-head__sub {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+
+/* ---- Conversa ------------------------------------------------------ */
+.assistant-thread {
+  position: relative;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+}
+.assistant-thread:focus-visible {
+  outline-offset: -2px;
+}
+.assistant-msg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 100%;
+  min-width: 0;
+}
+.assistant-row {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.assistant-row--user {
+  align-items: flex-end;
+}
+.assistant-msg--user {
+  max-width: 88%;
+}
+.assistant-bubble {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-xl);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.assistant-bubble--user {
+  background: var(--surface-hover);
+  border: 1px solid var(--line);
+  border-bottom-right-radius: var(--r-sm);
+}
+.assistant-bubble--assistant {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-bottom-left-radius: var(--r-sm);
+}
+.assistant-bubble--question {
+  border-style: dashed;
+  border-color: var(--line-strong);
+}
+.assistant-bubble--pending {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 220px;
+}
+.assistant-who {
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.assistant-meta {
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+
+/* ---- Estado vazio -------------------------------------------------- */
+.assistant-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+.assistant-empty__title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink-1);
+}
+.assistant-suggest {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.assistant-suggest__btn {
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-4);
+  text-align: left;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--ink-1);
+  font-size: var(--text-sm);
+}
+.assistant-suggest__btn:hover {
+  background: var(--surface-hover);
+}
+
+/* ---- Cartão de proposta -------------------------------------------- */
+.assistant-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.assistant-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.assistant-card:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.assistant-card--applied {
+  border-color: var(--status-good);
+}
+.assistant-card--cancelled {
+  /* Sem `opacity`: ela derrubaria o contraste do texto. O selo "Cancelado" já diz o estado. */
+  background: var(--surface-muted);
+  border-style: dashed;
+}
+.assistant-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.assistant-card__title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.assistant-card__kind {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+.assistant-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  justify-content: flex-end;
+}
+
+.assistant-changes {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  table-layout: fixed;
+}
+.assistant-changes th,
+.assistant-changes td {
+  padding: var(--sp-2) var(--sp-2);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--hairline);
+  overflow-wrap: anywhere;
+}
+.assistant-changes thead th {
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  border-bottom-color: var(--line);
+}
+.assistant-changes tbody td:nth-child(2) {
+  width: 29%;
+}
+.assistant-changes tbody th {
+  width: 27%;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.assistant-changes tbody tr:last-child th,
+.assistant-changes tbody tr:last-child td {
+  border-bottom: 0;
+}
+.assistant-changes__before {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.assistant-changes__after {
+  color: var(--ink-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* Linha com alerta: faixa à esquerda + selo com ícone e texto (nunca só cor). */
+.assistant-changes__row--flag th,
+.assistant-changes__row--flag td {
+  background: var(--surface-muted);
+}
+.assistant-changes__row--flag th {
+  box-shadow: inset 3px 0 0 var(--status-warning);
+}
+.assistant-changes__row--new th {
+  box-shadow: inset 3px 0 0 var(--series-1);
+}
+/* A linha do campo e a do selo andam juntas: sem filete entre elas, faixa contínua. */
+.assistant-changes__row--open th,
+.assistant-changes__row--open td {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+.assistant-changes__flagcell {
+  padding-top: 0;
+}
+.assistant-changes__row--flag .assistant-changes__flagcell {
+  box-shadow: inset 3px 0 0 var(--status-warning);
+}
+.assistant-changes__row--new .assistant-changes__flagcell {
+  box-shadow: inset 3px 0 0 var(--series-1);
+}
+.assistant-flag {
+  display: flex;
+  line-height: 1.3;
+}
+/* .badge usa nowrap; o texto do alerta precisa quebrar linha dentro do cartão. */
+.assistant-panel .assistant-flag.badge {
+  white-space: normal;
+  align-items: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: var(--r-md);
+  padding: 3px 8px;
+}
+.assistant-flag .icon,
+.assistant-flag svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.assistant-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--status-warning);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  font-size: var(--text-sm);
+  color: var(--ink-1);
+}
+.assistant-warnings li {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+.assistant-warnings svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--status-warning);
+}
+
+.assistant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.assistant-actions--end {
+  justify-content: flex-end;
+}
+
+/* Edição inline do card */
+.assistant-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--paper);
+}
+.assistant-panel .input,
+.assistant-panel .textarea {
+  min-height: 44px;
+}
+
+.assistant-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+.assistant-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+.assistant-note--bad {
+  color: var(--delta-down);
+}
+.assistant-note--good {
+  color: var(--delta-up);
+}
+
+.assistant-alert {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--status-warning);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+.assistant-alert--error {
+  border-left-color: var(--status-critical);
+}
+.assistant-alert--good {
+  border-left-color: var(--status-good);
+}
+.assistant-alert__text {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+.assistant-alert__text svg {
+  flex: none;
+  margin-top: 2px;
+}
+.assistant-alert__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: var(--sp-5);
+  list-style: disc;
+  color: var(--ink-2);
+}
+
+/* O esqueleto do "pensando" precisa aparecer sobre o fundo do balão (bg-muted some em --surface). */
+.assistant-bubble--pending [data-slot='skeleton'] {
+  background: var(--line);
+}
+
+/* ---- Campo de texto ------------------------------------------------- */
+.assistant-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5) calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+.assistant-composer__field {
+  width: 100%;
+  min-height: 72px;
+  max-height: 160px;
+  resize: none;
+  padding: var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+.assistant-composer__field:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--focus);
+}
+.assistant-composer__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.assistant-composer__hint {
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.assistant-counter {
+  font-variant-numeric: tabular-nums;
+}
+.assistant-counter--near {
+  /* --status-warning dá só 4,48:1 sobre branco; negrito em tinta cheia chama a atenção sem depender de cor. */
+  color: var(--ink-1);
+  font-weight: 700;
+}
+.assistant-counter--full {
+  color: var(--delta-down);
+  font-weight: 600;
+}
+@media (max-width: 767.98px) {
+  /* O texto de ajuda do teclado não ajuda no toque. */
+  .assistant-composer__keys {
+    display: none;
+  }
+}
