@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gte, inArray, isNull, like, lte, ne, or, sql, type SQL } from 'drizzle-orm'
-import { db } from '../db/client'
+import { db, type DbExecutor } from '../db/client'
 import { accounts, categories, categoryRules, cashFlowForecasts, debts, transactions } from '../db/schema'
 import { dedupeHash, directionOf, merchantSignature, normalizeDescription } from '../core/normalize'
 import { EXPLICIT_RULE_PRIORITY, learnCorrection } from './categorization'
@@ -349,7 +349,11 @@ export type ManualEntry = {
 }
 
 /** Quick-add path used by both the daily tracker and the manual entry form. */
-export async function createTransaction(entry: ManualEntry) {
+export async function createTransaction(
+  entry: ManualEntry,
+  /** transação do chamador (padrão: o `db` global); usada pelo `apply` do assistente */
+  executor: DbExecutor = db,
+) {
   const descriptionNorm = normalizeDescription(entry.description)
   const hash = dedupeHash({
     accountId: entry.accountId,
@@ -359,7 +363,7 @@ export async function createTransaction(entry: ManualEntry) {
   })
 
   const inserted = (
-    await db
+    await executor
       .insert(transactions)
       .values({
         accountId: entry.accountId,
@@ -384,7 +388,7 @@ export async function createTransaction(entry: ManualEntry) {
       .returning()
   )[0]!
 
-  if (entry.categoryId) await learnCorrection(entry.description, entry.categoryId)
+  if (entry.categoryId) await learnCorrection(entry.description, entry.categoryId, executor)
   return inserted
 }
 
@@ -409,8 +413,10 @@ export async function updateTransaction(
     ignored?: boolean
   },
   scope: PendingDeleteScope = 'only',
+  /** transação do chamador (padrão: o `db` global); usada pelo `apply` do assistente */
+  executor: DbExecutor = db,
 ) {
-  const current = (await db.select().from(transactions).where(eq(transactions.id, id)))[0]
+  const current = (await executor.select().from(transactions).where(eq(transactions.id, id)))[0]
   if (!current) return null
 
   const description = patch.description ?? current.description
@@ -429,7 +435,7 @@ export async function updateTransaction(
     (editsMaterializedFields && current.pending && (current.forecastId !== null || current.debtId !== null))
 
   const updated = (
-    await db
+    await executor
       .update(transactions)
       .set({
         postedOn,
@@ -456,7 +462,7 @@ export async function updateTransaction(
   if (patch.accountId !== undefined) cascadable.accountId = accountId
 
   if (scope !== 'only' && Object.keys(cascadable).length > 0 && (current.forecastId !== null || current.debtId !== null)) {
-    await cascadeToTemplate(current, cascadable, scope)
+    await cascadeToTemplate(current, cascadable, scope, executor)
   }
 
   return updated
@@ -466,11 +472,12 @@ async function cascadeToTemplate(
   current: typeof transactions.$inferSelect,
   cascadable: { description?: string; amountCents?: number; accountId?: number },
   scope: PendingDeleteScope,
+  executor: DbExecutor = db,
 ) {
   if (current.forecastId !== null) {
-    await db.update(cashFlowForecasts).set(cascadable).where(eq(cashFlowForecasts.id, current.forecastId))
+    await executor.update(cashFlowForecasts).set(cascadable).where(eq(cashFlowForecasts.id, current.forecastId))
   } else if (current.debtId !== null) {
-    await db
+    await executor
       .update(debts)
       .set({
         ...(cascadable.description !== undefined ? { name: cascadable.description } : {}),
@@ -481,7 +488,7 @@ async function cascadeToTemplate(
   }
 
   const period = current.occurrencePeriod ?? current.postedOn.slice(0, 7)
-  const siblings = await db
+  const siblings = await executor
     .select()
     .from(transactions)
     .where(
@@ -501,7 +508,7 @@ async function cascadeToTemplate(
     const sAmountCents = cascadable.amountCents ?? s.amountCents
     const sAccountId = cascadable.accountId ?? s.accountId
     const sDescriptionNorm = normalizeDescription(sDescription)
-    await db
+    await executor
       .update(transactions)
       .set({
         description: sDescription,

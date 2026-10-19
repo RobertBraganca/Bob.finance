@@ -17,6 +17,7 @@
     "typecheck": "tsc -b tsconfig.build.json --pretty",
     "verify": "tsx scripts/verify.ts && tsx scripts/verify-backup.ts",
     "verify:backup": "tsx scripts/verify-backup.ts",
+    "test:assistant": "tsx --test scripts/assistant/*.test.ts",
     "db:generate": "drizzle-kit generate",
     "demo": "tsx scripts/demo.ts",
     "import:real": "tsx scripts/import-real.ts",
