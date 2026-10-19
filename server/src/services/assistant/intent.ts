@@ -29,7 +29,14 @@ import { SYSTEM_PROMPT, buildUserMessage } from './prompt'
  * Formato da API de mensagens (o que o `ModelCaller` recebe e devolve)
  * ------------------------------------------------------------------ */
 export type ModelTextBlock = { type: 'text'; text: string }
-export type ModelToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown }
+export type ModelToolUseBlock = {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: unknown
+  /** Gemini: assinatura de raciocínio da chamada; precisa voltar junto na rodada seguinte */
+  signature?: string
+}
 export type ModelToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
 export type ModelContentBlock = ModelTextBlock | ModelToolUseBlock | ModelToolResultBlock
 
@@ -81,6 +88,19 @@ export class AssistantUnavailableError extends Error {
 }
 
 export const DEFAULT_MODELS = { cheap: 'claude-haiku-5-5', strong: 'claude-sonnet-5-5' } as const
+
+/** Provedores do modelo. O resto do serviço fala o formato da API de mensagens; o adaptador traduz. */
+export type AssistantProvider = 'anthropic' | 'gemini'
+
+export const DEFAULT_MODELS_BY_PROVIDER: Record<AssistantProvider, { cheap: string; strong: string }> = {
+  anthropic: DEFAULT_MODELS,
+  gemini: { cheap: 'gemini-2.5-flash', strong: 'gemini-2.5-pro' },
+}
+
+/** Chave da Anthropic começa com `sk-ant-`; qualquer outra é tratada como Gemini (Google AI Studio). */
+export function providerOfKey(apiKey: string): AssistantProvider {
+  return apiKey.trim().startsWith('sk-ant-') ? 'anthropic' : 'gemini'
+}
 export const DEFAULT_TIMEOUT_MS = 20_000
 /** Chamadas ao modelo por conversa (ferramentas de leitura + a proposta). */
 export const MAX_TOOL_TURNS = 4
@@ -187,8 +207,9 @@ export async function describeApiError(res: Response, apiKey: string): Promise<s
   } catch {
     return undefined
   }
-  const error = (parsed as { error?: { type?: unknown; message?: unknown } } | null)?.error
-  const type = typeof error?.type === 'string' ? error.type : null
+  const error = (parsed as { error?: { type?: unknown; status?: unknown; message?: unknown } } | null)?.error
+  // Anthropic manda `error.type`; o Gemini manda `error.status` (ex.: INVALID_ARGUMENT).
+  const type = typeof error?.type === 'string' ? error.type : typeof error?.status === 'string' ? error.status : null
   const message = typeof error?.message === 'string' ? error.message : null
   if (!type && !message) return undefined
   let text = [type, message].filter(Boolean).join(': ')
@@ -244,6 +265,146 @@ export function createAnthropicCaller(opts: AnthropicCallerOptions): ModelCaller
       clearTimeout(timer)
     }
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Gemini (Google AI Studio): traduz o formato interno (API de mensagens) para
+ * `generateContent` e de volta. Só `fetch`, sem SDK. A chave vai no cabeçalho
+ * `x-goog-api-key`, nunca na URL (URL vira log).
+ * ------------------------------------------------------------------ */
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
+
+type GeminiPart = {
+  text?: string
+  thought?: boolean
+  thoughtSignature?: string
+  functionCall?: { name: string; args?: unknown }
+  functionResponse?: { name: string; response: Record<string, unknown> }
+}
+
+function parseToolResult(content: string): unknown {
+  try {
+    return JSON.parse(content)
+  } catch {
+    return content
+  }
+}
+
+/** Corpo do `generateContent` a partir do pedido no formato da API de mensagens. */
+export function toGeminiBody(req: ModelRequest): Record<string, unknown> {
+  const namesById = new Map<string, string>()
+  const contents = req.messages.map((message) => {
+    const parts: GeminiPart[] =
+      typeof message.content === 'string'
+        ? [{ text: message.content }]
+        : message.content.map((block): GeminiPart => {
+            if (block.type === 'text') return { text: block.text }
+            if (block.type === 'tool_use') {
+              namesById.set(block.id, block.name)
+              return {
+                functionCall: { name: block.name, args: block.input ?? {} },
+                ...(block.signature ? { thoughtSignature: block.signature } : {}),
+              }
+            }
+            const result = parseToolResult(block.content)
+            return {
+              functionResponse: {
+                name: namesById.get(block.tool_use_id) ?? 'ferramenta',
+                response: block.is_error ? { error: result } : { result },
+              },
+            }
+          })
+    return { role: message.role === 'assistant' ? 'model' : 'user', parts }
+  })
+
+  const forced = req.tool_choice?.type === 'tool' ? req.tool_choice.name : null
+  return {
+    systemInstruction: { parts: [{ text: req.system }] },
+    contents,
+    tools: [
+      {
+        functionDeclarations: req.tools.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          // JSON Schema completo (o zod gera anyOf/const), não o subconjunto OpenAPI de `parameters`.
+          parametersJsonSchema: tool.input_schema,
+        })),
+      },
+    ],
+    toolConfig: {
+      functionCallingConfig: forced ? { mode: 'ANY', allowedFunctionNames: [forced] } : { mode: 'AUTO' },
+    },
+    generationConfig: { maxOutputTokens: req.max_tokens, temperature: 0 },
+  }
+}
+
+/** Resposta do `generateContent` no formato interno; `null` quando não veio candidato (bloqueio, vazio). */
+export function fromGeminiResponse(body: unknown): ModelResponse | null {
+  const parts = (body as { candidates?: Array<{ content?: { parts?: GeminiPart[] } }> } | null)?.candidates?.[0]?.content?.parts
+  if (!Array.isArray(parts)) return null
+  const content: ModelContentBlock[] = []
+  let n = 0
+  for (const part of parts) {
+    if (part.functionCall) {
+      n += 1
+      content.push({
+        type: 'tool_use',
+        id: `gemini_${n}`,
+        name: part.functionCall.name,
+        input: part.functionCall.args ?? {},
+        ...(part.thoughtSignature ? { signature: part.thoughtSignature } : {}),
+      })
+    } else if (typeof part.text === 'string' && !part.thought) {
+      content.push({ type: 'text', text: part.text })
+    }
+  }
+  return { content, stop_reason: content.some((b) => b.type === 'tool_use') ? 'tool_use' : 'end_turn' }
+}
+
+export function createGeminiCaller(opts: AnthropicCallerOptions): ModelCaller {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const doFetch = opts.fetchImpl ?? fetch
+  return async (req) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      let res: Response
+      let body: unknown
+      try {
+        res = await doFetch(`${GEMINI_BASE}/${encodeURIComponent(req.model)}:generateContent`, {
+          method: 'POST',
+          headers: { 'x-goog-api-key': opts.apiKey, 'content-type': 'application/json' },
+          body: JSON.stringify(toGeminiBody(req)),
+          signal: controller.signal,
+        })
+        if (!res.ok) {
+          throw new AssistantUnavailableError(
+            `O modelo respondeu com erro (HTTP ${res.status}).`,
+            'http',
+            res.status,
+            await describeApiError(res, opts.apiKey),
+          )
+        }
+        body = await res.json()
+      } catch (error) {
+        if (error instanceof AssistantUnavailableError) throw error
+        if (controller.signal.aborted) throw new AssistantUnavailableError('O modelo demorou demais para responder.', 'timeout')
+        if (error instanceof SyntaxError) throw new AssistantUnavailableError('O modelo devolveu uma resposta ilegível.', 'bad_response')
+        throw new AssistantUnavailableError('Não consegui falar com o modelo.', 'network')
+      }
+      const parsed = fromGeminiResponse(body)
+      if (!parsed) throw new AssistantUnavailableError('O modelo não devolveu resposta (possível bloqueio de conteúdo).', 'bad_response')
+      return parsed
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+}
+
+/** O cliente certo para o provedor (pela chave, ou o `provider` pedido). */
+export function createModelCaller(opts: AnthropicCallerOptions & { provider?: AssistantProvider }): ModelCaller {
+  const provider = opts.provider ?? providerOfKey(opts.apiKey)
+  return provider === 'gemini' ? createGeminiCaller(opts) : createAnthropicCaller(opts)
 }
 
 /* ------------------------------------------------------------------ *
@@ -445,6 +606,8 @@ export type IntentDeps = {
   callModel?: ModelCaller
   tools: AssistantTools
   models?: { cheap: string; strong: string }
+  /** `anthropic` ou `gemini`; ausente = pelo formato da chave */
+  provider?: AssistantProvider
   /** tempo limite de CADA chamada ao modelo (só no cliente padrão); padrão 20 s */
   timeoutMs?: number
 }
@@ -658,8 +821,9 @@ export async function proposeFromText(text: string, ctx: AssistantContext, deps:
     throw new AssistantUnavailableError('O assistente não está configurado (falta a chave do modelo).', 'no_key')
   }
 
-  const models = deps.models ?? DEFAULT_MODELS
-  const call = deps.callModel ?? createAnthropicCaller({ apiKey: deps.apiKey, timeoutMs: deps.timeoutMs })
+  const provider = deps.provider ?? providerOfKey(deps.apiKey)
+  const models = deps.models ?? DEFAULT_MODELS_BY_PROVIDER[provider]
+  const call = deps.callModel ?? createModelCaller({ apiKey: deps.apiKey, timeoutMs: deps.timeoutMs, provider })
   const seen: SeenIds = {
     pending: new Set(),
     transactions: new Set(),

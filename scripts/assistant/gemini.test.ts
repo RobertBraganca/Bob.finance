@@ -1,0 +1,291 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import {
+  AssistantUnavailableError,
+  DEFAULT_MODELS_BY_PROVIDER,
+  createGeminiCaller,
+  fromGeminiResponse,
+  proposeFromText,
+  providerOfKey,
+  toGeminiBody,
+  TOOL_DEFINITIONS,
+  type AssistantTools,
+  type ModelRequest,
+} from '../../server/src/services/assistant/intent'
+import { optionsFromEnv } from '../../server/src/services/assistant/service'
+import type { AssistantCandidate, AssistantContext } from '../../shared/assistantTypes'
+
+/**
+ * Adaptador do Gemini (Google AI Studio). NENHUMA rede: o `fetch` é simulado.
+ * A chave de teste é fictícia; vários testes garantem que ela nunca vira URL,
+ * mensagem de erro nem diagnóstico.
+ */
+const KEY = 'AQ.chave-de-teste-nao-e-real'
+
+const CTX: AssistantContext = {
+  today: '2026-10-19',
+  accounts: [{ id: 1, name: 'Nubank' }],
+  categories: [],
+  assets: [],
+}
+
+const CANDIDATE: AssistantCandidate = {
+  kind: 'pending',
+  id: 123,
+  description: 'Coral Opus',
+  amountCents: 75000,
+  postedOn: '2026-10-12',
+  accountName: 'Nubank',
+  strength: 'exact',
+}
+
+const emptyTools = (over: Partial<AssistantTools> = {}): AssistantTools => ({
+  searchPending: async () => [CANDIDATE],
+  searchTransactions: async () => [],
+  listAssets: async () => [],
+  listAccounts: async () => CTX.accounts,
+  ...over,
+})
+
+const REQ: ModelRequest = {
+  model: 'gemini-2.5-flash',
+  max_tokens: 1024,
+  system: 'Você registra o que o usuário disse.',
+  tools: TOOL_DEFINITIONS,
+  messages: [{ role: 'user', content: 'Receita Coral Opus de R$ 750,00' }],
+}
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
+
+/* ------------------------------------------------------------------ *
+ * Pedido: formato interno → generateContent
+ * ------------------------------------------------------------------ */
+test('pedido: sistema, ferramentas com JSON Schema completo e modo AUTO por padrão', () => {
+  const body = toGeminiBody(REQ) as {
+    systemInstruction: { parts: Array<{ text: string }> }
+    contents: Array<{ role: string; parts: Array<{ text?: string }> }>
+    tools: Array<{ functionDeclarations: Array<{ name: string; parametersJsonSchema: unknown; parameters?: unknown }> }>
+    toolConfig: { functionCallingConfig: { mode: string; allowedFunctionNames?: string[] } }
+    generationConfig: { maxOutputTokens: number; temperature: number }
+  }
+  assert.equal(body.systemInstruction.parts[0]!.text, REQ.system)
+  assert.deepEqual(body.contents, [{ role: 'user', parts: [{ text: 'Receita Coral Opus de R$ 750,00' }] }])
+  assert.equal(body.tools[0]!.functionDeclarations.length, TOOL_DEFINITIONS.length)
+  for (const declaration of body.tools[0]!.functionDeclarations) {
+    assert.ok(declaration.parametersJsonSchema, `${declaration.name} precisa do schema`)
+    assert.equal(declaration.parameters, undefined, 'usa parametersJsonSchema, não o subconjunto OpenAPI')
+  }
+  assert.deepEqual(body.toolConfig.functionCallingConfig, { mode: 'AUTO' })
+  assert.deepEqual(body.generationConfig, { maxOutputTokens: 1024, temperature: 0 })
+})
+
+test('pedido: tool_choice de uma ferramenta vira modo ANY com a lista permitida', () => {
+  const body = toGeminiBody({ ...REQ, tool_choice: { type: 'tool', name: 'submit_proposal' } }) as {
+    toolConfig: { functionCallingConfig: unknown }
+  }
+  assert.deepEqual(body.toolConfig.functionCallingConfig, { mode: 'ANY', allowedFunctionNames: ['submit_proposal'] })
+})
+
+test('pedido: tool_use vira functionCall (com a assinatura) e tool_result vira functionResponse com o nome certo', () => {
+  const body = toGeminiBody({
+    ...REQ,
+    messages: [
+      { role: 'user', content: 'frase' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'gemini_1', name: 'search_pending', input: { text: 'coral' }, signature: 'SIG123' }] },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'gemini_1', content: JSON.stringify([{ id: 123 }]) },
+          { type: 'tool_result', tool_use_id: 'gemini_1', content: 'falhou', is_error: true },
+        ],
+      },
+    ],
+  }) as { contents: Array<{ role: string; parts: Array<Record<string, unknown>> }> }
+  assert.deepEqual(body.contents[1], {
+    role: 'model',
+    parts: [{ functionCall: { name: 'search_pending', args: { text: 'coral' } }, thoughtSignature: 'SIG123' }],
+  })
+  assert.equal(body.contents[2]!.role, 'user')
+  assert.deepEqual(body.contents[2]!.parts[0], { functionResponse: { name: 'search_pending', response: { result: [{ id: 123 }] } } })
+  assert.deepEqual(body.contents[2]!.parts[1], { functionResponse: { name: 'search_pending', response: { error: 'falhou' } } })
+})
+
+/* ------------------------------------------------------------------ *
+ * Resposta: generateContent → formato interno
+ * ------------------------------------------------------------------ */
+test('resposta: functionCall vira tool_use com id estável e assinatura; texto de raciocínio é ignorado', () => {
+  const res = fromGeminiResponse({
+    candidates: [
+      {
+        content: {
+          parts: [
+            { text: 'pensando…', thought: true },
+            { functionCall: { name: 'search_pending', args: { text: 'coral' } }, thoughtSignature: 'S1' },
+            { functionCall: { name: 'list_assets', args: {} } },
+            { text: 'ok' },
+          ],
+        },
+      },
+    ],
+  })
+  assert.deepEqual(res, {
+    content: [
+      { type: 'tool_use', id: 'gemini_1', name: 'search_pending', input: { text: 'coral' }, signature: 'S1' },
+      { type: 'tool_use', id: 'gemini_2', name: 'list_assets', input: {} },
+      { type: 'text', text: 'ok' },
+    ],
+    stop_reason: 'tool_use',
+  })
+})
+
+test('resposta: só texto termina o turno; sem candidato (bloqueio) vira null', () => {
+  assert.equal(fromGeminiResponse({ candidates: [{ content: { parts: [{ text: 'oi' }] } }] })!.stop_reason, 'end_turn')
+  assert.equal(fromGeminiResponse({ promptFeedback: { blockReason: 'SAFETY' } }), null)
+  assert.equal(fromGeminiResponse({ candidates: [{}] }), null)
+})
+
+/* ------------------------------------------------------------------ *
+ * Cliente
+ * ------------------------------------------------------------------ */
+test('cliente: chave só no cabeçalho x-goog-api-key, modelo na URL, nunca a chave na URL', async () => {
+  let seen: { url: string; headers: Record<string, string> } | null = null
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    seen = { url, headers: init.headers as Record<string, string> }
+    return json({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] })
+  }) as unknown as typeof fetch
+  const res = await createGeminiCaller({ apiKey: KEY, fetchImpl })(REQ)
+  assert.equal(res.stop_reason, 'end_turn')
+  assert.match(seen!.url, /\/v1beta\/models\/gemini-2\.5-flash:generateContent$/)
+  assert.ok(!seen!.url.includes(KEY), 'a chave não pode ir na URL')
+  assert.equal(seen!.headers['x-goog-api-key'], KEY)
+})
+
+test('cliente: erro HTTP do Google vira diagnóstico (status e mensagem) sem a chave', async () => {
+  const body = { error: { code: 400, status: 'INVALID_ARGUMENT', message: `API key not valid (${KEY}). Please pass a valid API key.` } }
+  const fetchImpl = (async () => json(body, 400)) as unknown as typeof fetch
+  await assert.rejects(createGeminiCaller({ apiKey: KEY, fetchImpl })(REQ), (error: unknown) => {
+    const e = error as AssistantUnavailableError
+    assert.equal(e.reason, 'http')
+    assert.equal(e.status, 400)
+    assert.match(e.detail ?? '', /INVALID_ARGUMENT/)
+    assert.ok(!(e.detail ?? '').includes(KEY), 'a chave não pode aparecer no diagnóstico')
+    assert.ok(!e.message.includes(KEY))
+    return true
+  })
+})
+
+test('cliente: 429 (limite da camada gratuita), timeout e rede viram unavailable', async () => {
+  const limited = (async () => json({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'quota' } }, 429)) as unknown as typeof fetch
+  await assert.rejects(createGeminiCaller({ apiKey: KEY, fetchImpl: limited })(REQ), (e: unknown) => (e as AssistantUnavailableError).status === 429)
+  const down = (async () => {
+    throw new TypeError('fetch failed')
+  }) as unknown as typeof fetch
+  await assert.rejects(createGeminiCaller({ apiKey: KEY, fetchImpl: down })(REQ), (e: unknown) => (e as AssistantUnavailableError).reason === 'network')
+})
+
+test('cliente: resposta sem candidato (bloqueio) vira bad_response, sem a chave', async () => {
+  const fetchImpl = (async () => json({ promptFeedback: { blockReason: 'SAFETY' } })) as unknown as typeof fetch
+  await assert.rejects(createGeminiCaller({ apiKey: KEY, fetchImpl })(REQ), (error: unknown) => {
+    assert.equal((error as AssistantUnavailableError).reason, 'bad_response')
+    assert.ok(!(error as Error).message.includes(KEY))
+    return true
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * Provedor e ambiente
+ * ------------------------------------------------------------------ */
+test('provedor pela chave: sk-ant- é Anthropic; AQ. e AIza são Gemini', () => {
+  assert.equal(providerOfKey('sk-ant-api03-abc'), 'anthropic')
+  assert.equal(providerOfKey(`  sk-ant-api03-abc  `), 'anthropic')
+  assert.equal(providerOfKey('AQ.ExemploFicticio123'), 'gemini')
+  assert.equal(providerOfKey('AIzaSyAbc'), 'gemini')
+  assert.deepEqual(DEFAULT_MODELS_BY_PROVIDER.gemini, { cheap: 'gemini-2.5-flash', strong: 'gemini-2.5-pro' })
+})
+
+test('optionsFromEnv: chave sem espaços, provedor só se válido, modelos só se vierem os dois', () => {
+  const env = (vars: Record<string, string>) => (name: string) => vars[name]
+  assert.deepEqual(optionsFromEnv(env({ ASSISTANT_API_KEY: `  ${KEY} \n` })), { apiKey: KEY })
+  assert.deepEqual(optionsFromEnv(env({ ASSISTANT_API_KEY: KEY, ASSISTANT_PROVIDER: ' Gemini ' })), { apiKey: KEY, provider: 'gemini' })
+  assert.deepEqual(optionsFromEnv(env({ ASSISTANT_API_KEY: KEY, ASSISTANT_PROVIDER: 'openai' })), { apiKey: KEY })
+  assert.deepEqual(optionsFromEnv(env({ ASSISTANT_API_KEY: KEY, ASSISTANT_MODEL_CHEAP: 'a' })), { apiKey: KEY })
+  assert.deepEqual(optionsFromEnv(env({ ASSISTANT_API_KEY: KEY, ASSISTANT_MODEL_CHEAP: 'a', ASSISTANT_MODEL_STRONG: 'b' })), {
+    apiKey: KEY,
+    models: { cheap: 'a', strong: 'b' },
+  })
+  assert.deepEqual(optionsFromEnv(env({})), { apiKey: undefined })
+})
+
+/* ------------------------------------------------------------------ *
+ * Conversa completa com o Gemini simulado (duas rodadas: busca e proposta)
+ * ------------------------------------------------------------------ */
+test('Coral Opus de ponta a ponta pelo Gemini: busca a pendência e propõe data e comentário', async () => {
+  const urls: string[] = []
+  const bodies: Array<{ contents: unknown[] }> = []
+  const script = [
+    { candidates: [{ content: { parts: [{ functionCall: { name: 'search_pending', args: { text: 'coral opus', amountCents: 75000 } }, thoughtSignature: 'SIG-A' }] } }] },
+    {
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'submit_proposal',
+                  args: {
+                    summary: 'Achei a pendência "Coral Opus" de R$ 750,00. Vou mudar a data para 19/10/2026 e anotar "50% finais".',
+                    actions: [{ type: 'update_pending', pendingId: 123, postedOn: '2026-10-19', notes: '50% finais' }],
+                    questions: [],
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    },
+  ]
+  let turn = 0
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    urls.push(url)
+    bodies.push(JSON.parse(String(init.body)))
+    return json(script[turn++])
+  }) as unknown as typeof fetch
+
+  const result = await proposeFromText('Receita Coral Opus de R$ 750,00, 50% finais, pagamento previsto para segunda-feira dia 19.', CTX, {
+    apiKey: KEY,
+    tools: emptyTools(),
+    callModel: createGeminiCaller({ apiKey: KEY, fetchImpl }),
+    provider: 'gemini',
+  })
+
+  assert.equal(result.source, 'model')
+  assert.equal(result.model, 'gemini-2.5-flash')
+  assert.equal(result.escalated, false)
+  assert.equal(result.modelCalls, 2)
+  assert.deepEqual(result.proposal.actions, [{ type: 'update_pending', pendingId: 123, postedOn: '2026-10-19', notes: '50% finais' }])
+  assert.ok(urls.every((u) => u.includes('/models/gemini-2.5-flash:generateContent')))
+  // a assinatura da 1ª resposta volta junto na 2ª rodada
+  assert.match(JSON.stringify(bodies[1]!.contents), /"thoughtSignature":"SIG-A"/)
+  assert.match(JSON.stringify(bodies[1]!.contents), /"functionResponse":\{"name":"search_pending"/)
+})
+
+test('chave recusada pelo Gemini: proposeFromText lança unavailable com o motivo, sem a chave', async () => {
+  const fetchImpl = (async () =>
+    json({ error: { code: 400, status: 'INVALID_ARGUMENT', message: `API key not valid: ${KEY}` } }, 400)) as unknown as typeof fetch
+  await assert.rejects(
+    proposeFromText('Gastei R$ 16,00 hoje na padaria', CTX, {
+      apiKey: KEY,
+      tools: emptyTools(),
+      callModel: createGeminiCaller({ apiKey: KEY, fetchImpl }),
+      provider: 'gemini',
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof AssistantUnavailableError)
+      assert.equal(error.status, 400)
+      assert.ok(!String(error.detail).includes(KEY))
+      assert.ok(!error.message.includes(KEY))
+      return true
+    },
+  )
+})
