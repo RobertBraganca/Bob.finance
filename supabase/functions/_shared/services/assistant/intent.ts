@@ -94,7 +94,9 @@ export type AssistantProvider = 'anthropic' | 'gemini'
 
 export const DEFAULT_MODELS_BY_PROVIDER: Record<AssistantProvider, { cheap: string; strong: string }> = {
   anthropic: DEFAULT_MODELS,
-  gemini: { cheap: 'gemini-2.5-flash', strong: 'gemini-2.5-pro' },
+  // O Google aposenta modelos para contas novas (o 2.5 já devolve 404 "no longer available"): se mudar de
+  // novo, o painel mostra o motivo e `ASSISTANT_MODEL_CHEAP`/`ASSISTANT_MODEL_STRONG` trocam sem código.
+  gemini: { cheap: 'gemini-3.8-flash', strong: 'gemini-3.8-pro' },
 }
 
 /** Chave da Anthropic começa com `sk-ant-`; qualquer outra é tratada como Gemini (Google AI Studio). */
@@ -838,11 +840,19 @@ export async function proposeFromText(text: string, ctx: AssistantContext, deps:
   let escalated = false
   const cheapFailed = cheap.result === null
   const onlyQuestions = cheap.result !== null && cheap.result.proposal.actions.length === 0
-  if (cheapFailed || (onlyQuestions && looksClear(phrase))) {
+  // Escalar para o MESMO modelo só gastaria cota; e um forte indisponível (modelo aposentado, limite da
+  // camada gratuita) não pode derrubar o que o barato já entregou.
+  if ((cheapFailed || (onlyQuestions && looksClear(phrase))) && models.strong !== models.cheap) {
     escalated = true
-    const strong = await runModel(models.strong, phrase, ctx, deps.tools, call, seen, counter)
+    let strong: Run | null
+    try {
+      strong = await runModel(models.strong, phrase, ctx, deps.tools, call, seen, counter)
+    } catch (error) {
+      if (cheap.result !== null && error instanceof AssistantUnavailableError) strong = null
+      else throw error
+    }
     // O forte vale se entregou algo; senão, fica o que o barato tinha (se tinha).
-    if (strong.result !== null) chosen = strong
+    if (strong && strong.result !== null) chosen = strong
   }
 
   if (chosen.result === null) {

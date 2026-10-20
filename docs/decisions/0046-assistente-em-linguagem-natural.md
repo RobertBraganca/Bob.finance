@@ -34,7 +34,8 @@ conselho (decisions/0010).
   traduz para o Gemini (Google AI Studio, camada gratuita), porque a chave da
   Anthropic exige conta paga. O provedor sai do formato da chave (`sk-ant-` é Anthropic,
   o resto é Gemini) ou de `ASSISTANT_PROVIDER`; os modelos padrão do Gemini são
-  `gemini-2.5-flash` e `gemini-2.5-pro`, trocáveis por `ASSISTANT_MODEL_CHEAP` e
+  `gemini-3.8-flash` e `gemini-3.8-pro` (o Google aposenta modelos para contas novas; o 2.5
+  já devolve 404), trocáveis por `ASSISTANT_MODEL_CHEAP` e
   `ASSISTANT_MODEL_STRONG` (sempre os dois). Com o Gemini, as frases vão ao Google.
 
 ## Consequências

@@ -10,7 +10,9 @@ import {
   toGeminiBody,
   TOOL_DEFINITIONS,
   type AssistantTools,
+  type ModelCaller,
   type ModelRequest,
+  type ModelResponse,
 } from '../../server/src/services/assistant/intent'
 import { optionsFromEnv } from '../../server/src/services/assistant/service'
 import type { AssistantCandidate, AssistantContext } from '../../shared/assistantTypes'
@@ -48,7 +50,7 @@ const emptyTools = (over: Partial<AssistantTools> = {}): AssistantTools => ({
 })
 
 const REQ: ModelRequest = {
-  model: 'gemini-2.5-flash',
+  model: 'gemini-3.8-flash',
   max_tokens: 1024,
   system: 'Você registra o que o usuário disse.',
   tools: TOOL_DEFINITIONS,
@@ -155,7 +157,7 @@ test('cliente: chave só no cabeçalho x-goog-api-key, modelo na URL, nunca a ch
   }) as unknown as typeof fetch
   const res = await createGeminiCaller({ apiKey: KEY, fetchImpl })(REQ)
   assert.equal(res.stop_reason, 'end_turn')
-  assert.match(seen!.url, /\/v1beta\/models\/gemini-2\.5-flash:generateContent$/)
+  assert.match(seen!.url, /\/v1beta\/models\/gemini-3\.8-flash:generateContent$/)
   assert.ok(!seen!.url.includes(KEY), 'a chave não pode ir na URL')
   assert.equal(seen!.headers['x-goog-api-key'], KEY)
 })
@@ -200,7 +202,7 @@ test('provedor pela chave: sk-ant- é Anthropic; AQ. e AIza são Gemini', () => 
   assert.equal(providerOfKey(`  sk-ant-api03-abc  `), 'anthropic')
   assert.equal(providerOfKey('AQ.ExemploFicticio123'), 'gemini')
   assert.equal(providerOfKey('AIzaSyAbc'), 'gemini')
-  assert.deepEqual(DEFAULT_MODELS_BY_PROVIDER.gemini, { cheap: 'gemini-2.5-flash', strong: 'gemini-2.5-pro' })
+  assert.deepEqual(DEFAULT_MODELS_BY_PROVIDER.gemini, { cheap: 'gemini-3.8-flash', strong: 'gemini-3.8-pro' })
 })
 
 test('optionsFromEnv: chave sem espaços, provedor só se válido, modelos só se vierem os dois', () => {
@@ -260,11 +262,11 @@ test('Coral Opus de ponta a ponta pelo Gemini: busca a pendência e propõe data
   })
 
   assert.equal(result.source, 'model')
-  assert.equal(result.model, 'gemini-2.5-flash')
+  assert.equal(result.model, 'gemini-3.8-flash')
   assert.equal(result.escalated, false)
   assert.equal(result.modelCalls, 2)
   assert.deepEqual(result.proposal.actions, [{ type: 'update_pending', pendingId: 123, postedOn: '2026-10-19', notes: '50% finais' }])
-  assert.ok(urls.every((u) => u.includes('/models/gemini-2.5-flash:generateContent')))
+  assert.ok(urls.every((u) => u.includes('/models/gemini-3.8-flash:generateContent')))
   // a assinatura da 1ª resposta volta junto na 2ª rodada
   assert.match(JSON.stringify(bodies[1]!.contents), /"thoughtSignature":"SIG-A"/)
   assert.match(JSON.stringify(bodies[1]!.contents), /"functionResponse":\{"name":"search_pending"/)
@@ -288,4 +290,59 @@ test('chave recusada pelo Gemini: proposeFromText lança unavailable com o motiv
       return true
     },
   )
+})
+
+/* ------------------------------------------------------------------ *
+ * Escalada tolerante: modelo forte aposentado ou no limite não derruba o barato
+ * ------------------------------------------------------------------ */
+const submit = (proposal: unknown): ModelResponse => ({
+  content: [{ type: 'tool_use', id: 't1', name: 'submit_proposal', input: proposal }],
+  stop_reason: 'tool_use',
+})
+
+test('forte indisponível (404) depois de o barato só perguntar: vale a pergunta do barato, sem erro', async () => {
+  const seenModels: string[] = []
+  const callModel: ModelCaller = async (req) => {
+    seenModels.push(req.model)
+    if (req.model === 'modelo-barato') {
+      return submit({ summary: 'Preciso de mais um dado.', actions: [], questions: ['Em qual conta foi o pix?'] })
+    }
+    throw new AssistantUnavailableError('O modelo respondeu com erro (HTTP 404).', 'http', 404, 'NOT_FOUND: modelo aposentado')
+  }
+  const result = await proposeFromText('Gastei R$ 16,00 hoje na padaria', CTX, {
+    apiKey: KEY,
+    tools: emptyTools(),
+    callModel,
+    models: { cheap: 'modelo-barato', strong: 'modelo-forte' },
+  })
+  assert.deepEqual(seenModels, ['modelo-barato', 'modelo-forte'])
+  assert.equal(result.source, 'model')
+  assert.equal(result.model, 'modelo-barato')
+  assert.deepEqual(result.proposal.questions, ['Em qual conta foi o pix?'])
+})
+
+test('barato indisponível e forte também: o erro sobe (nada a aproveitar)', async () => {
+  const callModel: ModelCaller = async () => {
+    throw new AssistantUnavailableError('O modelo respondeu com erro (HTTP 404).', 'http', 404, 'NOT_FOUND')
+  }
+  await assert.rejects(
+    proposeFromText('Gastei R$ 16,00 hoje na padaria', CTX, { apiKey: KEY, tools: emptyTools(), callModel, models: { cheap: 'a', strong: 'b' } }),
+    (error: unknown) => error instanceof AssistantUnavailableError && error.status === 404,
+  )
+})
+
+test('modelo barato igual ao forte: não escala (gastaria cota à toa)', async () => {
+  let calls = 0
+  const callModel: ModelCaller = async () => {
+    calls += 1
+    return submit({ summary: 'Preciso de mais um dado.', actions: [], questions: ['Em qual conta?'] })
+  }
+  const result = await proposeFromText('Gastei R$ 16,00 hoje na padaria', CTX, {
+    apiKey: KEY,
+    tools: emptyTools(),
+    callModel,
+    models: { cheap: 'mesmo', strong: 'mesmo' },
+  })
+  assert.equal(calls, 1)
+  assert.equal(result.escalated, false)
 })
