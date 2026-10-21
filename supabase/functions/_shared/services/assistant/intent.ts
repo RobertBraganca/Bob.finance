@@ -103,7 +103,8 @@ export const DEFAULT_MODELS_BY_PROVIDER: Record<AssistantProvider, { cheap: stri
 export function providerOfKey(apiKey: string): AssistantProvider {
   return apiKey.trim().startsWith('sk-ant-') ? 'anthropic' : 'gemini'
 }
-export const DEFAULT_TIMEOUT_MS = 20_000
+// 30 s por chamada: os modelos "pensantes" (Gemini 3) levaram mais de 20 s com o raciocínio padrão.
+export const DEFAULT_TIMEOUT_MS = 30_000
 /** Chamadas ao modelo por conversa (ferramentas de leitura + a proposta). */
 export const MAX_TOOL_TURNS = 4
 const MAX_OUTPUT_TOKENS = 1024
@@ -293,7 +294,7 @@ function parseToolResult(content: string): unknown {
 }
 
 /** Corpo do `generateContent` a partir do pedido no formato da API de mensagens. */
-export function toGeminiBody(req: ModelRequest): Record<string, unknown> {
+export function toGeminiBody(req: ModelRequest, opts: { thinking?: boolean } = {}): Record<string, unknown> {
   const namesById = new Map<string, string>()
   const contents = req.messages.map((message) => {
     const parts: GeminiPart[] =
@@ -336,7 +337,13 @@ export function toGeminiBody(req: ModelRequest): Record<string, unknown> {
     toolConfig: {
       functionCallingConfig: forced ? { mode: 'ANY', allowedFunctionNames: [forced] } : { mode: 'AUTO' },
     },
-    generationConfig: { maxOutputTokens: req.max_tokens, temperature: 0 },
+    generationConfig: {
+      maxOutputTokens: req.max_tokens,
+      temperature: 0,
+      // Extrair campos de uma frase não pede raciocínio longo: nível baixo corta a latência
+      // (sem isto, o Gemini 3 passava de 20 s por chamada).
+      ...(opts.thinking === false ? {} : { thinkingConfig: { thinkingLevel: 'low' } }),
+    },
   }
 }
 
@@ -373,12 +380,20 @@ export function createGeminiCaller(opts: AnthropicCallerOptions): ModelCaller {
       let res: Response
       let body: unknown
       try {
-        res = await doFetch(`${GEMINI_BASE}/${encodeURIComponent(req.model)}:generateContent`, {
-          method: 'POST',
-          headers: { 'x-goog-api-key': opts.apiKey, 'content-type': 'application/json' },
-          body: JSON.stringify(toGeminiBody(req)),
-          signal: controller.signal,
-        })
+        const send = (thinking: boolean) =>
+          doFetch(`${GEMINI_BASE}/${encodeURIComponent(req.model)}:generateContent`, {
+            method: 'POST',
+            headers: { 'x-goog-api-key': opts.apiKey, 'content-type': 'application/json' },
+            body: JSON.stringify(toGeminiBody(req, { thinking })),
+            signal: controller.signal,
+          })
+        res = await send(true)
+        // Modelo que não conhece `thinkingLevel` responde 400 falando de "thinking": uma nova
+        // tentativa sem a opção, em vez de derrubar a conversa.
+        if (res.status === 400) {
+          const detail = await describeApiError(res.clone(), opts.apiKey)
+          if (detail && /thinking/i.test(detail)) res = await send(false)
+        }
         if (!res.ok) {
           throw new AssistantUnavailableError(
             `O modelo respondeu com erro (HTTP ${res.status}).`,

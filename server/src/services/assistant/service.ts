@@ -19,7 +19,7 @@ import { listContext, searchPending, searchTransactions } from './matcher'
  */
 
 /** Prazo da conversa inteira (vários turnos e a escalada); o de cada chamada ao modelo é do `intent`. */
-export const MESSAGE_DEADLINE_MS = 40_000
+export const MESSAGE_DEADLINE_MS = 60_000
 
 /** Mensagens por minuto: o app tem um usuário só, o limite protege o custo da API. */
 const MAX_MESSAGES_PER_MINUTE = 20

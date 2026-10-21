@@ -68,7 +68,7 @@ test('pedido: sistema, ferramentas com JSON Schema completo e modo AUTO por padr
     contents: Array<{ role: string; parts: Array<{ text?: string }> }>
     tools: Array<{ functionDeclarations: Array<{ name: string; parametersJsonSchema: unknown; parameters?: unknown }> }>
     toolConfig: { functionCallingConfig: { mode: string; allowedFunctionNames?: string[] } }
-    generationConfig: { maxOutputTokens: number; temperature: number }
+    generationConfig: { maxOutputTokens: number; temperature: number; thinkingConfig?: { thinkingLevel: string } }
   }
   assert.equal(body.systemInstruction.parts[0]!.text, REQ.system)
   assert.deepEqual(body.contents, [{ role: 'user', parts: [{ text: 'Receita Coral Opus de R$ 750,00' }] }])
@@ -78,7 +78,7 @@ test('pedido: sistema, ferramentas com JSON Schema completo e modo AUTO por padr
     assert.equal(declaration.parameters, undefined, 'usa parametersJsonSchema, não o subconjunto OpenAPI')
   }
   assert.deepEqual(body.toolConfig.functionCallingConfig, { mode: 'AUTO' })
-  assert.deepEqual(body.generationConfig, { maxOutputTokens: 1024, temperature: 0 })
+  assert.deepEqual(body.generationConfig, { maxOutputTokens: 1024, temperature: 0, thinkingConfig: { thinkingLevel: 'low' } })
 })
 
 test('pedido: tool_choice de uma ferramenta vira modo ANY com a lista permitida', () => {
@@ -345,4 +345,38 @@ test('modelo barato igual ao forte: não escala (gastaria cota à toa)', async (
   })
   assert.equal(calls, 1)
   assert.equal(result.escalated, false)
+})
+
+/* ------------------------------------------------------------------ *
+ * Raciocínio baixo e nova tentativa quando o modelo não o aceita
+ * ------------------------------------------------------------------ */
+test('corpo sem raciocínio quando pedido (thinking: false)', () => {
+  const body = toGeminiBody(REQ, { thinking: false }) as { generationConfig: Record<string, unknown> }
+  assert.deepEqual(body.generationConfig, { maxOutputTokens: 1024, temperature: 0 })
+})
+
+test('modelo que recusa thinkingLevel (400 sobre thinking): uma nova tentativa sem a opção', async () => {
+  const bodies: Array<{ generationConfig: Record<string, unknown> }> = []
+  const fetchImpl = (async (_url: string, init: RequestInit) => {
+    bodies.push(JSON.parse(String(init.body)))
+    if (bodies.length === 1) {
+      return json({ error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Unknown name "thinkingLevel": Cannot find field.' } }, 400)
+    }
+    return json({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] })
+  }) as unknown as typeof fetch
+  const res = await createGeminiCaller({ apiKey: KEY, fetchImpl })(REQ)
+  assert.equal(res.stop_reason, 'end_turn')
+  assert.equal(bodies.length, 2)
+  assert.deepEqual(bodies[0]!.generationConfig.thinkingConfig, { thinkingLevel: 'low' })
+  assert.equal(bodies[1]!.generationConfig.thinkingConfig, undefined)
+})
+
+test('400 que não é sobre thinking não repete a chamada', async () => {
+  let calls = 0
+  const fetchImpl = (async () => {
+    calls += 1
+    return json({ error: { code: 400, status: 'INVALID_ARGUMENT', message: 'API key not valid.' } }, 400)
+  }) as unknown as typeof fetch
+  await assert.rejects(createGeminiCaller({ apiKey: KEY, fetchImpl })(REQ), (e: unknown) => (e as AssistantUnavailableError).status === 400)
+  assert.equal(calls, 1)
 })
