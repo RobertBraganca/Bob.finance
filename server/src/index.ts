@@ -7,6 +7,7 @@ import { insightsRoutes } from './routes/insights'
 import { backupRoutes } from './routes/backups'
 import { pricingRoutes } from './routes/pricing'
 import { assistantRoutes } from './routes/assistant'
+import { clientsRoutes } from './routes/clients'
 import { simulateRoutes } from './routes/simulate'
 import { friendlyErrorMessage } from './core/errors'
 import { runInRequestScope } from './core/requestCache'
@@ -57,6 +58,7 @@ await app.register(backupRoutes, { prefix: '/api' })
 await app.register(pricingRoutes, { prefix: '/api' })
 await app.register(simulateRoutes, { prefix: '/api' })
 await app.register(assistantRoutes, { prefix: '/api' })
+await app.register(clientsRoutes, { prefix: '/api' })
 
 app.get('/api/health', async () => ({ ok: true, db: 'supabase' }))
 

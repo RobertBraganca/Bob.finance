@@ -51,6 +51,7 @@ import {
   IconSendFilled,
   IconMinus,
   IconPhotoFilled,
+  IconLink,
   type Icon as TablerIcon,
 } from '@tabler/icons-react'
 
@@ -153,6 +154,8 @@ const ICONS: Record<string, TablerIcon> = {
   send: IconSendFilled,
   minus: IconMinus,
   image: IconPhotoFilled,
+  // Ligar itens antigos a um serviço do catálogo; `link` não tem filled.
+  link: IconLink,
 }
 
 export type IconName = keyof typeof ICONS

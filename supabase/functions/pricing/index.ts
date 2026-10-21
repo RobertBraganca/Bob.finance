@@ -5,6 +5,10 @@ import { cors } from 'hono/cors'
 import { z, ZodError } from 'zod'
 import * as pricing from '../_shared/services/pricing.ts'
 import * as proposals from '../_shared/services/proposals.ts'
+import * as clientsService from '../_shared/services/clients.ts'
+import * as catalog from '../_shared/services/serviceCatalog.ts'
+import * as dealsService from '../_shared/services/deals.ts'
+import { DEAL_STAGES } from '../_shared/core/deals.ts'
 import { requireAdmin } from '../_shared/auth.ts'
 
 /**
@@ -48,11 +52,13 @@ const proposalItemSchema = z.object({
   unitPriceCents: z.number().int().min(0).max(1_000_000_000),
   quantity: z.number().positive().max(100_000),
   sourceQuoteId: z.number().int().positive().nullable().optional(),
+  serviceId: z.number().int().positive().nullable().optional(),
 })
 
 const proposalFields = {
   title: z.string().trim().min(1).max(160),
   clientLabel: z.string().trim().min(1).max(160),
+  clientId: z.number().int().positive().nullable().optional(),
   status: z.enum(proposals.EDITABLE_STATUSES).optional(),
   discountBps: z.number().int().min(0).max(10_000).optional(),
   validityDays: z.number().int().min(1).max(365).optional(),
@@ -69,6 +75,7 @@ const proposalListQuery = z.object({
   q: z.string().max(160).optional(),
   status: z.string().optional(),
   sort: z.enum(proposals.PROPOSAL_SORTS).optional(),
+  clientId: z.coerce.number().int().positive().optional(),
 })
 
 const statusList = (raw: string | undefined) =>
@@ -216,7 +223,7 @@ app.get('/quotes', async (c) => c.json({ quotes: await pricing.listQuotes() }))
 
 app.post('/quotes', async (c) => {
   const body = simulateBody
-    .extend({ clientLabel: z.string().min(1).max(120), ...commercialTerms })
+    .extend({ clientLabel: z.string().min(1).max(120), clientId: z.number().int().positive().nullable().optional(), ...commercialTerms })
     .parse(await c.req.json())
   return c.json(await pricing.saveQuote(body))
 })
@@ -236,7 +243,7 @@ app.patch('/quotes/:id', async (c) => {
   const body = simulateBody
     .omit({ period: true })
     .partial()
-    .extend({ clientLabel: z.string().min(1).max(120).optional(), ...commercialTerms })
+    .extend({ clientLabel: z.string().min(1).max(120).optional(), clientId: z.number().int().positive().nullable().optional(), ...commercialTerms })
     .parse(await c.req.json())
   const quote = await pricing.updateQuote(id, body)
   if (!quote) return c.json({ error: 'cotação não encontrada' }, 404)
@@ -283,7 +290,7 @@ app.post('/quotes/:id/approve', async (c) => {
  * ------------------------------------------------------------------ */
 app.get('/proposals', async (c) => {
   const query = proposalListQuery.parse(c.req.query())
-  return c.json(await proposals.listProposals({ q: query.q, statuses: statusList(query.status), sort: query.sort }))
+  return c.json(await proposals.listProposals({ q: query.q, statuses: statusList(query.status), sort: query.sort, clientId: query.clientId }))
 })
 app.get('/proposals/summary', async (c) => c.json(await proposals.proposalsSummary()))
 app.get('/proposals/item-suggestions', async (c) => {
@@ -334,6 +341,135 @@ app.post('/proposals/:id/duplicate', async (c) => {
 app.delete('/proposals/:id', async (c) => {
   const { id } = idParam.parse(c.req.param())
   return c.json(await proposals.deleteProposal(id))
+})
+
+/* ---------------------------------------------------------------- *
+ * Clientes, catálogo de serviços e negócios (docs/specs/clientes-e-negocios).
+ * Porta de server/src/routes/clients.ts. PricingError vira 422 no onError acima.
+ * Rotas fixas antes das com :id.
+ * ---------------------------------------------------------------- */
+const optionalText = (max: number) => z.string().max(max).nullable().optional()
+const clientFields = {
+  name: z.string().trim().min(1).max(160),
+  kind: z.enum(clientsService.CLIENT_KINDS).optional(),
+  status: z.enum(clientsService.CLIENT_STATUSES).optional(),
+  segment: optionalText(120),
+  email: z.string().trim().email().max(200).nullable().optional().or(z.literal('')),
+  phone: optionalText(60),
+  document: optionalText(40),
+  website: optionalText(200),
+  source: optionalText(120),
+  description: optionalText(4000),
+  isRecurring: z.boolean().optional(),
+}
+const contactFields = {
+  name: z.string().trim().min(1).max(160),
+  role: optionalText(120),
+  email: z.string().trim().email().max(200).nullable().optional().or(z.literal('')),
+  phone: optionalText(60),
+  isPrimary: z.boolean().optional(),
+}
+const serviceFields = {
+  name: z.string().trim().min(1).max(160),
+  description: optionalText(2000),
+  defaultPriceCents: z.number().int().min(0).max(1_000_000_000).optional(),
+  active: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).max(10_000).optional(),
+}
+const contactParams = idParam.extend({ contactId: z.coerce.number().int().positive() })
+const aliasParams = idParam.extend({ aliasId: z.coerce.number().int().positive() })
+const dealStageParams = z.object({ kind: z.enum(['proposal', 'quote']), id: z.coerce.number().int().positive() })
+const dealStageList = (raw: string | undefined) =>
+  (raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s): s is (typeof DEAL_STAGES)[number] => (DEAL_STAGES as readonly string[]).includes(s))
+
+app.get('/clients', async (c) => {
+  const query = z
+    .object({
+      q: z.string().max(160).optional(),
+      kind: z.enum(clientsService.CLIENT_KINDS).optional(),
+      status: z.enum(clientsService.CLIENT_STATUSES).optional(),
+      recurring: z.enum(['true', 'false']).optional(),
+    })
+    .parse(c.req.query())
+  return c.json(
+    await clientsService.listClients({
+      q: query.q,
+      kind: query.kind,
+      status: query.status,
+      recurring: query.recurring === undefined ? undefined : query.recurring === 'true',
+    }),
+  )
+})
+app.post('/clients', async (c) => c.json(await clientsService.createClient(z.object(clientFields).parse(await c.req.json()))))
+app.get('/clients/:id', async (c) => {
+  const client = await clientsService.getClient(idParam.parse(c.req.param()).id)
+  if (!client) return c.json({ error: 'cliente não encontrado' }, 404)
+  return c.json(client)
+})
+app.patch('/clients/:id', async (c) => {
+  const client = await clientsService.updateClient(idParam.parse(c.req.param()).id, z.object(clientFields).partial().parse(await c.req.json()))
+  if (!client) return c.json({ error: 'cliente não encontrado' }, 404)
+  return c.json(client)
+})
+app.delete('/clients/:id', async (c) => c.json(await clientsService.deleteClient(idParam.parse(c.req.param()).id)))
+app.get('/clients/:id/payer-suggestions', async (c) => {
+  const suggestions = await clientsService.payerSuggestions(idParam.parse(c.req.param()).id)
+  if (!suggestions) return c.json({ error: 'cliente não encontrado' }, 404)
+  return c.json({ suggestions })
+})
+app.post('/clients/:id/contacts', async (c) =>
+  c.json(await clientsService.addContact(idParam.parse(c.req.param()).id, z.object(contactFields).parse(await c.req.json()))),
+)
+app.patch('/clients/:id/contacts/:contactId', async (c) => {
+  const { id, contactId } = contactParams.parse(c.req.param())
+  const contact = await clientsService.updateContact(id, contactId, z.object(contactFields).partial().parse(await c.req.json()))
+  if (!contact) return c.json({ error: 'contato não encontrado' }, 404)
+  return c.json(contact)
+})
+app.delete('/clients/:id/contacts/:contactId', async (c) => {
+  const { id, contactId } = contactParams.parse(c.req.param())
+  return c.json(await clientsService.deleteContact(id, contactId))
+})
+app.post('/clients/:id/aliases', async (c) => {
+  const { alias } = z.object({ alias: z.string().trim().min(1).max(160) }).parse(await c.req.json())
+  return c.json(await clientsService.addPayerAlias(idParam.parse(c.req.param()).id, alias))
+})
+app.delete('/clients/:id/aliases/:aliasId', async (c) => {
+  const { id, aliasId } = aliasParams.parse(c.req.param())
+  return c.json(await clientsService.deletePayerAlias(id, aliasId))
+})
+
+app.get('/services', async (c) => c.json(await catalog.listServices()))
+app.post('/services', async (c) => c.json(await catalog.createService(z.object(serviceFields).parse(await c.req.json()))))
+app.patch('/services/:id', async (c) => {
+  const service = await catalog.updateService(idParam.parse(c.req.param()).id, z.object(serviceFields).partial().parse(await c.req.json()))
+  if (!service) return c.json({ error: 'serviço não encontrado' }, 404)
+  return c.json(service)
+})
+app.delete('/services/:id', async (c) => c.json(await catalog.deleteService(idParam.parse(c.req.param()).id)))
+app.post('/services/:id/adopt', async (c) => c.json(await catalog.adoptItemsByTitle(idParam.parse(c.req.param()).id)))
+
+app.get('/deals/summary', async (c) => c.json(await dealsService.dealsSummary()))
+app.get('/deals', async (c) => {
+  const query = z
+    .object({
+      q: z.string().max(160).optional(),
+      kind: z.enum(['proposal', 'quote']).optional(),
+      stage: z.string().optional(),
+      clientId: z.coerce.number().int().positive().optional(),
+    })
+    .parse(c.req.query())
+  return c.json({ deals: await dealsService.listDeals({ q: query.q, kind: query.kind, stages: dealStageList(query.stage), clientId: query.clientId }) })
+})
+app.post('/deals/:kind/:id/stage', async (c) => {
+  const { kind, id } = dealStageParams.parse(c.req.param())
+  const { stage } = z.object({ stage: z.enum(DEAL_STAGES) }).parse(await c.req.json())
+  const deal = await dealsService.setDealStage(kind, id, stage)
+  if (!deal) return c.json({ error: kind === 'proposal' ? 'orçamento não encontrado' : 'cotação não encontrada' }, 404)
+  return c.json(deal)
 })
 
 Deno.serve(app.fetch)

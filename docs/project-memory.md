@@ -1574,3 +1574,24 @@ enxugar telas repetidas, textos técnicos e menu.
   `criteria`, `debt` (paydown), `dre`, `financialEngine` (resumo PJ), `investments`,
   `partners`, `propertyPlans`, `transactions`.
 
+## 21/10/2026 — Clientes e negócios (specs/clientes-e-negocios, fases 1 a 4)
+
+- Migração `20261021120000_clients_and_deals` aplicada e registrada (manual, como
+  sempre): `clients`, `client_contacts`, `client_payer_aliases`, `service_catalog`,
+  `client_id` em `project_quotes`/`service_proposals`, `service_id` nos itens,
+  `negotiating`/`paused` no enum `proposal_status`. Idempotente (`if not exists`),
+  então os testes a rodam de novo dentro da transação sem efeito.
+- Precificação: Negócios (padrão, lista e quadro), Clientes (+ ficha
+  `/precificacao/clientes/:id`), Serviços, Cotações, Parâmetros. `ProposalsTab` saiu.
+- Regra: a fonte dos estágios unificados é `shared/deals.ts`; na cotação,
+  `in_review`/`needs_changes` leem como "Em negociação" e a volta grava `in_review`.
+  Aprovar nunca passa por `/pricing/deals/:kind/:id/stage` (422): sempre o modal.
+- LTV realizado vem do extrato: receitas com `source_proposal_id`/`source_quote_id`
+  do cliente mais as entradas cujo nome bate com um "nome no extrato" do cliente
+  (o mais longo vence). O extrator de pagador (`payerOf`) pega só o trecho logo
+  depois de "Transferência Recebida - " (o resto é CPF, banco, agência).
+- Edge: as leituras novas rodam em sequência; varredura sob Deno com a conexão do
+  Edge em 0,1 a 0,9 s cada.
+- Deploy: migração antes da função `pricing` (as leituras de cotação e orçamento
+  já selecionam `client_id`).
+

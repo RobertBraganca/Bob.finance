@@ -25,7 +25,8 @@
     "picpay:normalize": "tsx scripts/normalize-picpay.ts",
     "regras:locais": "tsx scripts/apply-local-rules.ts",
     "recolor:categories": "tsx scripts/recolor-categories.ts",
-    "test:assistant": "tsx --test scripts/assistant/*.test.ts"
+    "test:assistant": "tsx --test scripts/assistant/*.test.ts",
+    "test:clients": "tsx --test scripts/clients/*.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

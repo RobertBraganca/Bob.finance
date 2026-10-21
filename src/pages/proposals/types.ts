@@ -3,7 +3,7 @@
  * specs/service-proposals), no formato que `/pricing/proposals` devolve.
  */
 
-export type ProposalStatus = 'draft' | 'sent' | 'approved' | 'rejected'
+export type ProposalStatus = 'draft' | 'sent' | 'negotiating' | 'paused' | 'approved' | 'rejected'
 export type ProposalSort = 'recent' | 'oldest' | 'value_desc' | 'value_asc'
 
 export type ProposalSummary = {
@@ -12,6 +12,8 @@ export type ProposalSummary = {
   numberLabel: string
   title: string
   clientLabel: string
+  /** cliente da lista (specs/clientes-e-negocios); o nome escrito continua em `clientLabel` */
+  clientId: number | null
   status: ProposalStatus
   discountBps: number
   validityDays: number
@@ -37,6 +39,8 @@ export type ProposalItem = {
   unitPriceCents: number
   quantity: number
   sourceQuoteId: number | null
+  /** serviço do catálogo de onde o item veio, se veio */
+  serviceId?: number | null
 }
 
 export type ProposalReceivable = {
@@ -61,14 +65,18 @@ export type IssuerSettings = {
 export const STATUS_LABEL: Record<ProposalStatus, string> = {
   draft: 'Rascunho',
   sent: 'Enviado',
+  negotiating: 'Em negociação',
+  paused: 'Pausado',
   approved: 'Aprovado',
   rejected: 'Recusado',
 }
 
-/** Selos que já existem no app: neutro, azul, verde, vermelho. */
+/** Selos que já existem no app: neutro, azul, âmbar, verde, vermelho. */
 export const STATUS_BADGE: Record<ProposalStatus, string> = {
   draft: 'badge',
   sent: 'badge badge--info',
+  negotiating: 'badge badge--warning',
+  paused: 'badge',
   approved: 'badge badge--good',
   rejected: 'badge badge--critical',
 }

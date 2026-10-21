@@ -16,10 +16,11 @@ import { PricingError } from './pricing.ts'
  * aprovação congela o valor, e é ele que vira as receitas a receber.
  */
 
-export const PROPOSAL_STATUSES = ['draft', 'sent', 'approved', 'rejected'] as const
+/** `negotiating` e `paused`: os estágios do fluxo unificado (shared/deals.ts), iguais aos da cotação. */
+export const PROPOSAL_STATUSES = ['draft', 'sent', 'negotiating', 'paused', 'approved', 'rejected'] as const
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number]
 /** O que dá para escolher direto; `approved` só pela aprovação, que pede conta e data. */
-export const EDITABLE_STATUSES = ['draft', 'sent', 'rejected'] as const
+export const EDITABLE_STATUSES = ['draft', 'sent', 'negotiating', 'paused', 'rejected'] as const
 export type EditableStatus = (typeof EDITABLE_STATUSES)[number]
 
 export const PROPOSAL_SORTS = ['recent', 'oldest', 'value_desc', 'value_asc'] as const
@@ -31,11 +32,15 @@ export type ProposalItemInput = {
   unitPriceCents: number
   quantity: number
   sourceQuoteId?: number | null
+  /** serviço do catálogo de onde o item veio (título e preço continuam editáveis) */
+  serviceId?: number | null
 }
 
 export type ProposalInput = {
   title: string
   clientLabel: string
+  /** o cliente da lista; o `clientLabel` continua sendo o nome que sai no PDF */
+  clientId?: number | null
   status?: EditableStatus
   discountBps?: number
   validityDays?: number
@@ -59,6 +64,7 @@ function summarize(proposal: ProposalRecord, items: ItemRecord[]) {
     numberLabel: formatProposalNumber(proposal.number),
     title: proposal.title,
     clientLabel: proposal.clientLabel,
+    clientId: proposal.clientId,
     status: proposal.status as ProposalStatus,
     discountBps: proposal.discountBps,
     validityDays: proposal.validityDays,
@@ -93,9 +99,10 @@ async function itemsFor(ids: number[]): Promise<Map<number, ItemRecord[]>> {
 /* ------------------------------------------------------------------ *
  * Leitura
  * ------------------------------------------------------------------ */
-export async function listProposals(filter: { q?: string; statuses?: ProposalStatus[]; sort?: ProposalSort } = {}) {
+export async function listProposals(filter: { q?: string; statuses?: ProposalStatus[]; sort?: ProposalSort; clientId?: number } = {}) {
   const parts = []
   if (filter.statuses && filter.statuses.length > 0) parts.push(inArray(serviceProposals.status, filter.statuses))
+  if (filter.clientId !== undefined) parts.push(eq(serviceProposals.clientId, filter.clientId))
   const q = filter.q?.trim()
   if (q) {
     const like = `%${q}%`
@@ -142,7 +149,8 @@ export async function proposalsSummary() {
   let rejected = 0
   for (const r of rows) {
     const { totalCents } = proposalTotals(items.get(r.id) ?? [], r.discountBps)
-    if (r.status === 'sent') {
+    // Aguardando o cliente: enviado ou em negociação (pausado é decisão de quem vende, não espera).
+    if (r.status === 'sent' || r.status === 'negotiating') {
       awaitingCents += totalCents
       awaitingCount++
     }
@@ -186,6 +194,7 @@ export async function getProposal(id: number) {
       unitPriceCents: item.unitPriceCents,
       quantity: item.quantity,
       sourceQuoteId: item.sourceQuoteId,
+      serviceId: item.serviceId,
     })),
     receivables,
   }
@@ -217,6 +226,7 @@ async function replaceItems(proposalId: number, items: ProposalItemInput[]) {
       quantity: item.quantity,
       sortOrder: index,
       sourceQuoteId: item.sourceQuoteId ?? null,
+      serviceId: item.serviceId ?? null,
     })),
   )
 }
@@ -239,6 +249,7 @@ export async function createProposal(input: ProposalInput) {
       .values({
         title: input.title.trim(),
         clientLabel: input.clientLabel.trim(),
+        clientId: input.clientId ?? null,
         status,
         discountBps: input.discountBps ?? 0,
         validityDays: input.validityDays ?? (await defaultValidityDays()),
@@ -280,6 +291,7 @@ export async function updateProposal(id: number, patch: ProposalPatch) {
     .set({
       ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
       ...(patch.clientLabel !== undefined ? { clientLabel: patch.clientLabel.trim() } : {}),
+      ...(patch.clientId !== undefined ? { clientId: patch.clientId } : {}),
       ...(patch.discountBps !== undefined ? { discountBps: patch.discountBps } : {}),
       ...(patch.validityDays !== undefined ? { validityDays: patch.validityDays } : {}),
       ...(patch.installments !== undefined ? { installments: patch.installments } : {}),

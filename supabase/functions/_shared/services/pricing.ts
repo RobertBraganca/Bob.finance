@@ -1,6 +1,6 @@
 import { asc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
-import { pricingMultiplierOptions, pricingSettings, projectQuotes } from '../db/schema.ts'
+import { cashFlowForecasts, pricingMultiplierOptions, pricingSettings, projectQuotes, transactions } from '../db/schema.ts'
 import { addMonths, addMonthsToDate, periodOf, periodRange, todayIso } from '../core/dates.ts'
 import * as financialEngine from './financialEngine.ts'
 import { createTransaction } from './transactions.ts'
@@ -341,6 +341,8 @@ export type QuoteStatus = (typeof QUOTE_STATUSES)[number]
 export type QuoteRow = {
   id: number
   clientLabel: string
+  /** o cliente da lista, quando ligado (specs/clientes-e-negocios) */
+  clientId: number | null
   estimatedHours: number
   directCosts: DirectCost[]
   complexityOptionId: number | null
@@ -373,7 +375,7 @@ const toQuoteRow = (row: typeof projectQuotes.$inferSelect): QuoteRow => ({
  * week after (spec, "números congelados").
  */
 export async function saveQuote(
-  input: SimulateInput & { clientLabel: string; installments?: number; paymentTerms?: string | null },
+  input: SimulateInput & { clientLabel: string; clientId?: number | null; installments?: number; paymentTerms?: string | null },
 ): Promise<QuoteRow> {
   const result = await simulate(input)
   const row = (
@@ -381,6 +383,7 @@ export async function saveQuote(
       .insert(projectQuotes)
       .values({
         clientLabel: input.clientLabel,
+        clientId: input.clientId ?? null,
         estimatedHours: input.estimatedHours,
         directCosts: input.directCosts ?? [],
         complexityOptionId: input.complexityOptionId ?? null,
@@ -418,6 +421,7 @@ export async function getQuote(id: number): Promise<QuoteRow | null> {
  */
 export type QuoteEdit = Partial<SimulateInput> & {
   clientLabel?: string
+  clientId?: number | null
   installments?: number
   paymentTerms?: string | null
 }
@@ -456,6 +460,7 @@ export async function updateQuote(id: number, patch: QuoteEdit): Promise<QuoteRo
 
   const updateValues: Record<string, unknown> = {}
   if (patch.clientLabel !== undefined) updateValues.clientLabel = patch.clientLabel
+  if (patch.clientId !== undefined) updateValues.clientId = patch.clientId
   if (patch.installments !== undefined) updateValues.installments = patch.installments
   if (patch.paymentTerms !== undefined) updateValues.paymentTerms = patch.paymentTerms
 
@@ -561,6 +566,15 @@ export async function approveQuote(id: number, input: ApproveInput): Promise<Quo
   const quote = await getQuote(id)
   if (!quote) throw new PricingError('cotação não encontrada')
   if (quote.status === 'approved') throw new PricingError('esta cotação já foi aprovada')
+  // Tirar de "aprovada" não apaga a receita que a aprovação criou: aprovar de novo a duplicaria.
+  // Em sequência (pooler das Edge Functions).
+  const generated = (await db.select({ n: sql<number>`count(*)::int` }).from(transactions).where(eq(transactions.sourceQuoteId, id)))[0]
+  const recurring = (await db.select({ n: sql<number>`count(*)::int` }).from(cashFlowForecasts).where(eq(cashFlowForecasts.sourceQuoteId, id)))[0]
+  if (Number(generated?.n ?? 0) > 0 || Number(recurring?.n ?? 0) > 0) {
+    throw new PricingError(
+      'esta cotação já gerou receita no extrato; para aprovar de novo, exclua antes a receita ligada a ela em Lançamentos (senão ficaria duplicada)',
+    )
+  }
 
   const actualPriceCents = input.actualPriceCents ?? quote.recommendedPriceCents
   if (actualPriceCents <= 0) throw new PricingError('valor fechado precisa ser maior que zero')

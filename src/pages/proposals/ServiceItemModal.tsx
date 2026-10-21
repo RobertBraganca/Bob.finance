@@ -3,15 +3,17 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { centsToInput, money, parseMoneyInput } from '../../lib/format'
 import { lineTotalCents } from '@shared/proposals'
-import { Button, EmptyState, Modal, SkeletonLines, TextArea, TextInput } from '../../components/ui'
+import { Button, EmptyState, Modal, Select, SkeletonLines, TextArea, TextInput } from '../../components/ui'
+import { useServiceCatalog } from '../services/useServiceCatalog'
 import { formatQuantity, type ProposalItem } from './types'
 
 type Suggestion = { title: string; description: string | null; unitPriceCents: number }
 
 /**
- * Janela de um serviço do orçamento: título (com sugestões dos serviços já
- * usados, que preenchem descrição e preço), descrição, preço e quantidade com
- * − e +. A quantidade aceita decimais (12,5 horas).
+ * Janela de um serviço do orçamento: do catálogo (specs/clientes-e-negocios,
+ * fase 3: dá nome, descrição e preço de partida, e liga o item ao serviço nos
+ * números) ou título livre com sugestões dos já usados; descrição, preço e
+ * quantidade com − e +. A quantidade aceita decimais (12,5 horas).
  */
 export function ServiceItemModal({
   item,
@@ -28,7 +30,11 @@ export function ServiceItemModal({
   const [description, setDescription] = useState(item?.description ?? '')
   const [price, setPrice] = useState(item ? centsToInput(item.unitPriceCents) : '')
   const [quantity, setQuantity] = useState(item ? formatQuantity(item.quantity) : '1')
+  const [serviceId, setServiceId] = useState<number | null>(item?.serviceId ?? null)
   const [error, setError] = useState<string | null>(null)
+  const catalog = useServiceCatalog()
+  const catalogOptions = (catalog.data?.services ?? []).filter((s) => s.active || s.id === serviceId)
+  const catalogId = useId()
   const titleId = useId()
   const descriptionId = useId()
   const priceId = useId()
@@ -54,8 +60,23 @@ export function ServiceItemModal({
     return map
   }, [suggestions.data])
 
+  const pickService = (id: number | null) => {
+    setServiceId(id)
+    const service = catalogOptions.find((s) => s.id === id)
+    if (!service) return
+    setTitle(service.name)
+    if (service.description && !description.trim()) setDescription(service.description)
+    if (service.defaultPriceCents > 0 && (!price || !item)) setPrice(centsToInput(service.defaultPriceCents))
+  }
+
   const changeTitle = (value: string) => {
     setTitle(value)
+    // Digitou exatamente o nome de um serviço do catálogo: liga ao serviço.
+    const listed = catalogOptions.find((s) => s.name.toLowerCase() === value.trim().toLowerCase())
+    if (listed && serviceId === null) {
+      setServiceId(listed.id)
+      if (!price && listed.defaultPriceCents > 0) setPrice(centsToInput(listed.defaultPriceCents))
+    }
     // Escolheu uma sugestão (o texto bate com um serviço já usado) e ainda não
     // digitou preço nem descrição: preenche com os da última vez.
     const hit = byTitle.get(value.trim().toLowerCase())
@@ -79,6 +100,7 @@ export function ServiceItemModal({
       unitPriceCents: Math.abs(priceCents),
       quantity: quantityValue,
       sourceQuoteId: item?.sourceQuoteId ?? null,
+      serviceId,
     })
   }
 
@@ -101,9 +123,26 @@ export function ServiceItemModal({
       }
     >
       <div className="stack">
+        {catalogOptions.length > 0 && (
+          <div className="field">
+            <label className="field__label" htmlFor={catalogId}>
+              Do catálogo
+            </label>
+            <Select
+              id={catalogId}
+              value={serviceId ?? 0}
+              options={[
+                { value: 0, label: 'Fora do catálogo' },
+                ...catalogOptions.map((s) => ({ value: s.id, label: s.defaultPriceCents > 0 ? `${s.name} · ${money(s.defaultPriceCents)}` : s.name })),
+              ]}
+              onChange={(next) => pickService(next ? next : null)}
+            />
+            <span className="field__hint">Dá o nome e o preço de partida, e soma este item nos números do serviço. Tudo continua editável.</span>
+          </div>
+        )}
         <div className="field">
           <label className="field__label" htmlFor={titleId}>
-            Serviço
+            {catalogOptions.length > 0 ? 'Título no orçamento' : 'Serviço'}
           </label>
           <TextInput id={titleId} value={title} onChange={changeTitle} placeholder="ex. Design de interfaces" list={listId} autoFocus />
           <datalist id={listId}>

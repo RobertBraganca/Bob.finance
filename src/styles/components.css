@@ -625,6 +625,20 @@
   /* A seta acompanha a cor do estado em vez de ficar cinza sobre âmbar. */
   --select-arrow: currentColor;
 }
+/* Em tela de toque o status virou um controle de verdade (fase 1 de specs/clientes-e-negocios):
+   44px de alvo, como pede o design system; no mouse continua a pílula compacta da tabela. */
+@media (pointer: coarse) {
+  .select--pill {
+    min-height: 44px;
+  }
+}
+.select--pill.select--info {
+  /* Mesmos valores de `.badge--info`: "Enviado" lê em azul como selo e como menu. */
+  background-color: #e6f2ff;
+  border-color: #bcdcff;
+  color: #0056b3;
+  --select-arrow: currentColor;
+}
 .select--pill.select--critical {
   /* `background-color`, nunca o shorthand `background`: o shorthand
      reseta `background-image` para none, e era ele que desenhava a seta
@@ -2467,7 +2481,8 @@
   border-color: color-mix(in srgb, var(--status-critical) 45%, var(--line));
   color: color-mix(in srgb, var(--status-critical) 55%, var(--ink-1));
 }
-:root[data-theme='dark'] .badge--info {
+:root[data-theme='dark'] .badge--info,
+:root[data-theme='dark'] .select--pill.select--info {
   background-color: color-mix(in srgb, #3b8bff 18%, var(--surface));
   border-color: color-mix(in srgb, #3b8bff 45%, var(--line));
   color: color-mix(in srgb, #3b8bff 55%, var(--ink-1));
@@ -3112,4 +3127,106 @@ button {
 }
 .alloc-rates .input {
   text-align: right;
+}
+
+/* ---- Clientes e negócios (docs/specs/clientes-e-negocios) ------------------
+   Formulário em duas colunas a partir de 640px; o quadro de negócios rola na
+   horizontal dentro dele mesmo (a página nunca), uma coluna por estágio. */
+.form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+@media (min-width: 640px) {
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.grid-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+@media (min-width: 960px) {
+  .grid-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.kv-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.kv-list .kv__v {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.deal-board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(240px, 1fr);
+  gap: var(--sp-3);
+  overflow-x: auto;
+  padding: var(--sp-1) var(--sp-1) var(--sp-3);
+  scroll-snap-type: x proximity;
+}
+.deal-board__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 160px;
+  padding: var(--sp-3);
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  scroll-snap-align: start;
+}
+.deal-board__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.deal-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.deal-card__open {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.deal-card__open:focus-visible {
+  outline: 2px solid var(--focus, currentColor);
+  outline-offset: 2px;
+}
+.deal-card__open:hover .deal-card__title {
+  text-decoration: underline;
+}
+.deal-card__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.deal-card__meta {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
 }
