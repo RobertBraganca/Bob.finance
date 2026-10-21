@@ -62,6 +62,23 @@ function unavailableDetail(error: AssistantUnavailableError): string {
   }
 }
 
+/**
+ * Descrição segura de um erro inesperado para mostrar ao usuário (e ler no log): nome e mensagem,
+ * cortados em 160 caracteres e sem nada que pareça chave (a configurada, `sk-ant-…`, `AIza…`, `AQ.…`).
+ * É o que diz o que quebrou em vez de um "não foi possível concluir" mudo.
+ */
+export function describeUnexpected(error: unknown, secret?: string): string {
+  const name = error instanceof Error ? error.name : 'Erro'
+  let text = `${name}: ${error instanceof Error ? error.message : String(error)}`
+  if (secret && secret.trim()) text = text.split(secret.trim()).join('[chave]')
+  return text
+    .replace(/sk-ant-[A-Za-z0-9_-]+/g, '[chave]')
+    .replace(/AIza[A-Za-z0-9_-]{20,}/g, '[chave]')
+    .replace(/\bAQ\.[A-Za-z0-9_-]{10,}/g, '[chave]')
+    .replace(/\s+/g, ' ')
+    .slice(0, 160)
+}
+
 export type HandleMessageOptions = {
   /** segredo da função (`ASSISTANT_API_KEY`); ausente vira `unavailable`, sem gravar nada */
   apiKey: string | undefined
@@ -104,6 +121,29 @@ export async function handleMessage(
   request: { text: string; conversationId?: string },
   options: HandleMessageOptions,
 ): Promise<AssistantMessageResponse> {
+  // Etapa em andamento: se algo inesperado quebrar, o usuário vê onde (e o log tem o erro inteiro).
+  let stage = 'início'
+  try {
+    return await handleMessageSteps(request, options, (next) => {
+      stage = next
+    })
+  } catch (error) {
+    if (error instanceof AssistantError) throw error
+    console.error('assistant: erro inesperado em', stage, error)
+    throw new AssistantError(
+      'unavailable',
+      'O assistente está indisponível agora. Nada foi alterado.',
+      undefined,
+      `falha em ${stage}: ${describeUnexpected(error, options.apiKey)}`,
+    )
+  }
+}
+
+async function handleMessageSteps(
+  request: { text: string; conversationId?: string },
+  options: HandleMessageOptions,
+  setStage: (stage: string) => void,
+): Promise<AssistantMessageResponse> {
   const text = request.text.trim()
   if (text.length === 0 || text.length > MAX_PHRASE_LENGTH) {
     throw new AssistantError('invalid_action', `A frase precisa ter de 1 a ${MAX_PHRASE_LENGTH} caracteres.`, 400)
@@ -111,8 +151,10 @@ export async function handleMessage(
   takeRateLimitSlot()
 
   const conversationId = request.conversationId ?? randomUUID()
+  setStage('ler o contexto')
   const ctx = await listContext(options.today ?? todayIso())
 
+  setStage('chamar o modelo e as ferramentas')
   let result
   try {
     result = await withDeadline(
@@ -141,7 +183,9 @@ export async function handleMessage(
     return { conversationId, summary: proposal.summary, cards: [], questions: proposal.questions }
   }
 
+  setStage('guardar a proposta')
   const saved = await createProposal(text, conversationId, proposal)
+  setStage('montar os cartões')
   const cards: AssistantCard[] = []
   const questions = [...proposal.questions]
   for (const action of saved.actions) {
