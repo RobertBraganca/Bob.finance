@@ -141,7 +141,12 @@ const loaded = hasDb
     }
   : null
 
-const MIGRATION = readFileSync(new URL('../../supabase/migrations/20261021120000_clients_and_deals.sql', import.meta.url), 'utf8')
+const MIGRATION = [
+  '../../supabase/migrations/20261021120000_clients_and_deals.sql',
+  '../../supabase/migrations/20261021180000_client_transaction_links.sql',
+]
+  .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8'))
+  .join('\n')
 const TAG = '[teste]'
 class Rollback extends Error {}
 type Tx = import('../../server/src/db/client').DbExecutor
@@ -212,6 +217,52 @@ describe('clientes no banco (rollback)', { skip }, () => {
       const b = await svc.createClient({ name: `${TAG} Beta` }, tx)
       await rejectsPricing(() => svc.addPayerAlias(b.id, 'kleber de mello', tx), /já está ligado/)
       await rejectsPricing(() => svc.addPayerAlias(b.id, 'ab', tx), /3 letras/)
+    })
+  })
+
+  test('lançamento escolhido à mão: vence o nome do pagador, trava para outro cliente e volta ao desligar', async () => {
+    await inRollback(async (tx) => {
+      const { accounts } = loaded!.schema
+      const svc = loaded!.clients
+      const { createTransaction } = loaded!.txns
+      const account = (await tx.insert(accounts).values({ name: `${TAG} Conta`, institution: TAG }).returning())[0]!
+      const alpha = await svc.createClient({ name: `${TAG} Cliente Delta` }, tx)
+      const beta = await svc.createClient({ name: `${TAG} Cliente Épsilon` }, tx)
+      await svc.addPayerAlias(alpha.id, 'delta servicos', tx)
+      const pix = await createTransaction(
+        { accountId: account.id, postedOn: '2026-09-12', description: `Transferência Recebida|${TAG} DELTA SERVIÇOS`, amountCents: 40_000, notes: null },
+        tx,
+      )
+      const loose = await createTransaction(
+        { accountId: account.id, postedOn: '2026-09-20', description: `${TAG} Projeto especial deltaepsilon`, amountCents: 25_000, notes: null },
+        tx,
+      )
+      const out = await createTransaction(
+        { accountId: account.id, postedOn: '2026-09-21', description: `${TAG} Pagamento deltaepsilon`, amountCents: -9_000, notes: null },
+        tx,
+      )
+
+      // o candidato diz a quem conta hoje (Delta, pelo nome) antes de ligar
+      const candidates = (await svc.transactionCandidates(beta.id, { q: 'delta' }, tx))!
+      const pixCandidate = candidates.find((c) => c.id === pix.id)!
+      assert.equal(pixCandidate.linkedTo?.clientId, alpha.id)
+      assert.equal(pixCandidate.linkedTo?.via, 'payer')
+      assert.ok(!candidates.some((c) => c.id === out.id), 'saída não é candidata')
+
+      assert.deepEqual(await svc.linkTransactions(beta.id, [pix.id, loose.id], tx), { linked: 2, alreadyLinked: 0 })
+      const mine = async (clientId: number) => (await svc.linkedRevenue(tx, clientId)).map((r) => [r.id, r.via]).sort()
+      assert.deepEqual(await mine(beta.id), [[pix.id, 'manual'], [loose.id, 'manual']].sort())
+      assert.deepEqual(await mine(alpha.id), [], 'a escolha vence o nome do pagador')
+
+      // repetir é inofensivo; para outro cliente é recusado; saída também
+      assert.deepEqual(await svc.linkTransactions(beta.id, [pix.id], tx), { linked: 0, alreadyLinked: 1 })
+      await rejectsPricing(() => svc.linkTransactions(alpha.id, [pix.id], tx), /já foi escolhido/)
+      await rejectsPricing(() => svc.linkTransactions(alpha.id, [out.id], tx), /só entradas/)
+
+      // desligado, volta a contar pelo nome do pagador
+      assert.deepEqual(await svc.unlinkTransaction(beta.id, pix.id, tx), { removed: 1 })
+      assert.deepEqual(await mine(alpha.id), [[pix.id, 'payer']])
+      assert.equal((await svc.getClient(beta.id, tx))!.metrics.ltvRealizedCents, 25_000)
     })
   })
 

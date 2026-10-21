@@ -1593,8 +1593,12 @@ enxugar telas repetidas, textos técnicos e menu.
   do cliente mais as entradas cujo nome bate com um "nome no extrato" do cliente
   (o mais longo vence). O extrator de pagador (`payerOf`) pega só o trecho logo
   depois de "Transferência Recebida - " (o resto é CPF, banco, agência).
+- Lançamento escolhido à mão (`client_transaction_links`, migração
+  `20261021180000`, aplicada e registrada): na ficha, "Escolher lançamentos". Ordem
+  de quem leva a receita: escolhido > documento de origem > nome do pagador. Um
+  lançamento tem no máximo um cliente; escolhido para outro, a ligação é recusada.
 - Edge: as leituras novas rodam em sequência; varredura sob Deno com a conexão do
-  Edge em 0,1 a 0,9 s cada.
+  Edge em 0,1 a 1 s cada.
 - Deploy: migração antes da função `pricing` (as leituras de cotação e orçamento
   já selecionam `client_id`).
 

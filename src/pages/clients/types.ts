@@ -61,7 +61,19 @@ export type ClientRevenue = {
   description: string
   amountCents: number
   pending: boolean
-  via: 'proposal' | 'quote' | 'payer'
+  via: 'manual' | 'proposal' | 'quote' | 'payer'
+}
+
+/** Entrada do extrato para escolher à mão (`/pricing/clients/:id/transaction-candidates`). */
+export type TransactionCandidate = {
+  id: number
+  postedOn: string
+  description: string
+  amountCents: number
+  pending: boolean
+  accountName: string | null
+  categoryName: string | null
+  linkedTo: { clientId: number; clientName: string; via: ClientRevenue['via'] } | null
 }
 
 export type ClientDetail = ClientRecord & {
@@ -76,6 +88,7 @@ export type ClientDetail = ClientRecord & {
 export type PayerSuggestion = { alias: string; example: string; totalCents: number; count: number; looksLikeClient: boolean }
 
 export const REVENUE_VIA_LABEL: Record<ClientRevenue['via'], string> = {
+  manual: 'escolhido por você',
   proposal: 'orçamento',
   quote: 'cotação',
   payer: 'nome no extrato',

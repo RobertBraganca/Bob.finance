@@ -8,6 +8,7 @@ import { PageHeader } from '../../components/shell/Shell'
 import { Button, Card, ConfirmDeleteModal, EmptyState, Field, Icon, KpiTile, Modal, SkeletonLines, TextInput, useToast } from '../../components/ui'
 import { EditQuoteModal, type Quote } from '../Pricing'
 import { ClientFormModal } from './ClientFormModal'
+import { TransactionPickerModal } from './TransactionPickerModal'
 import {
   CLIENT_KIND_LABEL,
   CLIENT_STATUS_BADGE,
@@ -90,6 +91,16 @@ export function ClientDetailPage() {
       refresh()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao ligar o nome', 'error'),
+  })
+  const [pickingTransactions, setPickingTransactions] = useState(false)
+  const [showAllRevenue, setShowAllRevenue] = useState(false)
+  const unlinkTransaction = useMutation({
+    mutationFn: (transactionId: number) => api.del(`/pricing/clients/${id}/transactions/${transactionId}`),
+    onSuccess: () => {
+      toast('Lançamento desligado do cliente')
+      refresh()
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao desligar o lançamento', 'error'),
   })
   const removeAlias = useMutation({
     mutationFn: (aliasId: number) => api.del(`/pricing/clients/${id}/aliases/${aliasId}`),
@@ -243,6 +254,11 @@ export function ClientDetailPage() {
             <Card
               title="Nomes no extrato"
               subtitle="Com que nome este cliente paga. As entradas com esse nome passam a contar no LTV, mesmo sem orçamento."
+              actions={
+                <Button size="sm" icon="list" onClick={() => setPickingTransactions(true)}>
+                  Escolher lançamentos
+                </Button>
+              }
             >
               <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
                 {c.aliases.length === 0 && <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>Nenhum nome ligado ainda.</span>}
@@ -359,24 +375,53 @@ export function ClientDetailPage() {
                   </ul>
                 )}
               </Card>
-              <Card title="Receitas ligadas" subtitle="As mais recentes, e por onde cada uma foi ligada">
+              <Card
+                title="Receitas ligadas"
+                subtitle="As mais recentes, e por onde cada uma foi ligada"
+                actions={
+                  <Button size="sm" icon="plus" onClick={() => setPickingTransactions(true)}>
+                    Escolher
+                  </Button>
+                }
+              >
                 {c.revenue.length === 0 ? (
-                  <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>Nada ainda.</p>
+                  <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
+                    Nada ainda. Escolha os lançamentos deste cliente no extrato, ligue um nome de pagador ou aprove um orçamento dele.
+                  </p>
                 ) : (
-                  <ul className="stack stack--tight">
-                    {c.revenue.slice(0, 12).map((r) => (
-                      <li key={r.id} className="row row--between" style={{ gap: 'var(--sp-2)' }}>
-                        <span style={{ minWidth: 0 }}>
-                          <span style={{ display: 'block', overflowWrap: 'anywhere', fontSize: 'var(--text-sm)' }}>{r.description}</span>
-                          <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                            {fmtDate(r.postedOn)} · {REVENUE_VIA_LABEL[r.via]}
-                            {r.pending ? ' · a receber' : ''}
+                  <>
+                    <ul className="stack stack--tight">
+                      {(showAllRevenue ? c.revenue : c.revenue.slice(0, 12)).map((r) => (
+                        <li key={r.id} className="row row--between" style={{ gap: 'var(--sp-2)', alignItems: 'flex-start' }}>
+                          <span style={{ minWidth: 0 }}>
+                            <span style={{ display: 'block', overflowWrap: 'anywhere', fontSize: 'var(--text-sm)' }}>{r.description}</span>
+                            <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                              {fmtDate(r.postedOn)} · {REVENUE_VIA_LABEL[r.via]}
+                              {r.pending ? ' · a receber' : ''}
+                            </span>
                           </span>
-                        </span>
-                        <strong className={`tabular ${r.pending ? 'muted' : 'pos'}`}>{money(r.amountCents)}</strong>
-                      </li>
-                    ))}
-                  </ul>
+                          <span className="row" style={{ gap: 2, flexShrink: 0 }}>
+                            <strong className={`tabular ${r.pending ? 'muted' : 'pos'}`}>{money(r.amountCents)}</strong>
+                            {r.via === 'manual' && (
+                              <Button
+                                variant="quiet"
+                                size="sm"
+                                icon="x"
+                                title="Desligar este lançamento do cliente"
+                                onClick={() => unlinkTransaction.mutate(r.id)}
+                                disabled={unlinkTransaction.isPending}
+                              />
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {c.revenue.length > 12 && (
+                      <Button variant="quiet" size="sm" onClick={() => setShowAllRevenue((v) => !v)}>
+                        {showAllRevenue ? 'Mostrar só as 12 mais recentes' : `Mostrar todas (${c.revenue.length})`}
+                      </Button>
+                    )}
+                  </>
                 )}
               </Card>
             </div>
@@ -392,6 +437,7 @@ export function ClientDetailPage() {
 
       {editing && c && <ClientFormModal client={c} onClose={() => setEditing(false)} />}
       {editingQuote && <EditQuoteModal quote={editingQuote} onClose={() => setEditingQuote(null)} />}
+      {pickingTransactions && c && <TransactionPickerModal clientId={c.id} clientName={c.name} onClose={() => setPickingTransactions(false)} />}
       {contact && c && <ContactModal clientId={c.id} contact={contact === 'new' ? null : contact} onClose={() => setContact(null)} onSaved={refresh} />}
       {deleting && c && (
         <ConfirmDeleteModal

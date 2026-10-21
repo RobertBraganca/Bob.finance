@@ -111,9 +111,10 @@ export function ServicesTab({ creating, onCloseCreate }: { creating: boolean; on
                       <span style={{ minWidth: 0 }}>
                         <strong style={{ fontWeight: 600 }}>{s.name}</strong>
                         {!s.active && <span className="badge" style={{ marginLeft: 6 }}>Fora de uso</span>}
+                        {/* Só o resumo (a primeira linha), numa linha: o escopo inteiro fica no serviço e abre no Editar. */}
                         {s.description && (
-                          <span className="muted" style={{ display: 'block', fontSize: 'var(--text-xs)' }}>
-                            {s.description}
+                          <span className="muted service-summary" title={s.description}>
+                            {s.description.split('\n')[0]}
                           </span>
                         )}
                       </span>
@@ -237,8 +238,8 @@ function ServiceFormModal({ draft, onClose, onSaved }: { draft: Draft; onClose: 
     >
       <div className="stack">
         <Field label="Nome">{(id) => <TextInput id={id} value={name} onChange={setName} placeholder="ex. Identidade visual" />}</Field>
-        <Field label="Descrição" hint="Entra no item do orçamento quando ele ainda não tem descrição.">
-          {(id) => <TextArea id={id} value={description} onChange={setDescription} rows={3} placeholder="O que está incluído" />}
+        <Field label="Descrição e escopo" hint="Na lista aparece só a primeira linha. Entra no item do orçamento quando ele ainda não tem descrição.">
+          {(id) => <TextArea id={id} value={description} onChange={setDescription} rows={8} placeholder="Resumo na primeira linha; depois o que inclui, o que fica de fora e o prazo" />}
         </Field>
         <Field
           label="Preço de partida (R$)"

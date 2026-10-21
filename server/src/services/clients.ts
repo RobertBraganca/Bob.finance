@@ -1,9 +1,11 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db, type DbExecutor } from '../db/client'
 import {
+  accounts,
   categories,
   clientContacts,
   clientPayerAliases,
+  clientTransactionLinks,
   clients,
   projectQuotes,
   serviceProposalItems,
@@ -28,10 +30,11 @@ import { PricingError } from './pricing'
  * Clientes (docs/specs/clientes-e-negocios, fases 2 e 3): cadastro de lead,
  * empresa ou pessoa, com contatos, e as métricas lidas do DINHEIRO REAL.
  *
- * Uma receita é do cliente quando (1) nasceu da aprovação de um orçamento ou de
- * uma cotação dele (`source_proposal_id` / `source_quote_id`) ou (2) o nome de
+ * Uma receita é do cliente quando (1) o usuário escolheu o lançamento para ele
+ * (`client_transaction_links`), (2) nasceu da aprovação de um orçamento ou de
+ * uma cotação dele (`source_proposal_id` / `source_quote_id`) ou (3) o nome de
  * quem pagou, na descrição do extrato, é um dos "nomes no extrato" do cliente
- * (`client_payer_aliases`). O que nasceu de um documento vence o nome.
+ * (`client_payer_aliases`). Nessa ordem: a escolha vence o documento, que vence o nome.
  *
  * Só observa (decisions/0010): nada aqui diz em qual cliente focar. Edge: tudo
  * em sequência, nunca `Promise.all` (project-memory, 18/10/2026).
@@ -89,7 +92,7 @@ export type LinkedRevenue = {
   amountCents: number
   pending: boolean
   /** como o lançamento foi ligado ao cliente */
-  via: 'proposal' | 'quote' | 'payer'
+  via: 'manual' | 'proposal' | 'quote' | 'payer'
 }
 
 /**
@@ -101,6 +104,23 @@ export type LinkedRevenue = {
 export async function linkedRevenue(executor: DbExecutor = db, onlyClientId?: number): Promise<LinkedRevenue[]> {
   const out: LinkedRevenue[] = []
   const seen = new Set<number>()
+
+  const chosen = await executor
+    .select({
+      id: transactions.id,
+      clientId: clientTransactionLinks.clientId,
+      postedOn: transactions.postedOn,
+      description: transactions.description,
+      amountCents: transactions.amountCents,
+      pending: transactions.pending,
+    })
+    .from(clientTransactionLinks)
+    .innerJoin(transactions, eq(transactions.id, clientTransactionLinks.transactionId))
+    .where(and(sql`${transactions.amountCents} > 0`, eq(transactions.ignored, false)))
+  for (const r of chosen) {
+    seen.add(r.id)
+    out.push({ ...r, amountCents: Number(r.amountCents), via: 'manual' })
+  }
 
   const fromProposals = await executor
     .select({
@@ -115,6 +135,7 @@ export async function linkedRevenue(executor: DbExecutor = db, onlyClientId?: nu
     .innerJoin(serviceProposals, eq(serviceProposals.id, transactions.sourceProposalId))
     .where(and(sql`${transactions.amountCents} > 0`, eq(transactions.ignored, false), sql`${serviceProposals.clientId} is not null`))
   for (const r of fromProposals) {
+    if (seen.has(r.id)) continue
     seen.add(r.id)
     out.push({ ...r, clientId: r.clientId!, amountCents: Number(r.amountCents), via: 'proposal' })
   }
@@ -303,7 +324,7 @@ export async function listClients(
     clients: list,
     overview,
     assumptions: {
-      ltv: 'receita que de fato entrou: as receitas geradas pela aprovação dos orçamentos e cotações do cliente, mais as entradas em que o nome de quem pagou é um dos "nomes no extrato" dele',
+      ltv: 'receita que de fato entrou: os lançamentos escolhidos para o cliente, as receitas geradas pela aprovação dos orçamentos e cotações dele e as entradas em que o nome de quem pagou é um dos "nomes no extrato" dele',
       previsto: 'o realizado mais as receitas a receber ligadas ao cliente',
       recorrente: 'marcado como recorrente, ou com receita em 3 meses diferentes ou mais, ou com 2 negócios aprovados ou mais',
       mrr: 'para cada cliente recorrente, a média da receita dos 3 últimos meses fechados',
@@ -397,6 +418,105 @@ export function payerOf(description: string): string | null {
   // Tira o CPF/CNPJ e números soltos do fim ("ERICK ... 18364216724").
   const name = normalizeDescription(raw.replace(/[\d./-]{6,}/g, ' ')).trim()
   return name.length >= 3 ? name : null
+}
+
+/* ------------------------------------------------------------------ *
+ * Lançamentos escolhidos à mão
+ * ------------------------------------------------------------------ */
+
+export type TransactionCandidate = {
+  id: number
+  postedOn: string
+  description: string
+  amountCents: number
+  pending: boolean
+  accountName: string | null
+  categoryName: string | null
+  /** a quem o lançamento já conta hoje, e por quê; null se não conta para ninguém */
+  linkedTo: { clientId: number; clientName: string; via: LinkedRevenue['via'] } | null
+}
+
+/**
+ * Entradas do extrato para escolher à mão na ficha do cliente: as mais recentes,
+ * ou as que batem com a busca (descrição, sem acento nem maiúsculas). Cada uma diz
+ * se já conta para algum cliente e por quê, para a tela mostrar antes de ligar.
+ */
+export async function transactionCandidates(
+  clientId: number,
+  filter: { q?: string; from?: string; to?: string; limit?: number } = {},
+  executor: DbExecutor = db,
+): Promise<TransactionCandidate[] | null> {
+  const client = (await executor.select({ id: clients.id }).from(clients).where(eq(clients.id, clientId)))[0]
+  if (!client) return null
+  const q = filter.q ? normalizeDescription(filter.q) : ''
+  const conditions = [sql`${transactions.amountCents} > 0`, eq(transactions.ignored, false)]
+  if (q) conditions.push(sql`${transactions.descriptionNorm} like ${`%${q}%`}`)
+  if (filter.from) conditions.push(sql`${transactions.postedOn} >= ${filter.from}`)
+  if (filter.to) conditions.push(sql`${transactions.postedOn} <= ${filter.to}`)
+  const rows = await executor
+    .select({
+      id: transactions.id,
+      postedOn: transactions.postedOn,
+      description: transactions.description,
+      amountCents: transactions.amountCents,
+      pending: transactions.pending,
+      accountName: accounts.name,
+      categoryName: categories.name,
+    })
+    .from(transactions)
+    .leftJoin(accounts, eq(accounts.id, transactions.accountId))
+    .leftJoin(categories, eq(categories.id, transactions.categoryId))
+    .where(and(...conditions))
+    .orderBy(desc(transactions.postedOn), desc(transactions.id))
+    .limit(Math.min(100, Math.max(1, filter.limit ?? 40)))
+
+  const linked = new Map((await linkedRevenue(executor)).map((r) => [r.id, r] as const))
+  const names = new Map((await executor.select({ id: clients.id, name: clients.name }).from(clients)).map((c) => [c.id, c.name] as const))
+  return rows.map((r) => {
+    const hit = linked.get(r.id)
+    return {
+      ...r,
+      amountCents: Number(r.amountCents),
+      linkedTo: hit ? { clientId: hit.clientId, clientName: names.get(hit.clientId) ?? '', via: hit.via } : null,
+    }
+  })
+}
+
+/**
+ * Liga lançamentos ao cliente. Recusa (sem gravar nada) se algum já foi escolhido
+ * para OUTRO cliente: aí é preciso desligar lá antes. Só entradas não ignoradas.
+ */
+export async function linkTransactions(clientId: number, transactionIds: number[], executor: DbExecutor = db) {
+  const ids = [...new Set(transactionIds)].filter((n) => Number.isInteger(n) && n > 0)
+  if (ids.length === 0) throw new PricingError('escolha pelo menos um lançamento')
+  const client = (await executor.select({ id: clients.id }).from(clients).where(eq(clients.id, clientId)))[0]
+  if (!client) return null
+  const found = await executor
+    .select({ id: transactions.id, amountCents: transactions.amountCents, ignored: transactions.ignored })
+    .from(transactions)
+    .where(inArray(transactions.id, ids))
+  if (found.length !== ids.length) throw new PricingError('algum lançamento escolhido não existe mais')
+  if (found.some((t) => Number(t.amountCents) <= 0 || t.ignored)) throw new PricingError('só entradas (valor positivo e não ignoradas) contam como receita do cliente')
+
+  const existing = await executor.select().from(clientTransactionLinks).where(inArray(clientTransactionLinks.transactionId, ids))
+  const elsewhere = existing.filter((l) => l.clientId !== clientId)
+  if (elsewhere.length > 0) {
+    const other = (await executor.select({ name: clients.name }).from(clients).where(eq(clients.id, elsewhere[0]!.clientId)))[0]
+    throw new PricingError(
+      `${elsewhere.length === 1 ? 'um lançamento já foi escolhido' : `${elsewhere.length} lançamentos já foram escolhidos`} para ${other?.name ?? 'outro cliente'}: desligue lá antes`,
+    )
+  }
+  const already = new Set(existing.map((l) => l.transactionId))
+  const fresh = ids.filter((id) => !already.has(id))
+  if (fresh.length > 0) await executor.insert(clientTransactionLinks).values(fresh.map((transactionId) => ({ clientId, transactionId })))
+  return { linked: fresh.length, alreadyLinked: ids.length - fresh.length }
+}
+
+export async function unlinkTransaction(clientId: number, transactionId: number, executor: DbExecutor = db) {
+  const result = await executor
+    .delete(clientTransactionLinks)
+    .where(and(eq(clientTransactionLinks.clientId, clientId), eq(clientTransactionLinks.transactionId, transactionId)))
+  return { removed: result.count }
 }
 
 /* ------------------------------------------------------------------ *

@@ -1344,6 +1344,22 @@ export const clientPayerAliases = pgTable(
   (t) => [uniqueIndex('client_payer_aliases_uq').on(t.clientId, t.alias)],
 )
 
+/** Lançamento escolhido à mão para um cliente: vale mais que o orçamento de origem e o nome do pagador. */
+export const clientTransactionLinks = pgTable(
+  'client_transaction_links',
+  {
+    id: id(),
+    clientId: int('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    transactionId: int('transaction_id')
+      .notNull()
+      .references(() => transactions.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('client_transaction_links_tx_uq').on(t.transactionId), index('client_transaction_links_client_idx').on(t.clientId)],
+)
+
 /** Catálogo leve de serviços (fase 3): o item do orçamento pode apontar para um. */
 export const serviceCatalog = pgTable(
   'service_catalog',
