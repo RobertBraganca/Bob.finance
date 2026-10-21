@@ -2,14 +2,6 @@ import { Fragment, useId, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import {
-  QuoteFunnelChart,
-  QuoteSentVsApprovedChart,
-  QuoteStatusRing,
-  type QuoteFunnelStage,
-  type QuotePeriodPoint,
-  type QuoteStatusSlice,
-} from '../components/charts/PricingCharts'
 import { useAccounts } from '../lib/store'
 import { telemetry } from '../lib/telemetry'
 import {
@@ -22,7 +14,6 @@ import {
   parsePercentInput,
 } from '../lib/format'
 import {
-  Assumptions,
   Bento,
   Button,
   Card,
@@ -39,6 +30,7 @@ import {
 } from '../components/ui'
 import { PageHeader } from '../components/shell/Shell'
 import { DealsTab } from './deals/DealsTab'
+import { PricingDashboard } from './deals/PricingDashboard'
 import { ClientsTab } from './clients/ClientsTab'
 import { ClientPicker } from './clients/ClientPicker'
 import { ServicesTab } from './services/ServicesTab'
@@ -47,17 +39,6 @@ import { todayIso } from '../lib/period'
 
 const QUOTE_STATUSES = ['draft', 'sent', 'in_review', 'needs_changes', 'paused', 'rejected', 'approved'] as const
 type QuoteStatus = (typeof QUOTE_STATUSES)[number]
-
-/** Tom da pill de status: aprovada é o único desfecho bom, rejeitada o único ruim; o resto é caminho, não veredito. */
-const QUOTE_STATUS_TONE: Record<QuoteStatus, 'good' | 'warning' | 'critical' | 'neutral'> = {
-  draft: 'neutral',
-  sent: 'neutral',
-  in_review: 'neutral',
-  needs_changes: 'warning',
-  paused: 'neutral',
-  rejected: 'critical',
-  approved: 'good',
-}
 
 export const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
   draft: 'Rascunho',
@@ -140,30 +121,31 @@ type PricingSettings = { availableHoursPerMonth: number; billablePercentageBps: 
 
 type DirectCostDraft = { label: string; value: string }
 
-type PricingTab = 'negocios' | 'clientes' | 'servicos' | 'cotacoes' | 'parametros'
-const PRICING_TABS: PricingTab[] = ['negocios', 'clientes', 'servicos', 'cotacoes', 'parametros']
+type PricingTab = 'painel' | 'negocios' | 'clientes' | 'servicos' | 'parametros'
+const PRICING_TABS: PricingTab[] = ['painel', 'negocios', 'clientes', 'servicos', 'parametros']
 
 const TAB_SUBTITLE: Record<PricingTab, string> = {
+  painel: 'O resumo dos seus negócios: funil, valor por estágio, clientes e serviços',
   negocios: 'Orçamentos e cotações numa lista só, do rascunho à aprovação',
   clientes: 'Quem compra de você: contatos, negócios e quanto já entrou de cada um',
   servicos: 'O que você vende, com preço de partida e o que cada serviço já rendeu',
-  cotacoes: 'Quanto cobrar por um projeto, a partir do seu próprio custo de operar',
   parametros: 'Horas, multiplicadores e o que entra no cálculo do preço',
 }
 
 export function PricingPage() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  // A aba vive no endereço (`?aba=clientes`), como em Investimentos. Negócios
-  // é a padrão (specs/clientes-e-negocios, fase 4): reúne orçamentos e
-  // cotações; o endereço antigo `?aba=orcamentos` cai nela.
+  // A aba vive no endereço (`?aba=clientes`), como em Investimentos. O Painel
+  // é a padrão e herdou os gráficos da antiga aba Cotações (as cotações em si
+  // estão em Negócios); `?aba=cotacoes` e o antigo `?aba=orcamentos` caem
+  // nele e em Negócios.
   const raw = params.get('aba')
-  const tab: PricingTab = PRICING_TABS.includes(raw as PricingTab) ? (raw as PricingTab) : 'negocios'
+  const tab: PricingTab = raw === 'orcamentos' ? 'negocios' : PRICING_TABS.includes(raw as PricingTab) ? (raw as PricingTab) : 'painel'
   const setTab = (next: PricingTab) =>
     setParams(
       () => {
         const fresh = new URLSearchParams()
-        if (next !== 'negocios') fresh.set('aba', next)
+        if (next !== 'painel') fresh.set('aba', next)
         return fresh
       },
       { replace: true },
@@ -184,16 +166,16 @@ export function PricingPage() {
             value={tab}
             onChange={setTab}
             options={[
+              { value: 'painel', label: 'Painel' },
               { value: 'negocios', label: 'Negócios' },
               { value: 'clientes', label: 'Clientes' },
               { value: 'servicos', label: 'Serviços' },
-              { value: 'cotacoes', label: 'Cotações' },
               { value: 'parametros', label: 'Parâmetros' },
             ]}
           />
         }
         actions={
-          tab === 'negocios' ? (
+          tab === 'painel' || tab === 'negocios' ? (
             <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
               <Button icon="calculator" onClick={() => setSimulating(true)}>
                 Calcular preço
@@ -210,22 +192,18 @@ export function PricingPage() {
             <Button variant="primary" icon="plus" onClick={() => setCreatingService(true)}>
               Novo serviço
             </Button>
-          ) : tab === 'cotacoes' ? (
-            <Button variant="primary" icon="plus" onClick={() => setSimulating(true)}>
-              Nova cotação
-            </Button>
           ) : undefined
         }
       />
       <div className="page tab-panel" key={tab}>
-        {tab === 'negocios' ? (
+        {tab === 'painel' ? (
+          <PricingDashboard />
+        ) : tab === 'negocios' ? (
           <DealsTab onNewQuote={() => setSimulating(true)} />
         ) : tab === 'clientes' ? (
           <ClientsTab creating={creatingClient} onCreate={() => setCreatingClient(true)} onCloseCreate={() => setCreatingClient(false)} />
         ) : tab === 'servicos' ? (
           <ServicesTab creating={creatingService} onCloseCreate={() => setCreatingService(false)} />
-        ) : tab === 'cotacoes' ? (
-          <QuotesTab />
         ) : (
           <ParamsTab />
         )}
@@ -614,270 +592,6 @@ function SaveQuoteModal({
   )
 }
 
-/* ================================================================== *
- * Histórico
- * ================================================================== */
-function QuotesTab() {
-  const toast = useToast()
-  const queryClient = useQueryClient()
-  const quotes = useQuery({
-    queryKey: ['pricing-quotes'],
-    queryFn: () => api.get<{ quotes: Quote[] }>('/pricing/quotes'),
-  })
-  const analytics = useQuery({
-    queryKey: ['pricing-quote-analytics'],
-    queryFn: () =>
-      api.get<{
-        byStatus: QuoteStatusSlice[]
-        byPeriod: QuotePeriodPoint[]
-        funnel: QuoteFunnelStage[]
-        totalCount: number
-        assumptions: Record<string, unknown>
-      }>('/pricing/quotes/analytics'),
-  })
-  const [approving, setApproving] = useState<Quote | null>(null)
-  const [editing, setEditing] = useState<Quote | null>(null)
-  const [confirmingQuote, setConfirmingQuote] = useState<Quote | null>(null)
-
-  const remove = useMutation({
-    mutationFn: (id: number) => api.del(`/pricing/quotes/${id}`),
-    onSuccess: () => {
-      toast('Cotação removida')
-      queryClient.invalidateQueries({ queryKey: ['pricing-quotes'] })
-      setConfirmingQuote(null)
-    },
-    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
-  })
-
-  const [unapproving, setUnapproving] = useState<{ quote: Quote; to: QuoteStatus } | null>(null)
-  const setStatus = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: QuoteStatus }) =>
-      api.patch(`/pricing/quotes/${id}/status`, { status }),
-    onSuccess: () => {
-      toast('Status atualizado')
-      queryClient.invalidateQueries({ queryKey: ['pricing-quotes'] })
-      setUnapproving(null)
-    },
-    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao atualizar status', 'error'),
-  })
-
-  const rows = quotes.data?.quotes ?? []
-
-  return (
-    <Bento>
-      {/*
-        Funil primeiro, span inteiro: é o resumo mais "de cima" da tela —
-        quantas cotações avançam de etapa em etapa — antes de entrar nos
-        dois cards de meia largura (por status, por mês) e na lista em si.
-        Dado que `quoteAnalytics` já calculava e a UI nunca mostrava
-        (achado de 09/09/2026, ao reorganizar Precificação em painel de
-        negócios).
-      */}
-      <Card span={12} title="Funil de propostas" subtitle="Quantas cotações avançam de etapa em etapa" assumptions={analytics.data?.assumptions}>
-        {analytics.isError ? (
-          <EmptyState icon="alert" title="Falha ao carregar" body="Não foi possível carregar o funil agora." />
-        ) : !analytics.data ? (
-          <SkeletonLines lines={4} />
-        ) : (
-          <QuoteFunnelChart stages={analytics.data.funnel} surface="paper" />
-        )}
-      </Card>
-
-      {/*
-        Os dois cards de resumo vêm ANTES da tabela: o card de detalhe é a
-        lista, e uma tela se lê do agregado para o item. Os dois em meia
-        largura pareiam numa linha (regra paired_cards).
-      */}
-      <Card
-        span={6}
-        title="Cotações por status"
-        subtitle="Onde está o valor recomendado, por estado da proposta"
-        assumptions={analytics.data?.assumptions}
-      >
-        {analytics.isError ? (
-          <EmptyState icon="alert" title="Falha ao carregar" body="Não foi possível carregar o resumo agora." />
-        ) : !analytics.data ? (
-          <SkeletonLines lines={4} />
-        ) : analytics.data.totalCount === 0 ? (
-          <EmptyState
-            icon="info"
-            title="Nenhuma cotação salva"
-            body="Salve uma cotação em Simular para ela aparecer aqui."
-          />
-        ) : (
-          <>
-            <QuoteStatusRing
-              slices={analytics.data.byStatus}
-              labels={QUOTE_STATUS_LABELS}
-              surface="paper"
-            />
-            {analytics.data.totalCount < 10 && (
-              <p className="chart__note">
-                {analytics.data.totalCount} cotações no total. Com menos de dez, a proporção muda
-                muito a cada nova proposta: leia como retrato de agora, não como tendência.
-              </p>
-            )}
-          </>
-        )}
-      </Card>
-
-      <Card
-        span={6}
-        title="Enviado x aprovado"
-        subtitle="Quanto foi proposto e quanto foi fechado, mês a mês"
-        assumptions={analytics.data?.assumptions}
-      >
-        {analytics.isError ? (
-          <EmptyState icon="alert" title="Falha ao carregar" body="Não foi possível carregar o resumo agora." />
-        ) : !analytics.data ? (
-          <SkeletonLines lines={4} />
-        ) : (
-          <QuoteSentVsApprovedChart data={analytics.data.byPeriod} surface="paper" />
-        )}
-      </Card>
-
-      <Card span={12} flush title="Cotações salvas" subtitle="Números congelados no momento de cada simulação">
-        {quotes.isError ? (
-          <EmptyState
-            icon="alert"
-            title="Falha ao carregar"
-            body="Não foi possível carregar as cotações salvas agora. Tente novamente em instantes."
-          />
-        ) : rows.length === 0 ? (
-          <EmptyState
-            icon="file"
-            title="Nenhuma cotação salva"
-            body="Simule um projeto e use 'Salvar como cotação' para guardar o cálculo daquele momento."
-          />
-        ) : (
-          <div className="table-wrap">
-            <table className="table table--stack-mobile">
-              <thead>
-                <tr>
-                  <th scope="col">Cliente ou projeto</th>
-                  <th scope="col">Quando</th>
-                  <th scope="col" className="table__num">Horas</th>
-                  <th scope="col" className="table__num">Hora base</th>
-                  <th scope="col" className="table__num">Mínimo</th>
-                  <th scope="col" className="table__num">Recomendado</th>
-                  <th scope="col" className="table__num">Fechado por</th>
-                  <th scope="col" className="table__num">Premium</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" style={{ width: 96 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((quote) => (
-                  <tr key={quote.id}>
-                    <td data-label="Cliente ou projeto">
-                      {quote.clientLabel}
-                      {(quote.installments > 1 || quote.paymentTerms) && (
-                        <div className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-                          {quote.installments > 1 &&
-                            `${quote.installments}x de ${money(
-                              Math.round((quote.actualPriceCents ?? quote.recommendedPriceCents) / quote.installments),
-                            )}`}
-                          {quote.installments > 1 && quote.paymentTerms ? ' · ' : ''}
-                          {quote.paymentTerms}
-                        </div>
-                      )}
-                    </td>
-                    <td className="muted" data-label="Quando">{fmtDate(quote.createdAt.slice(0, 10))}</td>
-                    <td className="table__num" data-label="Horas">{quote.estimatedHours.toLocaleString('pt-BR')}</td>
-                    <td className="table__num" data-label="Hora base">{money(quote.hourlyBaseCents)}</td>
-                    <td className="table__num" data-label="Mínimo">{money(quote.minimumPriceCents)}</td>
-                    <td className="table__num" data-label="Recomendado">
-                      <strong>{money(quote.recommendedPriceCents)}</strong>
-                    </td>
-                    <td className="table__num" data-label="Fechado por">
-                      {quote.actualPriceCents === null ? (
-                        <span className="muted">-</span>
-                      ) : quote.actualPriceCents === quote.recommendedPriceCents ? (
-                        <span className="muted">{money(quote.actualPriceCents)}</span>
-                      ) : (
-                        <strong className={quote.actualPriceCents > quote.recommendedPriceCents ? 'pos' : 'neg'}>
-                          {money(quote.actualPriceCents)}
-                        </strong>
-                      )}
-                    </td>
-                    <td className="table__num muted" data-label="Premium">{money(quote.premiumPriceCents)}</td>
-                    <td data-label="Status">
-                      <Select
-                        value={quote.status}
-                        className={`select--pill select--${QUOTE_STATUS_TONE[quote.status]}`}
-                        options={QUOTE_STATUSES.map((value) => ({ value, label: QUOTE_STATUS_LABELS[value] }))}
-                        onChange={(value) => {
-                          if (!value || value === quote.status) return
-                          // Aprovar gera a receita no extrato: sempre pelo modal, nunca só trocando o status.
-                          if (value === 'approved') return setApproving(quote)
-                          if (quote.status === 'approved') return setUnapproving({ quote, to: value as QuoteStatus })
-                          setStatus.mutate({ id: quote.id, status: value as QuoteStatus })
-                        }}
-                      />
-                    </td>
-                    <td data-label="__trail">
-                      <div className="row" style={{ gap: 2, justifyContent: 'flex-end' }}>
-                        {quote.status !== 'approved' && (
-                          <Button
-                            variant="quiet"
-                            size="sm"
-                            icon="check"
-                            title="Aprovar: gera o lançamento de receita"
-                            onClick={() => setApproving(quote)}
-                          >
-                            Aprovar
-                          </Button>
-                        )}
-                        <Button
-                          variant="quiet"
-                          size="sm"
-                          icon="pencil"
-                          title="Editar cotação"
-                          onClick={() => setEditing(quote)}
-                        />
-                        <Button
-                          variant="quiet"
-                          size="sm"
-                          icon="trash"
-                          title="Remover cotação"
-                          onClick={() => setConfirmingQuote(quote)}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      {approving && <ApproveQuoteModal quote={approving} onClose={() => setApproving(null)} />}
-      {unapproving && (
-        <ConfirmDeleteModal
-          title={`Tirar a cotação de ${unapproving.quote.clientLabel} de aprovada?`}
-          body={`Ela passa para ${QUOTE_STATUS_LABELS[unapproving.to].toLowerCase()}. A receita que a aprovação criou continua no extrato; para aprovar de novo, exclua antes essa receita em Lançamentos (senão ela ficaria duplicada).`}
-          confirmLabel={`Mudar para ${QUOTE_STATUS_LABELS[unapproving.to].toLowerCase()}`}
-          pending={setStatus.isPending}
-          onCancel={() => setUnapproving(null)}
-          onConfirm={() => setStatus.mutate({ id: unapproving.quote.id, status: unapproving.to })}
-        />
-      )}
-      {editing && <EditQuoteModal quote={editing} onClose={() => setEditing(null)} />}
-      {confirmingQuote && (
-        <ConfirmDeleteModal
-          title={`Excluir a cotação de ${confirmingQuote.clientLabel}?`}
-          body="Isso não pode ser desfeito."
-          confirmLabel="Excluir cotação"
-          pending={remove.isPending}
-          onCancel={() => setConfirmingQuote(null)}
-          onConfirm={() => remove.mutate(confirmingQuote.id)}
-        />
-      )}
-    </Bento>
-  )
-}
-
 /**
  * Aprovar converte a cotação num lançamento de receita real, com conta e
  * data escolhidas aqui — a mesma conversão simples que `specs/project-pricing`
@@ -1183,6 +897,17 @@ export function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () =
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
   })
 
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const remove = useMutation({
+    mutationFn: () => api.del(`/pricing/quotes/${quote.id}`),
+    onSuccess: () => {
+      toast('Cotação excluída')
+      for (const key of ['pricing-quotes', 'deals', 'clients', 'client']) queryClient.invalidateQueries({ queryKey: [key] })
+      onClose()
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao excluir', 'error'),
+  })
+
   const hoursValid = Number.isFinite(Number(hours.replace(',', '.'))) && Number(hours.replace(',', '.')) > 0
   const canSave = clientLabel.trim().length > 0 && (isApproved || hoursValid)
   const referencePriceCents = quote.actualPriceCents ?? quote.recommendedPriceCents
@@ -1190,11 +915,13 @@ export function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () =
 
   return (
     <Modal
-      title={`Orçamento: ${quote.clientLabel}`}
+      title={`Cotação: ${quote.clientLabel}`}
       onClose={onClose}
       wide
       footer={
         <>
+          <Button variant="danger" icon="trash" title="Excluir cotação" onClick={() => setConfirmingDelete(true)} disabled={remove.isPending} />
+          <span className="grow" />
           <Button onClick={onClose}>Cancelar</Button>
           {!isApproved && (
             <Button
@@ -1271,7 +998,7 @@ export function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () =
               {quote.actualPriceCents === null ? 'o recomendado' : 'o valor fechado'}
             </span>
           </div>
-          <div className="field" style={{ minWidth: 260, flex: 1 }}>
+          <div className="field" style={{ flex: '1 1 220px', minWidth: 0 }}>
             <label className="field__label" htmlFor={paymentTermsFieldId}>Condição de pagamento</label>
             <TextInput
               id={paymentTermsFieldId}
@@ -1333,6 +1060,20 @@ export function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () =
           cotação foi criada: é isso que "editar" significa aqui (`decisions/0021`).
         </p>
       </div>
+      {confirmingDelete && (
+        <ConfirmDeleteModal
+          title={`Excluir a cotação de ${quote.clientLabel}?`}
+          body={
+            isApproved
+              ? 'Isso não pode ser desfeito. A receita que a aprovação criou continua em Lançamentos, mas deixa de contar nos números do cliente; ajuste ou exclua lá, se for o caso.'
+              : 'Isso não pode ser desfeito.'
+          }
+          confirmLabel="Excluir cotação"
+          pending={remove.isPending}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() => remove.mutate()}
+        />
+      )}
     </Modal>
   )
 }

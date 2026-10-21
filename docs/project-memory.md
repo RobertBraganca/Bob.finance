@@ -1581,8 +1581,11 @@ enxugar telas repetidas, textos técnicos e menu.
   `client_id` em `project_quotes`/`service_proposals`, `service_id` nos itens,
   `negotiating`/`paused` no enum `proposal_status`. Idempotente (`if not exists`),
   então os testes a rodam de novo dentro da transação sem efeito.
-- Precificação: Negócios (padrão, lista e quadro), Clientes (+ ficha
-  `/precificacao/clientes/:id`), Serviços, Cotações, Parâmetros. `ProposalsTab` saiu.
+- Precificação: Painel (padrão: KPIs, funil, valor por estágio, enviado x aprovado,
+  maiores clientes, serviços; lê `/pricing/deals/analytics`), Negócios (lista e
+  quadro), Clientes (+ ficha `/precificacao/clientes/:id`), Serviços, Parâmetros.
+  `ProposalsTab` e a aba Cotações saíram; a cotação abre e se exclui pelo modal de
+  edição (Negócios ou ficha), e "Calcular preço" abre a simulação.
 - Regra: a fonte dos estágios unificados é `shared/deals.ts`; na cotação,
   `in_review`/`needs_changes` leem como "Em negociação" e a volta grava `in_review`.
   Aprovar nunca passa por `/pricing/deals/:kind/:id/stage` (422): sempre o modal.

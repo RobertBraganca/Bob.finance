@@ -453,6 +453,7 @@ app.delete('/services/:id', async (c) => c.json(await catalog.deleteService(idPa
 app.post('/services/:id/adopt', async (c) => c.json(await catalog.adoptItemsByTitle(idParam.parse(c.req.param()).id)))
 
 app.get('/deals/summary', async (c) => c.json(await dealsService.dealsSummary()))
+app.get('/deals/analytics', async (c) => c.json(await dealsService.dealsAnalytics()))
 app.get('/deals', async (c) => {
   const query = z
     .object({

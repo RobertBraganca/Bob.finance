@@ -3230,3 +3230,52 @@ button {
   font-size: var(--text-xs);
   color: var(--ink-3);
 }
+/* Lista ranqueada do Painel de Precificação (maiores clientes, serviços). */
+.rank-list {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rank-list__item {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: var(--sp-2);
+  border-radius: var(--r-md);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+.rank-list__item--link {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-height: 44px;
+}
+.rank-list__item--link:hover {
+  background: var(--surface-hover);
+}
+.rank-list__item--link:focus-visible {
+  outline: 2px solid var(--focus, currentColor);
+  outline-offset: 2px;
+}
+.rank-list__label {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.rank-list__track {
+  display: block;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+.rank-list__bar {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--seq-600);
+}

@@ -155,6 +155,7 @@ export async function clientsRoutes(app: FastifyInstance) {
 
   /* ---- negócios (cotações e orçamentos juntos) ---- */
   app.get('/pricing/deals/summary', async () => dealsService.dealsSummary())
+  app.get('/pricing/deals/analytics', async () => dealsService.dealsAnalytics())
   app.get('/pricing/deals', async (req) => {
     const query = dealListQuery.parse(req.query)
     return { deals: await dealsService.listDeals({ q: query.q, kind: query.kind, stages: stageList(query.stage), clientId: query.clientId }) }
