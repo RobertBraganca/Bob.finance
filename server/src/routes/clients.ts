@@ -64,6 +64,10 @@ export const dealListQuery = z.object({
   stage: z.string().optional(),
   clientId: z.coerce.number().int().positive().optional(),
 })
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+export const candidateQuery = z.object({ q: z.string().max(160).optional(), from: isoDate.optional(), to: isoDate.optional() })
+export const linkTransactionsBody = z.object({ transactionIds: z.array(z.number().int().positive()).min(1).max(200) })
+
 export const dealStageParams = z.object({ kind: z.enum(['proposal', 'quote']), id: z.coerce.number().int().positive() })
 export const dealStageBody = z.object({ stage: z.enum(DEAL_STAGES) })
 
@@ -138,6 +142,23 @@ export async function clientsRoutes(app: FastifyInstance) {
   app.delete('/pricing/clients/:id/aliases/:aliasId', async (req) => {
     const { id, aliasId } = idParam.extend({ aliasId: z.coerce.number().int().positive() }).parse(req.params)
     return clientsService.deletePayerAlias(id, aliasId)
+  })
+  app.get('/pricing/clients/:id/transaction-candidates', async (req, reply) => {
+    const { id } = idParam.parse(req.params)
+    const candidates = await clientsService.transactionCandidates(id, candidateQuery.parse(req.query))
+    if (!candidates) return reply.code(404).send({ error: 'cliente não encontrado' })
+    return { transactions: candidates }
+  })
+  app.post('/pricing/clients/:id/transactions', async (req, reply) =>
+    guarded(reply, async () => {
+      const result = await clientsService.linkTransactions(idParam.parse(req.params).id, linkTransactionsBody.parse(req.body).transactionIds)
+      if (!result) return reply.code(404).send({ error: 'cliente não encontrado' })
+      return result
+    }),
+  )
+  app.delete('/pricing/clients/:id/transactions/:transactionId', async (req) => {
+    const { id, transactionId } = idParam.extend({ transactionId: z.coerce.number().int().positive() }).parse(req.params)
+    return clientsService.unlinkTransaction(id, transactionId)
   })
 
   /* ---- catálogo de serviços ---- */

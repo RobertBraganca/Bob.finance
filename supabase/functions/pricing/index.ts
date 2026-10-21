@@ -441,6 +441,23 @@ app.delete('/clients/:id/aliases/:aliasId', async (c) => {
   const { id, aliasId } = aliasParams.parse(c.req.param())
   return c.json(await clientsService.deletePayerAlias(id, aliasId))
 })
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+app.get('/clients/:id/transaction-candidates', async (c) => {
+  const query = z.object({ q: z.string().max(160).optional(), from: isoDate.optional(), to: isoDate.optional() }).parse(c.req.query())
+  const candidates = await clientsService.transactionCandidates(idParam.parse(c.req.param()).id, query)
+  if (!candidates) return c.json({ error: 'cliente não encontrado' }, 404)
+  return c.json({ transactions: candidates })
+})
+app.post('/clients/:id/transactions', async (c) => {
+  const { transactionIds } = z.object({ transactionIds: z.array(z.number().int().positive()).min(1).max(200) }).parse(await c.req.json())
+  const result = await clientsService.linkTransactions(idParam.parse(c.req.param()).id, transactionIds)
+  if (!result) return c.json({ error: 'cliente não encontrado' }, 404)
+  return c.json(result)
+})
+app.delete('/clients/:id/transactions/:transactionId', async (c) => {
+  const { id, transactionId } = idParam.extend({ transactionId: z.coerce.number().int().positive() }).parse(c.req.param())
+  return c.json(await clientsService.unlinkTransaction(id, transactionId))
+})
 
 app.get('/services', async (c) => c.json(await catalog.listServices()))
 app.post('/services', async (c) => c.json(await catalog.createService(z.object(serviceFields).parse(await c.req.json()))))
