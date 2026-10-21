@@ -1280,12 +1280,93 @@ export const pricingMultiplierOptions = pgTable(
  * A saved quote. The three output numbers are FROZEN at simulation
  * time, never recalculated (decisions/0021).
  */
+/* ------------------------------------------------------------------ *
+ * Clientes (specs/clientes-e-negocios, fases 2 e 3): lead, empresa ou
+ * pessoa, com contatos e os nomes com que pagam no extrato (o LTV lê o
+ * dinheiro real). Cotação e orçamento apontam para o cliente por
+ * `client_id`; o `client_label` continua sendo o nome que sai no documento.
+ * ------------------------------------------------------------------ */
+export const clientKindEnum = pgEnum('client_kind', ['lead', 'company', 'person'])
+export const clientStatusEnum = pgEnum('client_status', ['active', 'inactive', 'archived'])
+
+export const clients = pgTable(
+  'clients',
+  {
+    id: id(),
+    name: text('name').notNull(),
+    kind: clientKindEnum('kind').notNull().default('company'),
+    status: clientStatusEnum('status').notNull().default('active'),
+    segment: text('segment'),
+    email: text('email'),
+    phone: text('phone'),
+    /** CPF ou CNPJ, como o usuário digitou */
+    document: text('document'),
+    website: text('website'),
+    /** de onde veio: indicação, rede social, site... */
+    source: text('source'),
+    description: text('description'),
+    /** marcado pelo usuário; a recorrência também é inferida do extrato (services/clients.ts) */
+    isRecurring: boolean('is_recurring').notNull().default(false),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('clients_name_uq').on(sql`lower(${t.name})`), index('clients_status_idx').on(t.status)],
+)
+
+export const clientContacts = pgTable(
+  'client_contacts',
+  {
+    id: id(),
+    clientId: int('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    role: text('role'),
+    email: text('email'),
+    phone: text('phone'),
+    isPrimary: boolean('is_primary').notNull().default(false),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [index('client_contacts_client_idx').on(t.clientId)],
+)
+
+/** Nome do pagador como aparece no extrato, normalizado (`normalizeDescription`). */
+export const clientPayerAliases = pgTable(
+  'client_payer_aliases',
+  {
+    id: id(),
+    clientId: int('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    alias: text('alias').notNull(),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('client_payer_aliases_uq').on(t.clientId, t.alias)],
+)
+
+/** Catálogo leve de serviços (fase 3): o item do orçamento pode apontar para um. */
+export const serviceCatalog = pgTable(
+  'service_catalog',
+  {
+    id: id(),
+    name: text('name').notNull(),
+    description: text('description'),
+    defaultPriceCents: int('default_price_cents').notNull().default(0),
+    active: boolean('active').notNull().default(true),
+    sortOrder: int('sort_order').notNull().default(0),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('service_catalog_name_uq').on(sql`lower(${t.name})`)],
+)
+
 export const projectQuotes = pgTable(
   'project_quotes',
   {
     id: id(),
-    /** free text until a client/project table exists */
+    /** "cliente ou projeto": texto livre, o que sai na cotação */
     clientLabel: text('client_label').notNull(),
+    /** o cliente da lista, quando ligado (specs/clientes-e-negocios) */
+    clientId: int('client_id').references(() => clients.id, { onDelete: 'set null' }),
     estimatedHours: doublePrecision('estimated_hours').notNull(),
     /** {label, amountCents}[] */
     directCosts: jsonb('direct_costs').notNull().default(sql`'[]'::jsonb`),
@@ -1325,6 +1406,7 @@ export const projectQuotes = pgTable(
     index('project_quotes_urgency_idx').on(t.urgencyOptionId),
     index('project_quotes_client_size_idx').on(t.clientSizeOptionId),
     index('project_quotes_usage_rights_idx').on(t.usageRightsOptionId),
+    index('project_quotes_client_idx').on(t.clientId),
   ],
 )
 
@@ -1335,7 +1417,8 @@ export const projectQuotes = pgTable(
  * itens a cada leitura; só a aprovação congela o valor
  * (`approvedAmountCents`), que é o que foi para as receitas geradas.
  * ------------------------------------------------------------------ */
-export const proposalStatusEnum = pgEnum('proposal_status', ['draft', 'sent', 'approved', 'rejected'])
+/** `negotiating` e `paused` (fase 4): os mesmos estágios da cotação, para o fluxo unificado. */
+export const proposalStatusEnum = pgEnum('proposal_status', ['draft', 'sent', 'approved', 'rejected', 'negotiating', 'paused'])
 
 export const serviceProposals = pgTable(
   'service_proposals',
@@ -1344,8 +1427,10 @@ export const serviceProposals = pgTable(
     /** sequencial próprio, exibido como #0001 (default vem de `service_proposal_number_seq`) */
     number: int('number').notNull().default(sql`nextval('service_proposal_number_seq')`),
     title: text('title').notNull(),
-    /** texto livre, como em `project_quotes` (decisions/0012) */
+    /** texto livre, como em `project_quotes` (decisions/0012): o nome que sai no PDF */
     clientLabel: text('client_label').notNull(),
+    /** o cliente da lista, quando ligado (specs/clientes-e-negocios) */
+    clientId: int('client_id').references(() => clients.id, { onDelete: 'set null' }),
     status: proposalStatusEnum('status').notNull().default('draft'),
     /** desconto sobre o subtotal, 10000 = 100% */
     discountBps: int('discount_bps').notNull().default(0),
@@ -1361,7 +1446,11 @@ export const serviceProposals = pgTable(
     createdAt: text('created_at').notNull().default(now),
     updatedAt: text('updated_at').notNull().default(now),
   },
-  (t) => [uniqueIndex('service_proposals_number_uq').on(t.number), index('service_proposals_status_idx').on(t.status)],
+  (t) => [
+    uniqueIndex('service_proposals_number_uq').on(t.number),
+    index('service_proposals_status_idx').on(t.status),
+    index('service_proposals_client_idx').on(t.clientId),
+  ],
 )
 
 export const serviceProposalItems = pgTable(
@@ -1379,10 +1468,13 @@ export const serviceProposalItems = pgTable(
     sortOrder: int('sort_order').notNull().default(0),
     /** cotação de onde o preço veio, se veio; apagar a cotação não muda o item */
     sourceQuoteId: int('source_quote_id').references(() => projectQuotes.id, { onDelete: 'set null' }),
+    /** serviço do catálogo, se escolhido de lá; o título e o preço continuam editáveis no item */
+    serviceId: int('service_id').references(() => serviceCatalog.id, { onDelete: 'set null' }),
   },
   (t) => [
     index('service_proposal_items_proposal_idx').on(t.proposalId),
     index('service_proposal_items_quote_idx').on(t.sourceQuoteId),
+    index('service_proposal_items_service_idx').on(t.serviceId),
   ],
 )
 

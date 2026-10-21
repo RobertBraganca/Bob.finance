@@ -38,7 +38,10 @@ import {
   type AssumptionBag,
 } from '../components/ui'
 import { PageHeader } from '../components/shell/Shell'
-import { ProposalsTab } from './proposals/ProposalsTab'
+import { DealsTab } from './deals/DealsTab'
+import { ClientsTab } from './clients/ClientsTab'
+import { ClientPicker } from './clients/ClientPicker'
+import { ServicesTab } from './services/ServicesTab'
 import { IssuerCard } from './proposals/IssuerCard'
 import { todayIso } from '../lib/period'
 
@@ -56,7 +59,7 @@ const QUOTE_STATUS_TONE: Record<QuoteStatus, 'good' | 'warning' | 'critical' | '
   approved: 'good',
 }
 
-const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
+export const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
   draft: 'Rascunho',
   sent: 'Enviada',
   in_review: 'Em revisão',
@@ -109,9 +112,11 @@ type Simulation = {
   assumptions: AssumptionBag
 }
 
-type Quote = {
+export type Quote = {
   id: number
   clientLabel: string
+  /** cliente da lista (specs/clientes-e-negocios); o texto continua em `clientLabel` */
+  clientId: number | null
   estimatedHours: number
   directCosts: Array<{ label: string; amountCents: number }>
   complexityOptionId: number | null
@@ -135,36 +140,43 @@ type PricingSettings = { availableHoursPerMonth: number; billablePercentageBps: 
 
 type DirectCostDraft = { label: string; value: string }
 
-type PricingTab = 'orcamentos' | 'cotacoes' | 'parametros'
-const PRICING_TABS: PricingTab[] = ['orcamentos', 'cotacoes', 'parametros']
+type PricingTab = 'negocios' | 'clientes' | 'servicos' | 'cotacoes' | 'parametros'
+const PRICING_TABS: PricingTab[] = ['negocios', 'clientes', 'servicos', 'cotacoes', 'parametros']
+
+const TAB_SUBTITLE: Record<PricingTab, string> = {
+  negocios: 'Orçamentos e cotações numa lista só, do rascunho à aprovação',
+  clientes: 'Quem compra de você: contatos, negócios e quanto já entrou de cada um',
+  servicos: 'O que você vende, com preço de partida e o que cada serviço já rendeu',
+  cotacoes: 'Quanto cobrar por um projeto, a partir do seu próprio custo de operar',
+  parametros: 'Horas, multiplicadores e o que entra no cálculo do preço',
+}
 
 export function PricingPage() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  // A aba vive no endereço (`?aba=cotacoes`), como em Investimentos.
-  // Orçamentos é a padrão (decisions/0040); a antiga "Negócios" virou Cotações.
+  // A aba vive no endereço (`?aba=clientes`), como em Investimentos. Negócios
+  // é a padrão (specs/clientes-e-negocios, fase 4): reúne orçamentos e
+  // cotações; o endereço antigo `?aba=orcamentos` cai nela.
   const raw = params.get('aba')
-  const tab: PricingTab = raw === 'negocios' ? 'cotacoes' : PRICING_TABS.includes(raw as PricingTab) ? (raw as PricingTab) : 'orcamentos'
+  const tab: PricingTab = PRICING_TABS.includes(raw as PricingTab) ? (raw as PricingTab) : 'negocios'
   const setTab = (next: PricingTab) =>
     setParams(
       () => {
         const fresh = new URLSearchParams()
-        if (next !== 'orcamentos') fresh.set('aba', next)
+        if (next !== 'negocios') fresh.set('aba', next)
         return fresh
       },
       { replace: true },
     )
   const [simulating, setSimulating] = useState(false)
+  const [creatingClient, setCreatingClient] = useState(false)
+  const [creatingService, setCreatingService] = useState(false)
 
   return (
     <>
       <PageHeader
         title="Precificação"
-        subtitle={
-          tab === 'orcamentos'
-            ? 'Orçamentos para clientes: serviços, desconto, condições e o PDF'
-            : 'Quanto cobrar por um projeto, a partir do seu próprio custo de operar'
-        }
+        subtitle={TAB_SUBTITLE[tab]}
         filters={
           <Segmented
             ariaLabel="Seção"
@@ -172,16 +184,31 @@ export function PricingPage() {
             value={tab}
             onChange={setTab}
             options={[
-              { value: 'orcamentos', label: 'Orçamentos' },
+              { value: 'negocios', label: 'Negócios' },
+              { value: 'clientes', label: 'Clientes' },
+              { value: 'servicos', label: 'Serviços' },
               { value: 'cotacoes', label: 'Cotações' },
               { value: 'parametros', label: 'Parâmetros' },
             ]}
           />
         }
         actions={
-          tab === 'orcamentos' ? (
-            <Button variant="primary" icon="plus" onClick={() => navigate('/precificacao/orcamentos/novo')}>
-              Novo orçamento
+          tab === 'negocios' ? (
+            <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+              <Button icon="calculator" onClick={() => setSimulating(true)}>
+                Calcular preço
+              </Button>
+              <Button variant="primary" icon="plus" onClick={() => navigate('/precificacao/orcamentos/novo')}>
+                Novo orçamento
+              </Button>
+            </div>
+          ) : tab === 'clientes' ? (
+            <Button variant="primary" icon="plus" onClick={() => setCreatingClient(true)}>
+              Novo cliente
+            </Button>
+          ) : tab === 'servicos' ? (
+            <Button variant="primary" icon="plus" onClick={() => setCreatingService(true)}>
+              Novo serviço
             </Button>
           ) : tab === 'cotacoes' ? (
             <Button variant="primary" icon="plus" onClick={() => setSimulating(true)}>
@@ -191,7 +218,17 @@ export function PricingPage() {
         }
       />
       <div className="page tab-panel" key={tab}>
-        {tab === 'orcamentos' ? <ProposalsTab /> : tab === 'cotacoes' ? <QuotesTab /> : <ParamsTab />}
+        {tab === 'negocios' ? (
+          <DealsTab onNewQuote={() => setSimulating(true)} />
+        ) : tab === 'clientes' ? (
+          <ClientsTab creating={creatingClient} onCreate={() => setCreatingClient(true)} onCloseCreate={() => setCreatingClient(false)} />
+        ) : tab === 'servicos' ? (
+          <ServicesTab creating={creatingService} onCloseCreate={() => setCreatingService(false)} />
+        ) : tab === 'cotacoes' ? (
+          <QuotesTab />
+        ) : (
+          <ParamsTab />
+        )}
       </div>
       {simulating && <SimulateModal onClose={() => setSimulating(false)} />}
     </>
@@ -507,13 +544,18 @@ function SaveQuoteModal({
   onSaved: () => void
 }) {
   const toast = useToast()
+  const queryClient = useQueryClient()
   const [label, setLabel] = useState('')
+  const [clientId, setClientId] = useState<number | null>(null)
   const clientLabelFieldId = useId()
+  const clientPickerFieldId = useId()
 
   const save = useMutation({
-    mutationFn: () => api.post('/pricing/quotes', { ...payload, clientLabel: label.trim() }),
+    mutationFn: () => api.post('/pricing/quotes', { ...payload, clientLabel: label.trim(), clientId }),
     onSuccess: () => {
       telemetry.action('pricing', 'quote_saved')
+      queryClient.invalidateQueries({ queryKey: ['deals'] })
+      if (clientId) queryClient.invalidateQueries({ queryKey: ['client', clientId] })
       onSaved()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
@@ -538,6 +580,19 @@ function SaveQuoteModal({
       }
     >
       <div className="stack">
+        <div className="field">
+          <label className="field__label" htmlFor={clientPickerFieldId}>Cliente da lista</label>
+          <ClientPicker
+            id={clientPickerFieldId}
+            value={clientId}
+            suggestedName={label}
+            onChange={(client) => {
+              setClientId(client?.id ?? null)
+              if (client && label.trim() === '') setLabel(client.name)
+            }}
+          />
+          <span className="field__hint">Opcional. Ligada a um cliente, a cotação entra no histórico e nos números dele.</span>
+        </div>
         <div className="field">
           <label className="field__label" htmlFor={clientLabelFieldId}>Cliente ou projeto</label>
           <TextInput id={clientLabelFieldId} value={label} onChange={setLabel} placeholder="ex. Identidade visual, cliente X" />
@@ -594,12 +649,14 @@ function QuotesTab() {
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao remover', 'error'),
   })
 
+  const [unapproving, setUnapproving] = useState<{ quote: Quote; to: QuoteStatus } | null>(null)
   const setStatus = useMutation({
     mutationFn: ({ id, status }: { id: number; status: QuoteStatus }) =>
       api.patch(`/pricing/quotes/${id}/status`, { status }),
     onSuccess: () => {
       toast('Status atualizado')
       queryClient.invalidateQueries({ queryKey: ['pricing-quotes'] })
+      setUnapproving(null)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao atualizar status', 'error'),
   })
@@ -749,9 +806,13 @@ function QuotesTab() {
                         value={quote.status}
                         className={`select--pill select--${QUOTE_STATUS_TONE[quote.status]}`}
                         options={QUOTE_STATUSES.map((value) => ({ value, label: QUOTE_STATUS_LABELS[value] }))}
-                        onChange={(value) =>
-                          value && setStatus.mutate({ id: quote.id, status: value as QuoteStatus })
-                        }
+                        onChange={(value) => {
+                          if (!value || value === quote.status) return
+                          // Aprovar gera a receita no extrato: sempre pelo modal, nunca só trocando o status.
+                          if (value === 'approved') return setApproving(quote)
+                          if (quote.status === 'approved') return setUnapproving({ quote, to: value as QuoteStatus })
+                          setStatus.mutate({ id: quote.id, status: value as QuoteStatus })
+                        }}
                       />
                     </td>
                     <td data-label="__trail">
@@ -792,6 +853,16 @@ function QuotesTab() {
       </Card>
 
       {approving && <ApproveQuoteModal quote={approving} onClose={() => setApproving(null)} />}
+      {unapproving && (
+        <ConfirmDeleteModal
+          title={`Tirar a cotação de ${unapproving.quote.clientLabel} de aprovada?`}
+          body={`Ela passa para ${QUOTE_STATUS_LABELS[unapproving.to].toLowerCase()}. A receita que a aprovação criou continua no extrato; para aprovar de novo, exclua antes essa receita em Lançamentos (senão ela ficaria duplicada).`}
+          confirmLabel={`Mudar para ${QUOTE_STATUS_LABELS[unapproving.to].toLowerCase()}`}
+          pending={setStatus.isPending}
+          onCancel={() => setUnapproving(null)}
+          onConfirm={() => setStatus.mutate({ id: unapproving.quote.id, status: unapproving.to })}
+        />
+      )}
       {editing && <EditQuoteModal quote={editing} onClose={() => setEditing(null)} />}
       {confirmingQuote && (
         <ConfirmDeleteModal
@@ -827,7 +898,7 @@ function addMonthsToDateInput(iso: string, n: number): string {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(Math.min(d, lastDay)).padStart(2, '0')}`
 }
 
-function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void }) {
+export function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void }) {
   const toast = useToast()
   const queryClient = useQueryClient()
   const accounts = useAccounts()
@@ -1038,11 +1109,12 @@ function ApproveQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => vo
  * número mudando silenciosamente. Salvar sempre recalcula no servidor
  * (`PATCH` reusa `simulate()`), o "Recalcular" aqui é só a prévia.
  */
-function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void }) {
+export function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void }) {
   const toast = useToast()
   const queryClient = useQueryClient()
 
   const [clientLabel, setClientLabel] = useState(quote.clientLabel)
+  const [clientId, setClientId] = useState<number | null>(quote.clientId)
   const [installments, setInstallments] = useState(String(quote.installments))
   const [paymentTerms, setPaymentTerms] = useState(quote.paymentTerms ?? '')
   const [hours, setHours] = useState(String(quote.estimatedHours).replace('.', ','))
@@ -1058,6 +1130,7 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
   )
   const [preview, setPreview] = useState<Simulation | null>(null)
   const clientLabelFieldId = useId()
+  const clientPickerFieldId = useId()
   const installmentsFieldId = useId()
   const paymentTermsFieldId = useId()
 
@@ -1067,6 +1140,7 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
    *  numa cotação já aprovada (ver `updateQuote` em services/pricing.ts). */
   const commercialBody = () => ({
     clientLabel: clientLabel.trim(),
+    clientId,
     installments: Math.max(1, Number(installments) || 1),
     paymentTerms: paymentTerms.trim() === '' ? null : paymentTerms.trim(),
   })
@@ -1101,6 +1175,9 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
     onSuccess: () => {
       toast('Cotação atualizada')
       queryClient.invalidateQueries({ queryKey: ['pricing-quotes'] })
+      queryClient.invalidateQueries({ queryKey: ['deals'] })
+      queryClient.invalidateQueries({ queryKey: ['clients'] })
+      queryClient.invalidateQueries({ queryKey: ['client'] })
       onClose()
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao salvar', 'error'),
@@ -1163,9 +1240,23 @@ function EditQuoteModal({ quote, onClose }: { quote: Quote; onClose: () => void 
 
         <hr className="divider" />
 
-        <div className="field">
-          <label className="field__label" htmlFor={clientLabelFieldId}>Cliente ou projeto</label>
-          <TextInput id={clientLabelFieldId} value={clientLabel} onChange={setClientLabel} />
+        <div className="form-grid">
+          <div className="field">
+            <label className="field__label" htmlFor={clientPickerFieldId}>Cliente da lista</label>
+            <ClientPicker
+              id={clientPickerFieldId}
+              value={clientId}
+              suggestedName={clientLabel}
+              onChange={(client) => {
+                setClientId(client?.id ?? null)
+                if (client && clientLabel.trim() === '') setClientLabel(client.name)
+              }}
+            />
+          </div>
+          <div className="field">
+            <label className="field__label" htmlFor={clientLabelFieldId}>Cliente ou projeto</label>
+            <TextInput id={clientLabelFieldId} value={clientLabel} onChange={setClientLabel} />
+          </div>
         </div>
 
         <div className="row row--wrap" style={{ gap: 'var(--sp-4)', alignItems: 'flex-start' }}>

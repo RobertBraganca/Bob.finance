@@ -37,6 +37,7 @@ const FinancialHealthPage = lazy(() =>
 const PricingPage = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.PricingPage })))
 const ProposalFormPage = lazy(() => import('./pages/proposals/ProposalFormPage').then((m) => ({ default: m.ProposalFormPage })))
 const ProposalDetailPage = lazy(() => import('./pages/proposals/ProposalDetailPage').then((m) => ({ default: m.ProposalDetailPage })))
+const ClientDetailPage = lazy(() => import('./pages/clients/ClientDetailPage').then((m) => ({ default: m.ClientDetailPage })))
 const PartnersPage = lazy(() => import('./pages/Partners').then((m) => ({ default: m.PartnersPage })))
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })))
 const ProfilePage = lazy(() => import('./pages/Profile').then((m) => ({ default: m.ProfilePage })))
@@ -223,6 +224,11 @@ function AuthedApp() {
               <Route
                 path="/precificacao/orcamentos/:id/editar"
                 element={isPersonalAccount ? <Navigate to="/" replace /> : <ProposalFormPage />}
+              />
+              {/* Ficha do cliente (specs/clientes-e-negocios). */}
+              <Route
+                path="/precificacao/clientes/:id"
+                element={isPersonalAccount ? <Navigate to="/" replace /> : <ClientDetailPage />}
               />
               <Route
                 path="/parceiros"

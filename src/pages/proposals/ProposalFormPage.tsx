@@ -1,10 +1,12 @@
 import { useEffect, useId, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { bps, bpsToInput, date as fmtDate, money, parsePercentInput } from '../../lib/format'
 import { todayIso } from '../../lib/period'
 import { lineTotalCents, proposalTotals, proposalValidUntil } from '@shared/proposals'
+import { DEAL_STAGES } from '@shared/deals'
+import { ClientPicker, useClientOptions } from '../clients/ClientPicker'
 import { Button, Card, EmptyState, Segmented, SkeletonLines, TextArea, TextInput, useToast } from '../../components/ui'
 import { PageHeader } from '../../components/shell/Shell'
 import { ApproveProposalModal } from './ApproveProposalModal'
@@ -14,6 +16,7 @@ import { STATUS_LABEL, formatQuantity, type IssuerSettings, type ProposalDetail,
 type FormState = {
   title: string
   clientLabel: string
+  clientId: number | null
   status: ProposalStatus
   discount: string
   validityDays: string
@@ -28,6 +31,7 @@ function fromDetail(detail: ProposalDetail): FormState {
   return {
     title: detail.title,
     clientLabel: detail.clientLabel,
+    clientId: detail.clientId,
     status: detail.status,
     discount: detail.discountBps ? bpsToInput(detail.discountBps) : '',
     validityDays: String(detail.validityDays),
@@ -42,6 +46,7 @@ function fromDetail(detail: ProposalDetail): FormState {
 const EMPTY: FormState = {
   title: '',
   clientLabel: '',
+  clientId: null,
   status: 'draft',
   discount: '',
   validityDays: '',
@@ -84,7 +89,7 @@ export function ProposalFormPage() {
   const [editingIndex, setEditingIndex] = useState<number | 'new' | null>(null)
   const [pickingQuote, setPickingQuote] = useState(false)
   const [approving, setApproving] = useState<ProposalDetail | null>(null)
-  const ids = { title: useId(), client: useId(), clients: useId(), validity: useId(), installments: useId(), payment: useId(), delivery: useId(), notes: useId(), discount: useId() }
+  const ids = { title: useId(), client: useId(), clientPick: useId(), clients: useId(), validity: useId(), installments: useId(), payment: useId(), delivery: useId(), notes: useId(), discount: useId() }
 
   // Carrega o orçamento uma vez; daí em diante o formulário é a fonte.
   useEffect(() => {
@@ -94,6 +99,21 @@ export function ProposalFormPage() {
       setInitial(state)
     }
   }, [detail.data, form])
+
+  // "Novo orçamento" a partir da ficha do cliente (`?cliente=12`): já vem com ele.
+  const [params] = useSearchParams()
+  const presetClientId = proposalId === null ? Number(params.get('cliente')) || null : null
+  const clientOptions = useClientOptions()
+  const [presetApplied, setPresetApplied] = useState(false)
+  useEffect(() => {
+    if (presetApplied || presetClientId === null || !clientOptions.data) return
+    setPresetApplied(true)
+    const client = clientOptions.data.clients.find((c) => c.id === presetClientId)
+    if (!client) return
+    const state = { ...EMPTY, clientId: client.id, clientLabel: client.name }
+    setForm(state)
+    setInitial(state)
+  }, [presetApplied, presetClientId, clientOptions.data])
 
   const dirty = form !== null && initial !== null && JSON.stringify(form) !== JSON.stringify(initial)
   useEffect(() => {
@@ -120,6 +140,7 @@ export function ProposalFormPage() {
       const body = {
         title: form.title,
         clientLabel: form.clientLabel,
+        clientId: form.clientId,
         ...(status ? { status } : {}),
         ...(locked ? {} : { discountBps, items: form.items }),
         validityDays,
@@ -136,7 +157,7 @@ export function ProposalFormPage() {
     },
     onSuccess: ({ saved, wantsApproval }) => {
       setInitial(form)
-      queryClient.invalidateQueries({ queryKey: ['proposals'] })
+      for (const key of ['proposals', 'deals', 'clients', 'client', 'services']) queryClient.invalidateQueries({ queryKey: [key] })
       if (wasApproved && saved.status !== 'approved') queryClient.invalidateQueries()
       if (wantsApproval) {
         setApproving(saved)
@@ -151,7 +172,9 @@ export function ProposalFormPage() {
   const update = (patch: Partial<FormState>) => setForm((current) => (current ? { ...current, ...patch } : current))
   const cancel = () => {
     if (dirty && !window.confirm('Sair sem salvar? As alterações deste orçamento serão perdidas.')) return
-    navigate(proposalId === null ? '/precificacao' : `/precificacao/orcamentos/${proposalId}`)
+    navigate(
+      proposalId !== null ? `/precificacao/orcamentos/${proposalId}` : presetClientId !== null ? `/precificacao/clientes/${presetClientId}` : '/precificacao',
+    )
   }
 
   const title = proposalId === null ? 'Novo orçamento' : detail.data ? `Editar ${detail.data.numberLabel}` : 'Editar orçamento'
@@ -202,8 +225,22 @@ export function ProposalFormPage() {
                     <TextInput id={ids.title} value={form.title} onChange={(title) => update({ title })} placeholder="ex. Desenvolvimento de aplicativo de loja online" />
                   </div>
                   <div className="field">
+                    <label className="field__label" htmlFor={ids.clientPick}>
+                      Cliente da lista
+                    </label>
+                    <ClientPicker
+                      id={ids.clientPick}
+                      value={form.clientId}
+                      suggestedName={form.clientLabel}
+                      onChange={(client) =>
+                        update(client ? { clientId: client.id, clientLabel: client.name } : { clientId: null })
+                      }
+                    />
+                    <span className="field__hint">Ligado a um cliente, o orçamento entra na ficha dele, no LTV e no MRR.</span>
+                  </div>
+                  <div className="field">
                     <label className="field__label" htmlFor={ids.client}>
-                      Cliente
+                      Nome no orçamento
                     </label>
                     <TextInput id={ids.client} value={form.clientLabel} onChange={(clientLabel) => update({ clientLabel })} placeholder="Nome da empresa ou pessoa" list={ids.clients} />
                     <datalist id={ids.clients}>
@@ -221,7 +258,7 @@ export function ProposalFormPage() {
                   className="segmented--nav"
                   value={form.status}
                   onChange={(status) => update({ status })}
-                  options={(['draft', 'sent', 'approved', 'rejected'] as ProposalStatus[]).map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
+                  options={DEAL_STAGES.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
                 />
                 {form.status === 'approved' && !wasApproved && (
                   <p className="chart__note" style={{ margin: 0 }}>

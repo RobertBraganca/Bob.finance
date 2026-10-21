@@ -659,6 +659,7 @@ export function Select<T extends string | number>({
   bare,
   toolbar,
   className,
+  ariaLabel,
 }: {
   id?: string
   value: T | null
@@ -670,6 +671,8 @@ export function Select<T extends string | number>({
   toolbar?: boolean
   /** Variante visual do gatilho (ex. `select--pill select--good` para status). */
   className?: string
+  /** Nome para leitor de tela quando não há `<label>`; o valor atual vai junto. */
+  ariaLabel?: string
 }) {
   return (
     <DropdownSelect
@@ -681,6 +684,7 @@ export function Select<T extends string | number>({
         <button
           id={id}
           {...triggerProps}
+          {...(ariaLabel ? { 'aria-label': `${ariaLabel}: ${label}` } : {})}
           className={cx('select', bare && 'select--bare', toolbar && 'select--toolbar', className)}
         >
           <span className="select__value truncate">{label}</span>

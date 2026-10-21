@@ -44,11 +44,13 @@ const proposalItemSchema = z.object({
   unitPriceCents: z.number().int().min(0).max(1_000_000_000),
   quantity: z.number().positive().max(100_000),
   sourceQuoteId: z.number().int().positive().nullable().optional(),
+  serviceId: z.number().int().positive().nullable().optional(),
 })
 
 const proposalFields = {
   title: z.string().trim().min(1).max(160),
   clientLabel: z.string().trim().min(1).max(160),
+  clientId: z.number().int().positive().nullable().optional(),
   status: z.enum(proposals.EDITABLE_STATUSES).optional(),
   discountBps: z.number().int().min(0).max(10_000).optional(),
   validityDays: z.number().int().min(1).max(365).optional(),
@@ -65,6 +67,7 @@ const proposalListQuery = z.object({
   q: z.string().max(160).optional(),
   status: z.string().optional(),
   sort: z.enum(proposals.PROPOSAL_SORTS).optional(),
+  clientId: z.coerce.number().int().positive().optional(),
 })
 
 const statusList = (raw: string | undefined) =>
@@ -191,7 +194,7 @@ export async function pricingRoutes(app: FastifyInstance) {
 
   app.post('/pricing/quotes', async (req, reply) => {
     const body = simulateBody
-      .extend({ clientLabel: z.string().min(1).max(120), ...commercialTerms })
+      .extend({ clientLabel: z.string().min(1).max(120), clientId: z.number().int().positive().nullable().optional(), ...commercialTerms })
       .parse(req.body)
     try {
       return await pricing.saveQuote(body)
@@ -216,7 +219,7 @@ export async function pricingRoutes(app: FastifyInstance) {
     const body = simulateBody
       .omit({ period: true })
       .partial()
-      .extend({ clientLabel: z.string().min(1).max(120).optional(), ...commercialTerms })
+      .extend({ clientLabel: z.string().min(1).max(120).optional(), clientId: z.number().int().positive().nullable().optional(), ...commercialTerms })
       .parse(req.body)
     try {
       const quote = await pricing.updateQuote(id, body)
@@ -276,7 +279,7 @@ export async function pricingRoutes(app: FastifyInstance) {
 
   app.get('/pricing/proposals', async (req) => {
     const query = proposalListQuery.parse(req.query)
-    return proposals.listProposals({ q: query.q, statuses: statusList(query.status), sort: query.sort })
+    return proposals.listProposals({ q: query.q, statuses: statusList(query.status), sort: query.sort, clientId: query.clientId })
   })
   app.get('/pricing/proposals/summary', async () => proposals.proposalsSummary())
   app.get('/pricing/proposals/item-suggestions', async (req) => {
