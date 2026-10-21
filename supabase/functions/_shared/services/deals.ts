@@ -1,7 +1,7 @@
 import { db, type DbExecutor } from '../db/client.ts'
 import { clients, projectQuotes, serviceProposalItems, serviceProposals } from '../db/schema.ts'
 import { asc, eq, inArray } from 'drizzle-orm'
-import { todayIso } from '../core/dates.ts'
+import { addMonths, periodRange, todayIso } from '../core/dates.ts'
 import { normalizeDescription } from '../core/normalize.ts'
 import { formatProposalNumber, proposalTotals } from '../core/proposals.ts'
 import { DEAL_STAGES, quoteStatusToStage, stageToQuoteStatus, type DealStage, type QuoteStatus } from '../core/deals.ts'
@@ -131,6 +131,72 @@ export async function dealsSummary(executor: DbExecutor = db) {
       emAberto: 'soma de cotações e orçamentos enviados ou em negociação',
       aprovadoNoAno: 'valor fechado dos aprovados criados no ano corrente',
       taxa: 'aprovados ÷ (aprovados + recusados), cotações e orçamentos juntos',
+    },
+  }
+}
+
+/**
+ * Painel de Precificação: as três leituras que a aba Cotações fazia só com
+ * cotações (estágio, mês e funil), agora com orçamentos e cotações juntos.
+ *
+ * Mesmas limitações de antes, declaradas em `assumptions`: o documento guarda
+ * o estágio ATUAL, não o histórico, então o funil é inferido ("para estar
+ * aprovado, foi enviado"); e o mês é o de criação, porque não existe data de
+ * aprovação gravada no documento.
+ */
+export async function dealsAnalytics(monthsBack = 12, executor: DbExecutor = db) {
+  const all = await listDeals({}, executor)
+  const total = all.length
+
+  const byStage = DEAL_STAGES.map((stage) => {
+    const own = all.filter((d) => d.stage === stage)
+    const valueCents = own.reduce((sum, d) => sum + d.valueCents, 0)
+    return { status: stage, count: own.length, recommendedCents: valueCents, actualCents: valueCents, shareBps: total > 0 ? Math.round((own.length / total) * 10_000) : 0 }
+  }).filter((slice) => slice.count > 0)
+
+  const current = todayIso().slice(0, 7)
+  const first = addMonths(current, -(monthsBack - 1))
+  const byPeriod = periodRange(first, current).map((period) => {
+    const own = all.filter((d) => d.createdAt.slice(0, 7) === period)
+    const sent = own.filter((d) => d.stage !== 'draft')
+    const approved = own.filter((d) => d.stage === 'approved')
+    const sentCents = sent.reduce((sum, d) => sum + d.valueCents, 0)
+    const approvedCents = approved.reduce((sum, d) => sum + d.valueCents, 0)
+    return {
+      period,
+      sentCents,
+      sentCount: sent.length,
+      approvedCents,
+      approvedCount: approved.length,
+      conversionBps: sentCents > 0 ? Math.round((approvedCents / sentCents) * 10_000) : null,
+    }
+  })
+
+  const beyondSent: DealStage[] = ['negotiating', 'paused', 'approved', 'rejected']
+  const steps = [
+    { key: 'created', label: 'Criados', count: total },
+    { key: 'sent', label: 'Enviados', count: all.filter((d) => d.stage !== 'draft').length },
+    { key: 'negotiated', label: 'Com retorno', count: all.filter((d) => beyondSent.includes(d.stage)).length },
+    { key: 'approved', label: 'Aprovados', count: all.filter((d) => d.stage === 'approved').length },
+  ]
+  const funnel = steps.map((s, i) => ({
+    ...s,
+    shareBps: total > 0 ? Math.round((s.count / total) * 10_000) : 0,
+    dropFromPreviousCount: i === 0 ? 0 : Math.max(0, steps[i - 1]!.count - s.count),
+  }))
+
+  return {
+    byStage,
+    byPeriod,
+    funnel,
+    totalCount: total,
+    assumptions: {
+      formula: 'cotações e orçamentos juntos, agrupados por estágio, por mês de criação e por etapa acumulada do funil',
+      negociosConsiderados: total,
+      janela: `${monthsBack} meses, de ${first} a ${current}`,
+      valor: 'orçamento: o total (o valor aprovado, quando aprovado); cotação: o valor fechado, ou o recomendado se ainda não fechou',
+      funilEInferido: 'o documento guarda o estágio atual, não o histórico: "chegou até a etapa" é inferido (para estar aprovado, foi enviado). O funil não diz quantos voltaram atrás',
+      mesDeCriacao: 'um negócio aprovado conta no mês em que foi criado, porque a data de aprovação não fica no documento',
     },
   }
 }

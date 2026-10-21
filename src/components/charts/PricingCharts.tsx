@@ -1,11 +1,11 @@
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { axisMoney, bps, money, period as fmtPeriod } from '../../lib/format'
 import { MARK, axisProps, gridProps, themeFor, type Surface } from '../../lib/chartTheme'
 import { useEffectiveSurface } from '../../lib/theme'
 import { ChartFrame, makeTooltip } from './frame'
 import { CategoryRing, type Slice } from './CategoryRing'
 
-export type QuoteFunnelStage = {
+export type DealFunnelStage = {
   key: string
   label: string
   count: number
@@ -13,7 +13,7 @@ export type QuoteFunnelStage = {
   dropFromPreviousCount: number
 }
 
-export type QuoteStatusSlice = {
+export type DealStageSlice = {
   status: string
   count: number
   recommendedCents: number
@@ -21,7 +21,7 @@ export type QuoteStatusSlice = {
   shareBps: number
 }
 
-export type QuotePeriodPoint = {
+export type DealPeriodPoint = {
   period: string
   sentCents: number
   sentCount: number
@@ -50,6 +50,8 @@ export type QuotePeriodPoint = {
 const STATUS_COLOR: Record<string, string> = {
   draft: 'var(--seq-300)',
   sent: 'var(--seq-450)',
+  // Estágio unificado (specs/clientes-e-negocios): o mesmo âmbar do selo "Em negociação".
+  negotiating: 'var(--status-warning)',
   in_review: 'var(--seq-600)',
   needs_changes: 'var(--status-warning)',
   // Pausada não é veredito nem etapa do caminho de aprovação — é o
@@ -60,7 +62,7 @@ const STATUS_COLOR: Record<string, string> = {
   approved: 'var(--status-good)',
 }
 
-const STATUS_ORDER = ['draft', 'sent', 'in_review', 'needs_changes', 'paused', 'rejected', 'approved']
+const STATUS_ORDER = ['draft', 'sent', 'negotiating', 'in_review', 'needs_changes', 'paused', 'rejected', 'approved']
 
 /**
  * Rosca de cotações por status, sobre o mesmo componente de anel que
@@ -71,13 +73,13 @@ const STATUS_ORDER = ['draft', 'sent', 'in_review', 'needs_changes', 'paused', '
  * estão em cada estado" é a pergunta do card. O valor recomendado de cada
  * status vai no tooltip, porque é contexto, não a medida.
  */
-export function QuoteStatusRing({
+export function DealStageRing({
   slices,
   labels,
   surface = 'paper',
   height = 220,
 }: {
-  slices: QuoteStatusSlice[]
+  slices: DealStageSlice[]
   labels: Record<string, string>
   surface?: Surface
   height?: number
@@ -117,8 +119,8 @@ export function QuoteStatusRing({
       slices={ringSlices}
       surface={surface}
       height={height}
-      totalLabel="Recomendado"
-      countLabel="Cotações"
+      totalLabel="Valor"
+      countLabel="Negócios"
       paddingAngle={1.2}
     />
   )
@@ -140,19 +142,19 @@ export function QuoteStatusRing({
  *  - Uma cotação aprovada é contada no mês em que foi CRIADA, não no mês
  *    em que fechou: não existe coluna de data de aprovação.
  */
-export function QuoteSentVsApprovedChart({
+export function DealSentVsApprovedChart({
   data,
   surface = 'paper',
   height = 240,
 }: {
-  data: QuotePeriodPoint[]
+  data: DealPeriodPoint[]
   surface?: Surface
   height?: number
 }) {
   const theme = themeFor(useEffectiveSurface(surface))
   const hasData = data.some((d) => d.sentCents > 0 || d.approvedCents > 0)
 
-  const Tip = makeTooltip<QuotePeriodPoint>((point) => ({
+  const Tip = makeTooltip<DealPeriodPoint>((point) => ({
     title: fmtPeriod(point.period),
     rows: [
       {
@@ -175,12 +177,12 @@ export function QuoteSentVsApprovedChart({
   return (
     <ChartFrame
       legend={[
-        { label: 'Enviado (recomendado)', color: theme.income, shape: 'block' },
-        { label: 'Aprovado (fechado)', color: theme.expense, shape: 'block' },
+        { label: 'Enviado', color: theme.income, shape: 'block' },
+        { label: 'Aprovado', color: theme.expense, shape: 'block' },
       ]}
       isEmpty={!hasData}
-      emptyTitle="Nenhuma cotação no período"
-      emptyBody="Salve uma cotação em Simular para ela aparecer aqui."
+      emptyTitle="Nenhum negócio no período"
+      emptyBody="Orçamentos e cotações enviados aparecem aqui, no mês em que foram criados."
       table={{
         rows: data.filter((d) => d.sentCount > 0 || d.approvedCount > 0),
         columns: [
@@ -194,7 +196,7 @@ export function QuoteSentVsApprovedChart({
           },
         ],
       }}
-      note="Enviado é o preço recomendado das cotações que saíram do rascunho; aprovado é o valor fechado. Uma cotação aprovada conta no mês em que foi criada, porque a data de aprovação não é registrada."
+      note="Enviado soma os orçamentos e cotações que saíram do rascunho; aprovado, o valor fechado dos aprovados. Um negócio aprovado conta no mês em que foi criado, porque a data de aprovação não fica no documento."
     >
       <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
         <BarChart data={data} margin={{ top: 18, right: 8, bottom: 4, left: 0 }} barGap={MARK.surfaceGap}>
@@ -211,70 +213,88 @@ export function QuoteSentVsApprovedChart({
 }
 
 /**
- * Funil de propostas: Criadas -> Enviadas -> Em análise ou além -> Aprovadas.
- * `services/pricing.ts#quoteAnalytics` já calcula essas 4 etapas por
- * inferência de status (não existe log de transição) desde sempre — só
- * nunca tinha um lugar na tela (achado de 09/09/2026, ao reorganizar
- * Precificação). Barra à mão, não Recharts: sem eixo/grade/tooltip
- * cartesiano para justificar a biblioteca, mesma linha de `SpendingHeatmap`.
+ * Funil de negócios: Criados -> Enviados -> Com retorno -> Aprovados, em
+ * barras horizontais na mesma gramática do resto do app (moldura, grade,
+ * eixo, tooltip e tabela de `ChartFrame`, como `AllocationChart`), não mais
+ * em barras desenhadas à mão. As etapas do caminho seguem a rampa
+ * sequencial da rosca (do claro ao escuro, na ordem em que o negócio anda) e
+ * só "Aprovados" leva o verde de desfecho bom, para cor e estágio lerem igual
+ * nos dois cards lado a lado.
+ *
+ * As etapas são inferidas do estágio atual (não existe log de transição), e
+ * "Criados" só aparece quando há rascunho: sem nenhum, ele repetiria
+ * "Enviados" e a primeira barra não diria nada.
  */
-export function QuoteFunnelChart({ stages, surface = 'paper' }: { stages: QuoteFunnelStage[]; surface?: Surface }) {
+const FUNNEL_COLOR: Record<string, string> = {
+  created: 'var(--seq-300)',
+  sent: 'var(--seq-450)',
+  negotiated: 'var(--seq-600)',
+  approved: 'var(--status-good)',
+}
+
+export function DealFunnelChart({ stages, surface = 'paper' }: { stages: DealFunnelStage[]; surface?: Surface }) {
   const theme = themeFor(useEffectiveSurface(surface))
+  const created = stages.find((s) => s.key === 'created')
+  const sent = stages.find((s) => s.key === 'sent')
+  const rows = created && sent && created.count === sent.count ? stages.filter((s) => s.key !== 'created') : stages
+  const base = rows[0]?.count ?? 0
+  const data = rows.map((s) => ({ ...s, ofBaseBps: base > 0 ? Math.round((s.count / base) * 10_000) : 0 }))
   const hasData = stages.some((s) => s.count > 0)
-  const maxCount = Math.max(1, ...stages.map((s) => s.count))
+  // Alto o bastante para parear com a rosca ao lado (as duas ficam na mesma linha do Painel).
+  const height = Math.max(260, data.length * 64 + 40)
+
+  const Tip = makeTooltip<(typeof data)[number]>((row) => ({
+    title: row.label,
+    rows: [
+      { label: 'Negócios', value: String(row.count), color: FUNNEL_COLOR[row.key] },
+      { label: `Do total de ${rows[0]?.label.toLowerCase() ?? ''}`, value: bps(row.ofBaseBps, 0) },
+      ...(row.dropFromPreviousCount > 0 ? [{ label: 'Pararam na etapa anterior', value: String(row.dropFromPreviousCount) }] : []),
+    ],
+  }))
 
   return (
     <ChartFrame
       isEmpty={!hasData}
-      emptyTitle="Nenhuma cotação ainda"
-      emptyBody="Salve uma cotação para o funil aparecer aqui."
+      emptyTitle="Nenhum negócio ainda"
+      emptyBody="Crie um orçamento ou salve uma cotação para o funil aparecer aqui."
       table={{
-        caption: 'Cotações por etapa do funil',
-        rows: stages,
+        caption: 'Negócios por etapa do funil',
+        rows: data,
         columns: [
           { header: 'Etapa', value: (row) => row.label },
-          { header: 'Cotações', value: (row) => String(row.count), align: 'right' },
-          { header: 'Participação', value: (row) => bps(row.shareBps, 0), align: 'right' },
-          { header: 'Queda desde a etapa anterior', value: (row) => String(row.dropFromPreviousCount), align: 'right' },
+          { header: 'Negócios', value: (row) => String(row.count), align: 'right' },
+          { header: `Do total de ${rows[0]?.label.toLowerCase() ?? ''}`, value: (row) => bps(row.ofBaseBps, 0), align: 'right' },
+          { header: 'Pararam na etapa anterior', value: (row) => String(row.dropFromPreviousCount), align: 'right' },
         ],
       }}
-      note="Etapas inferidas do status atual de cada cotação, não de um histórico de transições. Uma cotação que já foi rejeitada e depois reaprovada conta como aprovada, não como reprovada no caminho."
+      note={`Etapas inferidas do estágio atual, não de um histórico.${rows.length < stages.length ? ' Sem rascunhos, "Criados" seria igual a "Enviados" e fica de fora.' : ''} Com retorno: em negociação, pausado, aprovado ou recusado.`}
     >
-      <div className="stack stack--tight">
-        {stages.map((stage, i) => (
-          <div key={stage.key} className="stack" style={{ gap: 4 }}>
-            <div className="row row--between" style={{ fontSize: 'var(--text-sm)' }}>
-              <span>{stage.label}</span>
-              <span className="tabular">
-                <strong>{stage.count}</strong>
-                <span className="muted"> · {bps(stage.shareBps, 0)}</span>
-              </span>
-            </div>
-            <div
-              style={{
-                height: 10,
-                borderRadius: 999,
-                background: 'var(--surface-muted)',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  height: '100%',
-                  width: `${maxCount > 0 ? (stage.count / maxCount) * 100 : 0}%`,
-                  background: theme.primary,
-                  borderRadius: 999,
-                }}
-              />
-            </div>
-            {i > 0 && stage.dropFromPreviousCount > 0 && (
-              <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-                {stage.dropFromPreviousCount} não passaram desta etapa
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
+      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={height}>
+        <BarChart data={data} layout="vertical" margin={{ top: 6, right: 64, bottom: 4, left: 4 }}>
+          <CartesianGrid {...gridProps(theme)} vertical horizontal={false} />
+          <XAxis
+            type="number"
+            domain={[0, Math.max(1, base)]}
+            ticks={[...new Set([0, Math.round(base / 2), Math.max(1, base)])]}
+            allowDecimals={false}
+            {...axisProps(theme)}
+          />
+          <YAxis type="category" dataKey="label" width={96} {...axisProps(theme)} />
+          <Tooltip content={<Tip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
+          <Bar isAnimationActive={false} dataKey="count" maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius}>
+            {data.map((row) => (
+              <Cell key={row.key} fill={FUNNEL_COLOR[row.key] ?? theme.primary} />
+            ))}
+            <LabelList
+              dataKey="ofBaseBps"
+              position="right"
+              formatter={(value: unknown) => bps(Number(value), 0)}
+              fill={theme.axisText}
+              fontSize={11}
+            />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </ChartFrame>
   )
 }

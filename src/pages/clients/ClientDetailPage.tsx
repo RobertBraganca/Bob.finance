@@ -6,6 +6,7 @@ import { bps, date as fmtDate, money, period as fmtPeriod } from '../../lib/form
 import { DEAL_STAGE_LABEL, DEAL_STAGE_TONE } from '@shared/deals'
 import { PageHeader } from '../../components/shell/Shell'
 import { Button, Card, ConfirmDeleteModal, EmptyState, Field, Icon, KpiTile, Modal, SkeletonLines, TextInput, useToast } from '../../components/ui'
+import { EditQuoteModal, type Quote } from '../Pricing'
 import { ClientFormModal } from './ClientFormModal'
 import {
   CLIENT_KIND_LABEL,
@@ -41,6 +42,20 @@ export function ClientDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [contact, setContact] = useState<ClientContact | 'new' | null>(null)
   const [aliasDraft, setAliasDraft] = useState('')
+  const [editingQuote, setEditingQuote] = useState<Quote | null>(null)
+  const openQuote = async (quoteId: number) => {
+    try {
+      const { quotes } = await queryClient.fetchQuery({
+        queryKey: ['pricing-quotes'],
+        queryFn: () => api.get<{ quotes: Quote[] }>('/pricing/quotes'),
+      })
+      const found = quotes.find((q) => q.id === quoteId)
+      if (found) setEditingQuote(found)
+      else toast('cotação não encontrada', 'error')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'falha ao abrir a cotação', 'error')
+    }
+  }
 
   const detail = useQuery({
     queryKey: ['client', id],
@@ -300,8 +315,7 @@ export function ClientDetailPage() {
                     </thead>
                     <tbody>
                       {c.deals.map((d) => {
-                        const open = () =>
-                          navigate(d.kind === 'proposal' ? `/precificacao/orcamentos/${d.id}` : `/precificacao?aba=cotacoes`)
+                        const open = () => (d.kind === 'proposal' ? navigate(`/precificacao/orcamentos/${d.id}`) : void openQuote(d.id))
                         return (
                           <tr key={`${d.kind}-${d.id}`} tabIndex={0} onClick={open} onKeyDown={(event) => event.key === 'Enter' && open()}>
                             <td data-label="__lead">
@@ -377,6 +391,7 @@ export function ClientDetailPage() {
       </div>
 
       {editing && c && <ClientFormModal client={c} onClose={() => setEditing(false)} />}
+      {editingQuote && <EditQuoteModal quote={editingQuote} onClose={() => setEditingQuote(null)} />}
       {contact && c && <ContactModal clientId={c.id} contact={contact === 'new' ? null : contact} onClose={() => setContact(null)} onSaved={refresh} />}
       {deleting && c && (
         <ConfirmDeleteModal
