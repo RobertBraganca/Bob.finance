@@ -6,7 +6,7 @@ import { ZodError } from 'zod'
 import { requireAdmin } from '../_shared/auth.ts'
 import { assistantApplyRequest, assistantMessageRequest, assistantUndoRequest } from '../_shared/core/assistantTypes.ts'
 import { applyProposal, undoApplied } from '../_shared/services/assistant/apply.ts'
-import { assistantHttpError, handleMessage, optionsFromEnv } from '../_shared/services/assistant/service.ts'
+import { assistantHttpError, describeUnexpected, handleMessage, optionsFromEnv } from '../_shared/services/assistant/service.ts'
 
 /**
  * Assistente em linguagem natural (docs/specs/assistente/spec.md). Porta de
@@ -28,7 +28,8 @@ app.onError((error, c) => {
   const mapped = assistantHttpError(error)
   if (mapped) return c.json(mapped.body, mapped.status as 400)
   console.error(error)
-  return c.json({ error: 'erro interno' }, 500)
+  // Diz o que quebrou (nome e mensagem, sem segredo); o log tem o erro inteiro.
+  return c.json({ error: 'erro interno', detail: describeUnexpected(error, Deno.env.get('ASSISTANT_API_KEY')) }, 500)
 })
 
 app.post('/message', async (c) =>

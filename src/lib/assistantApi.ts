@@ -93,10 +93,11 @@ export function toAssistantFailure(error: unknown): AssistantFailure {
     if (error.code && KNOWN_CODES.has(error.code)) {
       return { ...failureOf(error.code as AssistantErrorCode), ...(error.detail ? { detail: error.detail } : {}) }
     }
+    const withDetail = (failure: AssistantFailure): AssistantFailure => (error.detail ? { ...failure, detail: error.detail } : failure)
     // Função ainda não publicada ou fora do ar: o servidor não deu um `code`.
-    if ([404, 502, 503, 504].includes(error.status)) return failureOf('unavailable')
-    if (error.status === 429) return failureOf('rate_limited')
-    return failureOf('unknown')
+    if ([404, 502, 503, 504].includes(error.status)) return withDetail(failureOf('unavailable'))
+    if (error.status === 429) return withDetail(failureOf('rate_limited'))
+    return withDetail(failureOf('unknown'))
   }
   // `fetch` rejeita com TypeError quando não há rede.
   if (error instanceof TypeError || (typeof navigator !== 'undefined' && navigator.onLine === false)) {

@@ -14,7 +14,7 @@ import {
   type ModelRequest,
   type ModelResponse,
 } from '../../server/src/services/assistant/intent'
-import { optionsFromEnv } from '../../server/src/services/assistant/service'
+import { describeUnexpected, optionsFromEnv } from '../../server/src/services/assistant/service'
 import type { AssistantCandidate, AssistantContext } from '../../shared/assistantTypes'
 
 /**
@@ -379,4 +379,19 @@ test('400 que não é sobre thinking não repete a chamada', async () => {
   }) as unknown as typeof fetch
   await assert.rejects(createGeminiCaller({ apiKey: KEY, fetchImpl })(REQ), (e: unknown) => (e as AssistantUnavailableError).status === 400)
   assert.equal(calls, 1)
+})
+
+/* ------------------------------------------------------------------ *
+ * Erro inesperado: o motivo aparece, sem segredo
+ * ------------------------------------------------------------------ */
+test('describeUnexpected: nome e mensagem, cortados em 160 e sem chave nenhuma', () => {
+  const error = new TypeError(`falhou com x-goog-api-key ${KEY} e sk-ant-abc123_def e AIzaSyA1234567890123456789012 e AQ.OutraChaveDeTeste123`)
+  const text = describeUnexpected(error, KEY)
+  assert.match(text, /^TypeError: falhou/)
+  for (const secret of [KEY, 'sk-ant-abc123_def', 'AIzaSyA1234567890123456789012', 'AQ.OutraChaveDeTeste123']) {
+    assert.ok(!text.includes(secret), `não pode vazar ${secret}`)
+  }
+  assert.ok(text.includes('[chave]'))
+  assert.ok(describeUnexpected(new Error('x'.repeat(500))).length <= 160)
+  assert.equal(describeUnexpected('texto solto'), 'Erro: texto solto')
 })
