@@ -41,8 +41,11 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | und
 
 const LEDGER_PREFIXES = ['/accounts', '/profiles', '/imports', '/categories', '/rules', '/transactions', '/bank-connections']
 
-function functionFor(path: string): 'pricing' | 'ledger' | 'insights' | 'assistant' {
+function functionFor(path: string): 'pricing' | 'ledger' | 'insights' | 'assistant' | 'accountant' {
   if (path === '/pricing' || path.startsWith('/pricing/')) return 'pricing'
+  // Área do contador (docs/specs/tarefas-comercial-contador): função própria, a única
+  // que aceita outro login além do dono; o caminho já traz o nome dela, como `/pricing`.
+  if (path === '/accountant' || path.startsWith('/accountant/')) return 'accountant'
   // Assistente em linguagem natural (specs/assistente): função Edge própria,
   // `${SUPABASE_URL}/functions/v1/assistant${path}` (mesma regra de `ledger`).
   if (path === '/assistant' || path.startsWith('/assistant/')) return 'assistant'
@@ -54,7 +57,7 @@ function functionFor(path: string): 'pricing' | 'ledger' | 'insights' | 'assista
 function resolveUrl(path: string): string {
   if (!SUPABASE_URL) return `/api${path}`
   const fn = functionFor(path)
-  return fn === 'pricing' ? `${SUPABASE_URL}/functions/v1${path}` : `${SUPABASE_URL}/functions/v1/${fn}${path}`
+  return fn === 'pricing' || fn === 'accountant' ? `${SUPABASE_URL}/functions/v1${path}` : `${SUPABASE_URL}/functions/v1/${fn}${path}`
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

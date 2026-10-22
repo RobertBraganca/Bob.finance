@@ -29,6 +29,8 @@ import * as propertyPlans from '../_shared/services/propertyPlans.ts'
 import * as quotesService from '../_shared/services/quotes.ts'
 import * as simulatorService from '../_shared/services/simulator.ts'
 import * as subscriptionsService from '../_shared/services/subscriptions.ts'
+import * as tasksService from '../_shared/services/tasks.ts'
+import * as google from '../_shared/services/googleCalendar.ts'
 import { ledgerBounds } from '../_shared/services/transactions.ts'
 import { accountFlows } from '../_shared/services/transfers.ts'
 
@@ -136,6 +138,7 @@ app.onError((error, c) => {
   if (error instanceof budgetService.BudgetError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
   if (error instanceof investments.InvestmentRuleError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
   if (error instanceof debtService.DebtError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
+  if (error instanceof tasksService.TaskError || error instanceof google.GoogleCalendarError) return c.json({ error: error.message }, 422)
   console.error(error)
   return c.json({ error: friendlyErrorMessage(error) }, 500)
 })
@@ -549,6 +552,87 @@ app.post('/financial-health/closing-checklist', async (c) => {
   await monthlyClosingService.setClosingReview(body.period, body.reviewed)
   return c.json(await monthlyClosingService.closingChecklist(body.period))
 })
+
+// ---- tarefas financeiras (docs/specs/tarefas-comercial-contador, fase 1) ----
+const taskDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+const taskFields = {
+  title: z.string().trim().min(1).max(160),
+  kind: z.enum(['custom', 'nf']).optional(),
+  clientId: z.number().int().positive().nullable().optional(),
+  amountCents: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
+  notes: z.string().max(1000).nullable().optional(),
+  recurrence: z.enum(['once', 'monthly', 'yearly']).optional(),
+  dueOn: taskDate.nullable().optional(),
+  dueDay: z.number().int().min(1).max(31).nullable().optional(),
+  dueMonth: z.number().int().min(1).max(12).nullable().optional(),
+  startsOn: taskDate.nullable().optional(),
+  endsOn: taskDate.nullable().optional(),
+  active: z.boolean().optional(),
+}
+const taskIdParam = z.object({ id: z.coerce.number().int().positive() })
+
+app.get('/tasks', async (c) => {
+  const query = z.object({ from: taskDate.optional(), to: taskDate.optional() }).parse(c.req.query())
+  const fallback = tasksService.defaultWindow()
+  return c.json(await tasksService.listTasks({ from: query.from ?? fallback.from, to: query.to ?? fallback.to }))
+})
+app.get('/tasks/manual', async (c) => c.json({ tasks: await tasksService.listManualTasks() }))
+const googleConfig = () => google.googleConfigFromEnv((name) => Deno.env.get(name))
+const googleMissing = { error: 'o acesso ao Google ainda não foi configurado no servidor' }
+
+app.post('/tasks', async (c) => {
+  const task = await tasksService.createTask(z.object(taskFields).parse(await c.req.json()))
+  await google.syncQuietly(googleConfig())
+  return c.json(task)
+})
+app.patch('/tasks/:id', async (c) => {
+  const task = await tasksService.updateTask(taskIdParam.parse(c.req.param()).id, z.object(taskFields).partial().parse(await c.req.json()))
+  if (!task) return c.json({ error: 'tarefa não encontrada' }, 404)
+  await google.syncQuietly(googleConfig())
+  return c.json(task)
+})
+app.delete('/tasks/:id', async (c) => {
+  const result = await tasksService.deleteTask(taskIdParam.parse(c.req.param()).id)
+  await google.syncQuietly(googleConfig())
+  return c.json(result)
+})
+app.post('/tasks/complete', async (c) => {
+  const body = z
+    .object({
+      key: z.string().min(3).max(120),
+      done: z.boolean(),
+      status: z.enum(['done', 'skipped']).optional(),
+      reference: z.string().max(120).nullable().optional(),
+      note: z.string().max(500).nullable().optional(),
+    })
+    .parse(await c.req.json())
+  const result = body.done ? await tasksService.completeTask(body.key, body) : await tasksService.reopenTask(body.key)
+  await google.syncQuietly(googleConfig(), [body.key])
+  return c.json(result)
+})
+
+// ---- Google Agenda (fase 3) ----
+app.get('/google/status', async (c) => c.json(await google.status(googleConfig())))
+app.post('/google/auth-url', async (c) => {
+  const config = googleConfig()
+  if (!config) return c.json(googleMissing, 422)
+  const { state } = z.object({ state: z.string().min(8).max(120) }).parse(await c.req.json())
+  return c.json({ url: google.authUrl(config, state) })
+})
+app.post('/google/connect', async (c) => {
+  const config = googleConfig()
+  if (!config) return c.json(googleMissing, 422)
+  const { code } = z.object({ code: z.string().min(4).max(2000) }).parse(await c.req.json())
+  await google.connect(config, code)
+  await google.syncQuietly(config)
+  return c.json(await google.status(config))
+})
+app.post('/google/sync', async (c) => {
+  const config = googleConfig()
+  if (!config) return c.json(googleMissing, 422)
+  return c.json(await google.sync(config))
+})
+app.delete('/google/connection', async (c) => c.json(await google.disconnect(googleConfig())))
 
 app.get('/financial-health/runway', async (c) => {
   const query = z.object({ liquidClasses: z.string().optional() }).parse(c.req.query())
@@ -1357,6 +1441,8 @@ app.get('/partners', async (c) => {
   const query = rangeQuery.parse(c.req.query())
   return c.json(await partners.partnerOverview(await resolveRange(query)))
 })
+
+app.get('/partners/recurring', async (c) => c.json(await partners.partnersRecurring()))
 
 app.get('/partners/evolution', async (c) => {
   const query = z.object({ months: z.coerce.number().int().min(2).max(60).default(12) }).parse(c.req.query())

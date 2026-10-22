@@ -59,6 +59,8 @@ import { SpendingPaceChart, type SpendingPacePoint } from '../components/charts/
 import { AnnualPaceChart, type AnnualPacePoint } from '../components/charts/AnnualPaceChart'
 import { SpendingHeatmap } from '../components/charts/SpendingHeatmap'
 import { AnnualSpendingHeatmap } from '../components/charts/AnnualSpendingHeatmap'
+import { TasksTodayCard } from './tasks/TasksTodayCard'
+import { HealthSummaryCard } from './health/HealthCards'
 
 type DashboardResponse = {
   range: { from: string; to: string }
@@ -348,6 +350,12 @@ export function Dashboard() {
         <Bento>
           <SpendingPaceCard span={6} range={range} />
           <HistoryCard span={6} range={range} />
+        </Bento>
+
+        {/* Tarefas e a Saúde financeira dissolvida (docs/specs/tarefas-comercial-contador). */}
+        <Bento>
+          <TasksTodayCard span={6} />
+          <HealthSummaryCard span={6} />
         </Bento>
 
         <Card title="Pendências e sugestões">

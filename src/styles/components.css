@@ -3337,3 +3337,80 @@ button {
   border-radius: var(--r-pill);
   background: var(--seq-600);
 }
+
+/* Tarefas financeiras (docs/specs/tarefas-comercial-contador). */
+.task-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--sp-3);
+  align-items: start;
+  min-height: 44px;
+  padding: var(--sp-2);
+  border-radius: var(--r-md);
+}
+.task-row:hover {
+  background: var(--surface-hover);
+}
+.task-row .checkbox {
+  margin-top: 2px;
+}
+.task-row__auto {
+  display: inline-flex;
+  width: 18px;
+  justify-content: center;
+  margin-top: 2px;
+  color: var(--ink-3);
+}
+.task-row__body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.task-row__title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.task-row--done .task-row__title {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+.task-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--sp-2);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+.task-row--overdue .task-row__meta > span:nth-child(2) {
+  color: var(--status-warning);
+  font-weight: 600;
+}
+.task-row__end {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--text-sm);
+}
+
+/* App do contador (docs/specs/tarefas-comercial-contador, fase 5): uma tela só, sem a sidebar. */
+.accountant-app {
+  min-height: 100vh;
+  background: var(--bg, var(--surface));
+}
+.accountant-app__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}

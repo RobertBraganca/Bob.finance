@@ -31,7 +31,6 @@ import {
   type AssumptionBag,
   type MeterState,
 } from '../components/ui'
-import { PageHeader } from '../components/shell/Shell'
 import {
   PartnerEvolutionChart,
   type PartnerEvolutionData,
@@ -128,10 +127,14 @@ function withdrawalState(platform: PlatformRow): { state: MeterState; label: str
   return { state: 'at_risk', label: closeToMinimum ? 'Quase no mínimo' : 'Abaixo do mínimo' }
 }
 
-export function PartnersPage() {
+/**
+ * Aba Parceiros de Comercial (docs/specs/tarefas-comercial-contador, fase 2): era
+ * a página "Receita de parceiros"; agora mora em Comercial, ao lado de Negócios e
+ * Clientes. O botão de cadastrar plataforma fica no cabeçalho de Comercial.
+ */
+export function PartnersTab({ adding, onAdd, onCloseAdding }: { adding: boolean; onAdd: () => void; onCloseAdding: () => void }) {
   const meta = useMeta()
   const [period, setPeriod] = useState(() => currentPeriod())
-  const [addingPlatform, setAddingPlatform] = useState(false)
   const [editing, setEditing] = useState<PlatformRow | null>(null)
   const [addingCommission, setAddingCommission] = useState<PlatformRow | null>(null)
   const [withdrawing, setWithdrawing] = useState<PlatformRow | null>(null)
@@ -157,18 +160,10 @@ export function PartnersPage() {
 
   return (
     <>
-      <PageHeader
-        title="Receita de parceiros"
-        subtitle="Comissões acumuladas nas plataformas e o que já virou dinheiro em conta"
-        actions={
-          <Button variant="primary" icon="plus" onClick={() => setAddingPlatform(true)}>
-            Cadastrar plataforma
-          </Button>
-        }
-        filters={<PeriodNav period={period} onChange={setPeriod} />}
-      />
-
-      <div className="page">
+      <div className="stack stack--loose">
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <PeriodNav period={period} onChange={setPeriod} />
+        </div>
         <Bento>
           <Slab span={6} accent>
             <HeroFigure
@@ -250,7 +245,7 @@ export function PartnersPage() {
                 title="Nenhuma plataforma cadastrada"
                 body="Cadastre Wbuy, Hostinger, Nuvemshop ou qualquer parceiro que pague comissão para acompanhar o saldo e o mínimo de saque."
                 action={
-                  <Button variant="primary" size="sm" icon="plus" onClick={() => setAddingPlatform(true)}>
+                  <Button variant="primary" size="sm" icon="plus" onClick={onAdd}>
                     Cadastrar plataforma
                   </Button>
                 }
@@ -285,7 +280,7 @@ export function PartnersPage() {
         </Bento>
       </div>
 
-      {addingPlatform && <PlatformModal onClose={() => setAddingPlatform(false)} />}
+      {adding && <PlatformModal onClose={onCloseAdding} />}
       {editing && <PlatformModal platform={editing} onClose={() => setEditing(null)} />}
       {addingCommission && (
         <CommissionModal platform={addingCommission} onClose={() => setAddingCommission(null)} />

@@ -38,32 +38,56 @@ const verified = new Map<string, { userId: string; expiresAt: number }>()
  * de verdade contra o servidor de Auth do Supabase — não é só decodificar o
  * JWT localmente sem checar assinatura/expiração.
  */
+/** Verifica o token com o servidor de Auth (com o cache curto acima) e devolve o id do usuário, ou null. */
+async function verifiedUserId(token: string): Promise<string | null> {
+  const now = Date.now()
+  const cached = verified.get(token)
+  if (cached && cached.expiresAt > now) return cached.userId
+
+  const { data, error } = await authClient.auth.getUser(token)
+  if (error || !data.user) return null
+  if (verified.size >= MAX_CACHE_ENTRIES) {
+    // App de um usuário só: nunca deveria crescer de verdade, isto é só
+    // um teto de segurança contra o Map crescer sem limite.
+    const oldestKey = verified.keys().next().value
+    if (oldestKey !== undefined) verified.delete(oldestKey)
+  }
+  verified.set(token, { userId: data.user.id, expiresAt: now + CACHE_TTL_MS })
+  return data.user.id
+}
+
 export async function requireAdmin(c: Context, next: Next) {
   const authHeader = c.req.header('Authorization')
   const token = authHeader?.replace(/^Bearer\s+/i, '')
   if (!token) return c.json({ error: 'não autenticado' }, 401)
 
-  const now = Date.now()
-  const cached = verified.get(token)
-  let userId: string
-
-  if (cached && cached.expiresAt > now) {
-    userId = cached.userId
-  } else {
-    const { data, error } = await authClient.auth.getUser(token)
-    if (error || !data.user) return c.json({ error: 'sessão inválida ou expirada' }, 401)
-    userId = data.user.id
-
-    if (verified.size >= MAX_CACHE_ENTRIES) {
-      // App de um usuário só: nunca deveria crescer de verdade, isto é só
-      // um teto de segurança contra o Map crescer sem limite.
-      const oldestKey = verified.keys().next().value
-      if (oldestKey !== undefined) verified.delete(oldestKey)
-    }
-    verified.set(token, { userId, expiresAt: now + CACHE_TTL_MS })
-  }
-
+  const userId = await verifiedUserId(token)
+  if (!userId) return c.json({ error: 'sessão inválida ou expirada' }, 401)
   if (userId !== ADMIN_USER_ID) return c.json({ error: 'acesso negado' }, 403)
 
   await next()
+}
+
+export type AccessRole = 'owner' | 'accountant'
+
+/**
+ * Só para a função `accountant` (docs/specs/tarefas-comercial-contador, fase 5):
+ * aceita o dono ou um contador ATIVO em `app_users` (convidado e não revogado).
+ * Todas as outras funções continuam com `requireAdmin`, só o dono. O papel fica
+ * em `c.get('role')` para as rotas que só o dono pode usar.
+ */
+export function requireAccountAccess(isActiveAccountant: (userId: string) => Promise<boolean>) {
+  return async (c: Context, next: Next) => {
+    const token = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '')
+    if (!token) return c.json({ error: 'não autenticado' }, 401)
+    const userId = await verifiedUserId(token)
+    if (!userId) return c.json({ error: 'sessão inválida ou expirada' }, 401)
+    let role: AccessRole
+    if (userId === ADMIN_USER_ID) role = 'owner'
+    else if (await isActiveAccountant(userId)) role = 'accountant'
+    else return c.json({ error: 'acesso negado' }, 403)
+    c.set('role', role)
+    c.set('userId', userId)
+    await next()
+  }
 }

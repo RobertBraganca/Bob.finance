@@ -116,6 +116,17 @@ export async function companySettings() {
   }
 }
 
+/**
+ * O DAS para as tarefas (docs/specs/tarefas-comercial-contador): o valor do mês
+ * e o último pago na conta PJ. Mesma leitura do resumo da Minha empresa.
+ */
+export async function dasStatus() {
+  const row = await settingsRow()
+  const das = await dasCategoryIds(row)
+  const last = row?.pjAccountId ? await lastDasPaid(row.pjAccountId, das.ids) : null
+  return { dasMonthlyCents: row?.dasMonthlyCents ?? last?.cents ?? 0, lastPaid: last }
+}
+
 export async function saveCompanySettings(input: {
   dasMonthlyCents: number | null
   pjCushionMonths: number

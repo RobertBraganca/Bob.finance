@@ -8,6 +8,10 @@ import { telemetry } from './lib/telemetry'
 import { useAuth } from './lib/auth'
 import { useUserProfile } from './lib/store'
 import { LoginPage } from './pages/Login'
+import { AccessDenied, AccountantApp, SetPasswordPage } from './pages/accountant/AccountantApp'
+import { api } from './lib/api'
+import { arrivedToSetPassword } from './lib/supabaseClient'
+import { useQuery } from '@tanstack/react-query'
 import { NotFoundPage, RouteErrorBoundary, clearChunkReloadFlag } from './components/shell/RouteErrorBoundary'
 
 /**
@@ -34,11 +38,13 @@ const PatrimonioPage = lazy(() => import('./pages/Patrimonio').then((m) => ({ de
 const FinancialHealthPage = lazy(() =>
   import('./pages/FinancialHealth').then((m) => ({ default: m.FinancialHealthPage })),
 )
+const AccountantPage = lazy(() => import('./pages/accountant/AccountantPage').then((m) => ({ default: m.AccountantPage })))
+const TasksPage = lazy(() => import('./pages/tasks/TasksPage').then((m) => ({ default: m.TasksPage })))
+const GoogleCallbackPage = lazy(() => import('./pages/tasks/GoogleCalendarCard').then((m) => ({ default: m.GoogleCallbackPage })))
 const PricingPage = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.PricingPage })))
 const ProposalFormPage = lazy(() => import('./pages/proposals/ProposalFormPage').then((m) => ({ default: m.ProposalFormPage })))
 const ProposalDetailPage = lazy(() => import('./pages/proposals/ProposalDetailPage').then((m) => ({ default: m.ProposalDetailPage })))
 const ClientDetailPage = lazy(() => import('./pages/clients/ClientDetailPage').then((m) => ({ default: m.ClientDetailPage })))
-const PartnersPage = lazy(() => import('./pages/Partners').then((m) => ({ default: m.PartnersPage })))
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })))
 const ProfilePage = lazy(() => import('./pages/Profile').then((m) => ({ default: m.ProfilePage })))
 
@@ -94,6 +100,8 @@ function PortWarning() {
 /** Uma feature por rota — chave de log de uso, não rótulo de UI. */
 const FEATURE_BY_PATH: Record<string, string> = {
   '/': 'dashboard',
+  '/tarefas': 'tasks',
+  '/contador': 'accountant',
   '/diario': 'daily',
   '/lancamentos': 'transactions',
   '/dre': 'dre',
@@ -128,12 +136,14 @@ function usePageViewTelemetry() {
 /** Mesmo rótulo do item de navegação lateral (Shell.tsx) para cada rota. */
 const PAGE_TITLE_BY_PATH: Record<string, string> = {
   '/': 'Visão geral',
+  '/tarefas': 'Tarefas',
+  '/contador': 'Contador',
   '/patrimonio': 'Patrimônio',
   '/diario': 'Diário',
   '/lancamentos': 'Lançamentos',
   '/dre': 'Minha empresa',
   '/saude': 'Saúde financeira',
-  '/precificacao': 'Precificação',
+  '/precificacao': 'Comercial',
   '/parceiros': 'Receita de parceiros',
   '/metas': 'Orçamento',
   '/dividas': 'Endividamento',
@@ -208,6 +218,9 @@ function AuthedApp() {
               <Route path="/investimentos" element={<InvestmentsPage />} />
               <Route path="/patrimonio" element={<PatrimonioPage />} />
               <Route path="/saude" element={<FinancialHealthPage />} />
+              <Route path="/tarefas" element={<TasksPage />} />
+              <Route path="/tarefas/google" element={<GoogleCallbackPage />} />
+              <Route path="/contador" element={isPersonalAccount ? <Navigate to="/" replace /> : <AccountantPage />} />
               <Route
                 path="/precificacao"
                 element={isPersonalAccount ? <Navigate to="/" replace /> : <PricingPage />}
@@ -232,7 +245,7 @@ function AuthedApp() {
               />
               <Route
                 path="/parceiros"
-                element={isPersonalAccount ? <Navigate to="/" replace /> : <PartnersPage />}
+                element={<Navigate to={isPersonalAccount ? '/' : '/precificacao?aba=parceiros'} replace />}
               />
               <Route path="/importar" element={<ImportPage />} />
               <Route path="/categorias" element={<CategoriesPage />} />
@@ -276,5 +289,32 @@ export function App() {
   if (loading) return null
   if (!session) return <LoginPage />
 
-  return <AuthedApp />
+  return <RoleGate userId={session.user.id} />
+}
+
+/**
+ * Quem entrou (docs/specs/tarefas-comercial-contador, fase 5): o dono vai direto
+ * para o app, sem chamada extra (o id dele é o mesmo fixo do servidor); qualquer
+ * outro login pergunta à função `accountant` se é um contador ativo. Quem veio
+ * pelo link do convite define a senha primeiro.
+ */
+const OWNER_USER_ID = '23d255ea-c812-4733-aaff-fdb3ef838117'
+
+function RoleGate({ userId }: { userId: string }) {
+  const [settingPassword, setSettingPassword] = useState(arrivedToSetPassword)
+  const isOwner = userId === OWNER_USER_ID
+  const me = useQuery({
+    queryKey: ['accountant', 'me', userId],
+    queryFn: () => api.get<{ role: 'owner' | 'accountant'; email: string | null }>('/accountant/me'),
+    enabled: !isOwner,
+    retry: false,
+    staleTime: Infinity,
+  })
+
+  if (settingPassword) return <SetPasswordPage onDone={() => setSettingPassword(false)} />
+  if (isOwner) return <AuthedApp />
+  if (me.isPending) return null
+  if (me.data?.role === 'accountant') return <AccountantApp email={me.data.email} />
+  if (me.data?.role === 'owner') return <AuthedApp />
+  return <AccessDenied />
 }

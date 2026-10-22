@@ -581,3 +581,39 @@ export async function getPlatform(id: number): Promise<PlatformRow | null> {
     from p`)
   return rows[0] ? withProgress(rows[0]) : null
 }
+
+/**
+ * Receita recorrente de plataformas (docs/specs/tarefas-comercial-contador,
+ * fase 2): a média mensal das comissões GANHAS nos 3 últimos meses fechados,
+ * por plataforma. Fica ao lado do MRR de serviços, nunca somada nele: comissão
+ * não é contrato, varia todo mês e só vira dinheiro no saque.
+ */
+export const RECURRING_WINDOW_MONTHS = 3
+
+export async function partnersRecurring(today = todayIso()) {
+  const current = today.slice(0, 7)
+  const first = addMonths(current, -RECURRING_WINDOW_MONTHS)
+  const rows = await db
+    .select({
+      platformId: partnerCommissions.platformId,
+      name: partnerPlatforms.name,
+      cents: sql<string>`sum(${partnerCommissions.amountCents})`,
+    })
+    .from(partnerCommissions)
+    .innerJoin(partnerPlatforms, eq(partnerPlatforms.id, partnerCommissions.platformId))
+    .where(sql`${partnerCommissions.earnedOn} >= ${`${first}-01`} and ${partnerCommissions.earnedOn} < ${`${current}-01`}`)
+    .groupBy(partnerCommissions.platformId, partnerPlatforms.name)
+  const byPlatform = rows
+    .map((r) => ({ platformId: r.platformId, name: r.name, monthlyAvgCents: Math.round(Number(r.cents) / RECURRING_WINDOW_MONTHS) }))
+    .filter((r) => r.monthlyAvgCents > 0)
+    .sort((a, b) => b.monthlyAvgCents - a.monthlyAvgCents)
+  return {
+    monthlyAvgCents: byPlatform.reduce((sum, r) => sum + r.monthlyAvgCents, 0),
+    byPlatform,
+    window: { from: first, to: addMonths(current, -1) },
+    assumptions: {
+      formula: `média mensal das comissões ganhas de ${first} a ${addMonths(current, -1)} (os ${RECURRING_WINDOW_MONTHS} últimos meses fechados), pela data em que foram ganhas`,
+      separado: 'fica ao lado do MRR de serviços, não somado nele: comissão varia todo mês e só vira dinheiro no saque',
+    },
+  }
+}

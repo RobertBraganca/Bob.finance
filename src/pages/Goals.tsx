@@ -37,6 +37,7 @@ import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
 import { Link } from 'react-router-dom'
 import { BudgetOverview } from './budget/BudgetOverview'
+import { RiskRadarCard } from './health/HealthCards'
 
 type CapProgress = {
   categoryId: number
@@ -328,6 +329,9 @@ export function GoalsPage() {
                 </div>
               )}
             </Card>
+
+            {/* Veio da Saúde financeira (docs/specs/tarefas-comercial-contador). */}
+            <RiskRadarCard span={12} period={period} />
 
             <Card span={12} title="Histórico de metas" subtitle="Meses que bateram todos os alvos definidos">
               <div className="bento" style={{ gap: 'var(--sp-3)' }}>
