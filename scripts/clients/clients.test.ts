@@ -74,6 +74,26 @@ test('recorrência: marcado, 3 meses com receita ou 2 negócios aprovados; senã
   assert.equal(one.mrrCents, 0, 'quem não é recorrente não entra no MRR')
 })
 
+test('contrato encerrado: sai da recorrência e do MRR, mas o LTV e o histórico ficam', () => {
+  const months = new Map([['2026-07', 40_000], ['2026-08', 40_000], ['2026-09', 40_000]])
+  const live = computeClientMetrics({ ...base, flaggedRecurring: true, realizedByPeriod: months })
+  const ended = computeClientMetrics({ ...base, flaggedRecurring: true, realizedByPeriod: months, contractEnded: true })
+  assert.equal(live.mrrCents, 40_000)
+  assert.equal(ended.isRecurring, false)
+  assert.equal(ended.recurringReason, null)
+  assert.equal(ended.mrrCents, 0)
+  assert.equal(ended.ltvRealizedCents, 120_000)
+  assert.equal(ended.monthsWithRevenue, 3)
+  const overview = summarizeClients([
+    { id: 1, name: 'Ativo', kind: 'company', status: 'active', metrics: live },
+    { id: 2, name: 'Encerrado', kind: 'company', status: 'ended', metrics: ended },
+  ])
+  assert.equal(overview.activeClients, 1)
+  assert.equal(overview.recurringClients, 1)
+  assert.equal(overview.mrrCents, 40_000)
+  assert.equal(overview.ltvRealizedCents, 240_000)
+})
+
 test('MRR: média dos 3 meses FECHADOS (o mês corrente fica fora)', () => {
   const m = computeClientMetrics({
     ...base,
@@ -144,6 +164,7 @@ const loaded = hasDb
 const MIGRATION = [
   '../../supabase/migrations/20261021120000_clients_and_deals.sql',
   '../../supabase/migrations/20261021180000_client_transaction_links.sql',
+  '../../supabase/migrations/20261021210000_client_status_ended.sql',
 ]
   .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8'))
   .join('\n')

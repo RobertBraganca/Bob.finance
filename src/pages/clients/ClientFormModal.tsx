@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
-import { Button, Field, Modal, Segmented, TextArea, TextInput, useToast } from '../../components/ui'
+import { Button, Field, Modal, Segmented, Select, TextArea, TextInput, useToast } from '../../components/ui'
 import { CLIENT_KIND_LABEL, CLIENT_STATUS_LABEL, type ClientKind, type ClientRecord, type ClientStatus } from './types'
 
 type Form = {
@@ -127,14 +127,21 @@ export function ClientFormModal({
               options={(Object.keys(CLIENT_KIND_LABEL) as ClientKind[]).map((value) => ({ value, label: CLIENT_KIND_LABEL[value] }))}
             />
           </div>
-          <div className="field">
-            <span className="field__label">Situação</span>
-            <Segmented
-              ariaLabel="Situação do cliente"
-              value={form.status}
-              onChange={(status) => update({ status })}
-              options={(Object.keys(CLIENT_STATUS_LABEL) as ClientStatus[]).map((value) => ({ value, label: CLIENT_STATUS_LABEL[value] }))}
-            />
+          {/* Menu, não botões: com "Contrato encerrado" as quatro opções não cabem lado a lado no celular. */}
+          <div className="field" style={{ flex: '1 1 200px', minWidth: 0 }}>
+            <Field label="Situação">
+              {(id) => (
+                <Select
+                  id={id}
+                  value={form.status}
+                  onChange={(status) => status && update({ status })}
+                  options={(Object.keys(CLIENT_STATUS_LABEL) as ClientStatus[]).map((value) => ({ value, label: CLIENT_STATUS_LABEL[value] }))}
+                />
+              )}
+            </Field>
+            {form.status === 'ended' && (
+              <span className="field__hint">O histórico continua no LTV; o cliente sai dos ativos, dos recorrentes e do MRR.</span>
+            )}
           </div>
         </div>
         <div className="form-grid">

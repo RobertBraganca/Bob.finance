@@ -42,7 +42,7 @@ import { PricingError } from './pricing'
 
 export const CLIENT_KINDS = ['lead', 'company', 'person'] as const
 export type ClientKind = (typeof CLIENT_KINDS)[number]
-export const CLIENT_STATUSES = ['active', 'inactive', 'archived'] as const
+export const CLIENT_STATUSES = ['active', 'inactive', 'ended', 'archived'] as const
 export type ClientStatus = (typeof CLIENT_STATUSES)[number]
 
 export type ClientInput = {
@@ -266,6 +266,7 @@ function metricsFor(client: ClientRecord, revenue: LinkedRevenue[], deals: Clien
   return computeClientMetrics({
     currentPeriod,
     flaggedRecurring: client.isRecurring,
+    contractEnded: client.status === 'ended',
     realizedByPeriod,
     pendingCents,
     approvedDealCents: deals.filter((d) => d.stage === 'approved').map((d) => d.valueCents),

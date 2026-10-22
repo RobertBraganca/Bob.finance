@@ -6,13 +6,20 @@ import type { ClientMetrics, ClientsOverview, DealStage } from '@shared/deals'
  */
 
 export type ClientKind = 'lead' | 'company' | 'person'
-export type ClientStatus = 'active' | 'inactive' | 'archived'
+export type ClientStatus = 'active' | 'inactive' | 'ended' | 'archived'
 
 export const CLIENT_KIND_LABEL: Record<ClientKind, string> = { lead: 'Lead', company: 'Empresa', person: 'Pessoa' }
-export const CLIENT_STATUS_LABEL: Record<ClientStatus, string> = { active: 'Ativo', inactive: 'Inativo', archived: 'Arquivado' }
+export const CLIENT_STATUS_LABEL: Record<ClientStatus, string> = {
+  active: 'Ativo',
+  inactive: 'Inativo',
+  ended: 'Contrato encerrado',
+  archived: 'Arquivado',
+}
 export const CLIENT_STATUS_BADGE: Record<ClientStatus, string> = {
   active: 'badge badge--good',
   inactive: 'badge',
+  // Não é ruim nem bom: o trabalho terminou. Âmbar só para destacar de "Ativo" na lista.
+  ended: 'badge badge--warning',
   archived: 'badge',
 }
 
