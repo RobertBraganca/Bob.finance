@@ -65,6 +65,8 @@ export type ClientMetricsInput = {
   currentPeriod: string
   /** marcado pelo usuário */
   flaggedRecurring: boolean
+  /** situação "Contrato encerrado": o histórico fica, mas não há receita recorrente a esperar */
+  contractEnded?: boolean
   /** receita que de fato entrou, por mês */
   realizedByPeriod: Map<string, number>
   /** receita a receber ligada ao cliente (pendências) */
@@ -105,7 +107,10 @@ export function computeClientMetrics(input: ClientMetricsInput): ClientMetrics {
     if (cents > 0) months += 1
   }
   const approvedDeals = input.approvedDealCents.length
-  const recurringReason: ClientMetrics['recurringReason'] = input.flaggedRecurring
+  // Contrato encerrado: deixa de ser recorrente e o MRR zera; LTV e histórico continuam.
+  const recurringReason: ClientMetrics['recurringReason'] = input.contractEnded
+    ? null
+    : input.flaggedRecurring
     ? 'flag'
     : months >= RECURRING_MIN_MONTHS
       ? 'months'
@@ -148,9 +153,9 @@ export type ClientsOverview = {
   openPipelineCents: number
 }
 
-/** Soma da carteira. Clientes arquivados ficam fora; lead não conta como cliente ativo. */
+/** Soma da carteira. Clientes arquivados ficam fora; lead não conta como cliente ativo; contrato encerrado conta no LTV, não no MRR (as métricas dele já vêm sem recorrência). */
 export function summarizeClients(
-  rows: Array<{ id: number; name: string; kind: 'lead' | 'company' | 'person'; status: 'active' | 'inactive' | 'archived'; metrics: ClientMetrics }>,
+  rows: Array<{ id: number; name: string; kind: 'lead' | 'company' | 'person'; status: 'active' | 'inactive' | 'ended' | 'archived'; metrics: ClientMetrics }>,
 ): ClientsOverview {
   const live = rows.filter((r) => r.status !== 'archived')
   const customers = live.filter((r) => r.kind !== 'lead')

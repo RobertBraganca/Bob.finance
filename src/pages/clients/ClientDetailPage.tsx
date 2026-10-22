@@ -187,8 +187,16 @@ export function ClientDetailPage() {
               <KpiTile
                 label="MRR"
                 value={m.isRecurring ? money(m.mrrCents) : '-'}
-                foot={<span>{m.recurringReason ? `recorrente: ${RECURRING_REASON_LABEL[m.recurringReason]}` : 'não é recorrente'}</span>}
-                assumptions={{ formula: 'Para cliente recorrente, a média da receita dos 3 últimos meses fechados.' }}
+                foot={
+                  <span>
+                    {m.recurringReason
+                      ? `recorrente: ${RECURRING_REASON_LABEL[m.recurringReason]}`
+                      : c.status === 'ended'
+                        ? 'contrato encerrado'
+                        : 'não é recorrente'}
+                  </span>
+                }
+                assumptions={{ formula: 'Para cliente recorrente, a média da receita dos 3 últimos meses fechados. Com o contrato encerrado, o MRR zera e o histórico continua no LTV.' }}
               />
               <KpiTile
                 label="Taxa de aprovação"

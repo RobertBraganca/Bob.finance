@@ -1287,7 +1287,7 @@ export const pricingMultiplierOptions = pgTable(
  * `client_id`; o `client_label` continua sendo o nome que sai no documento.
  * ------------------------------------------------------------------ */
 export const clientKindEnum = pgEnum('client_kind', ['lead', 'company', 'person'])
-export const clientStatusEnum = pgEnum('client_status', ['active', 'inactive', 'archived'])
+export const clientStatusEnum = pgEnum('client_status', ['active', 'inactive', 'ended', 'archived'])
 
 export const clients = pgTable(
   'clients',
