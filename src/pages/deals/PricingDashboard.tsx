@@ -45,6 +45,13 @@ export function PricingDashboard() {
     queryFn: () => api.get<ClientsResponse>('/pricing/clients'),
   })
   const services = useServiceCatalog()
+  const platforms = useQuery({
+    queryKey: ['partners-recurring'],
+    queryFn: () =>
+      api.get<{ monthlyAvgCents: number; byPlatform: Array<{ platformId: number; name: string; monthlyAvgCents: number }>; assumptions: { formula: string; separado: string } }>(
+        '/partners/recurring',
+      ),
+  })
 
   const s = summary.data
   const o = clients.data?.overview
@@ -86,11 +93,23 @@ export function PricingDashboard() {
           foot={s ? <span>{s.decidedCount === 0 ? 'nenhum respondido ainda' : `de ${s.decidedCount} respondidos`}</span> : undefined}
           assumptions={{ formula: s?.assumptions.taxa ?? '' }}
         />
+        {/* Serviços e plataformas lado a lado, o total por cima (fase 2 do Comercial). */}
         <KpiTile
-          label="MRR"
-          value={o ? money(o.mrrCents) : '-'}
-          foot={o ? <span>{o.recurringClients === 1 ? '1 cliente recorrente' : `${o.recurringClients} clientes recorrentes`}</span> : undefined}
-          assumptions={{ formula: clients.data?.assumptions.mrr ?? '', recorrente: clients.data?.assumptions.recorrente ?? '' }}
+          label="Receita recorrente"
+          value={o && platforms.data ? money(o.mrrCents + platforms.data.monthlyAvgCents) : '-'}
+          foot={
+            o && platforms.data ? (
+              <span>
+                serviços {money(o.mrrCents)} · plataformas {money(platforms.data.monthlyAvgCents)}
+              </span>
+            ) : undefined
+          }
+          assumptions={{
+            servicos: clients.data?.assumptions.mrr ?? '',
+            recorrente: clients.data?.assumptions.recorrente ?? '',
+            plataformas: platforms.data?.assumptions.formula ?? '',
+            separado: platforms.data?.assumptions.separado ?? '',
+          }}
         />
       </div>
 

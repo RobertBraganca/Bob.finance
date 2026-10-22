@@ -26,7 +26,9 @@
     "regras:locais": "tsx scripts/apply-local-rules.ts",
     "recolor:categories": "tsx scripts/recolor-categories.ts",
     "test:assistant": "tsx --test scripts/assistant/*.test.ts",
-    "test:clients": "tsx --test scripts/clients/*.test.ts"
+    "test:clients": "tsx --test scripts/clients/*.test.ts",
+    "test:tasks": "tsx --test scripts/tasks/*.test.ts",
+    "test:accountant": "tsx --test scripts/accountant/*.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

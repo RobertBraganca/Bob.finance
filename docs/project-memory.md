@@ -1602,3 +1602,27 @@ enxugar telas repetidas, textos técnicos e menu.
 - Deploy: migração antes da função `pricing` (as leituras de cotação e orçamento
   já selecionam `client_id`).
 
+
+## 22/10/2026 — Tarefas, Comercial, Google Agenda e contador (specs/tarefas-comercial-contador)
+
+- Tarefas: as automáticas são CALCULADAS na leitura (`services/tasks.ts`), a partir
+  das fontes que já existem; só as manuais e o "feito" são gravados (`tasks`,
+  `task_completions`, chave estável por ocorrência: `manual:12:2026-11-05`,
+  `das:2026-11`, `card:3:...`, `closing:2026-09:dre-review`). Pendência e saque
+  não se concluem por aqui (some ao baixar ou sacar).
+- Saúde financeira fora do menu: peças em `src/pages/health/healthParts.tsx`,
+  cards em `HealthCards.tsx`; `/saude` continua com os ajustes.
+- Comercial = `/precificacao` com aba Parceiros; plataformas AO LADO do MRR
+  (`partners.partnersRecurring`, média de 3 meses fechados por `earned_on`).
+- Google Agenda: OAuth com retorno pelo próprio site (`/tarefas/google`) e o
+  código enviado com a sessão; refresh token só no banco. `syncQuietly` depois de
+  mexer numa tarefa; erro fica em `last_error`. Precisa de GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI nos secrets. App OAuth em modo de
+  teste expira o acesso em 7 dias: publicar.
+- Contador: função `accountant` é a ÚNICA que aceita outro login
+  (`requireAccountAccess` em `_shared/auth.ts`); todas as outras seguem
+  `requireAdmin`. Recorte por lista de permissão em `services/accountantView.ts`
+  (teste confere que nada pessoal sai). O front decide pelo id do dono
+  (`OWNER_USER_ID` em `App.tsx`, o mesmo de `auth.ts`); outro login pergunta a
+  `/accountant/me`. Pacotes no bucket `accountant-packages` (dono grava; links
+  assinados de 7 dias). Deploy da `accountant` com `--no-verify-jwt`.

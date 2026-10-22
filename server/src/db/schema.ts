@@ -1670,3 +1670,81 @@ export const assistantActions = pgTable(
     index('assistant_actions_created_idx').on(t.createdAt),
   ],
 )
+
+/* ------------------------------------------------------------------ *
+ * Tarefas financeiras (docs/specs/tarefas-comercial-contador, fase 1).
+ * As automáticas são calculadas na leitura; aqui só as manuais e o "feito".
+ * ------------------------------------------------------------------ */
+export const taskKindEnum = pgEnum('task_kind', ['custom', 'nf'])
+export const taskRecurrenceEnum = pgEnum('task_recurrence', ['once', 'monthly', 'yearly'])
+
+export const tasks = pgTable(
+  'tasks',
+  {
+    id: id(),
+    title: text('title').notNull(),
+    kind: taskKindEnum('kind').notNull().default('custom'),
+    clientId: int('client_id').references(() => clients.id, { onDelete: 'set null' }),
+    amountCents: int('amount_cents'),
+    notes: text('notes'),
+    recurrence: taskRecurrenceEnum('recurrence').notNull().default('once'),
+    dueOn: text('due_on'),
+    dueDay: int('due_day'),
+    dueMonth: int('due_month'),
+    startsOn: text('starts_on'),
+    endsOn: text('ends_on'),
+    active: boolean('active').notNull().default(true),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [index('tasks_active_idx').on(t.active), index('tasks_client_idx').on(t.clientId)],
+)
+
+export const taskCompletions = pgTable(
+  'task_completions',
+  {
+    id: id(),
+    taskKey: text('task_key').notNull(),
+    status: text('status').notNull().default('done'),
+    reference: text('reference'),
+    note: text('note'),
+    doneAt: text('done_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('task_completions_key_uq').on(t.taskKey)],
+)
+
+/* ------------------------------------------------------------------ *
+ * Google Agenda (docs/specs/tarefas-comercial-contador, fase 3)
+ * ------------------------------------------------------------------ */
+export const googleCalendarConnection = pgTable('google_calendar_connection', {
+  id: bigint('id', { mode: 'number' }).primaryKey().default(1),
+  email: text('email'),
+  refreshToken: text('refresh_token').notNull(),
+  calendarId: text('calendar_id').notNull().default('primary'),
+  connectedAt: text('connected_at').notNull().default(now),
+  lastSyncAt: text('last_sync_at'),
+  lastError: text('last_error'),
+})
+
+export const googleCalendarEvents = pgTable(
+  'google_calendar_events',
+  {
+    id: id(),
+    taskKey: text('task_key').notNull(),
+    eventId: text('event_id').notNull(),
+    signature: text('signature').notNull(),
+    syncedAt: text('synced_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('google_calendar_events_key_uq').on(t.taskKey)],
+)
+
+/* ------------------------------------------------------------------ *
+ * Acesso do contador (docs/specs/tarefas-comercial-contador, fase 5)
+ * ------------------------------------------------------------------ */
+export const appUsers = pgTable('app_users', {
+  userId: uuid('user_id').primaryKey(),
+  email: text('email').notNull(),
+  role: text('role').notNull().default('accountant'),
+  invitedAt: text('invited_at').notNull().default(now),
+  revokedAt: text('revoked_at'),
+})

@@ -19,4 +19,11 @@ const FALLBACK_SUPABASE_ANON_KEY =
 const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || FALLBACK_SUPABASE_URL
 const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || FALLBACK_SUPABASE_ANON_KEY
 
+/**
+ * Chegou por um link de convite ou de nova senha (docs/specs/tarefas-comercial-contador,
+ * fase 5)? Lido ANTES de criar o client, que consome o `#access_token=...` da URL.
+ * O app então pede para a pessoa definir a senha antes de seguir.
+ */
+export const arrivedToSetPassword = typeof window !== 'undefined' && /type=(invite|recovery)/.test(window.location.hash)
+
 export const supabase = createClient(url, anonKey)

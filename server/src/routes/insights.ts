@@ -1431,6 +1431,7 @@ export async function insightsRoutes(app: FastifyInstance) {
     return partners.partnerOverview(await resolveRange(query))
   })
 
+  app.get('/partners/recurring', async () => partners.partnersRecurring())
   app.get('/partners/evolution', async (req) => {
     const query = z.object({ months: z.coerce.number().int().min(2).max(60).default(12) }).parse(req.query)
     return partners.partnerEvolution(query.months)

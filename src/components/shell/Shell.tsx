@@ -44,25 +44,29 @@ type NavItem = {
 type NavSection = { label: string; items: NavItem[] }
 
 const NAV_SECTIONS: NavSection[] = [
+  // Ordem pedida pelo usuário em 22/10/2026: o que se olha todo dia primeiro. A Saúde
+  // financeira saiu do menu (dissolvida em Visão geral, Orçamento e Tarefas); `/saude`
+  // continua no ar para os detalhes e os ajustes.
   {
     label: 'Acompanhar',
     items: [
       { to: '/', label: 'Visão geral', icon: 'dashboard' },
+      // Tarefas (docs/specs/tarefas-comercial-contador): o que vence, de todas as telas.
+      { to: '/tarefas', label: 'Tarefas', icon: 'check' },
       { to: '/patrimonio', label: 'Patrimônio', icon: 'layers' },
-      { to: '/diario', label: 'Diário', icon: 'calendar' },
-      { to: '/lancamentos', label: 'Lançamentos', icon: 'list' },
       { to: '/dre', label: 'Minha empresa', icon: 'scale' },
+      { to: '/lancamentos', label: 'Lançamentos', icon: 'list' },
+      { to: '/diario', label: 'Diário', icon: 'calendar' },
     ],
   },
   {
     label: 'Planejar',
     items: [
-      { to: '/saude', label: 'Saúde financeira', icon: 'sparkle' },
-      { to: '/precificacao', label: 'Precificação', icon: 'calculator', freelancerOnly: true },
-      { to: '/parceiros', label: 'Receita de parceiros', icon: 'banknote', freelancerOnly: true },
       { to: '/metas', label: 'Orçamento', icon: 'target' },
-      { to: '/dividas', label: 'Endividamento', icon: 'landmark' },
       { to: '/investimentos', label: 'Investimentos', icon: 'trending' },
+      { to: '/dividas', label: 'Endividamento', icon: 'landmark' },
+      // Comercial: Precificação e Receita de parceiros juntas (`/parceiros` abre a aba Parceiros).
+      { to: '/precificacao', label: 'Comercial', icon: 'calculator', freelancerOnly: true },
     ],
   },
 ]
@@ -81,6 +85,8 @@ const SETTINGS_NAV: NavItem[] = [
   { to: '/cartoes', label: 'Cartões', icon: 'wallet' },
   { to: '/categorias', label: 'TAGs e regras', icon: 'tags' },
   { to: '/importar', label: 'Importar', icon: 'upload' },
+  // Contador (docs/specs/tarefas-comercial-contador): pacote do mês e acesso só leitura da parte PJ.
+  { to: '/contador', label: 'Contador', icon: 'file', freelancerOnly: true },
 ]
 
 function isNavActive(pathname: string, to: string) {
@@ -157,7 +163,7 @@ export function Sidebar() {
               {uncategorized === 0 && !settingsOpen && <SidebarMenuBadge>comece aqui</SidebarMenuBadge>}
               {settingsOpen && (
                 <SidebarMenuSub>
-                  {SETTINGS_NAV.map((item) => (
+                  {SETTINGS_NAV.filter((item) => !item.freelancerOnly || !isPersonalAccount).map((item) => (
                     <SidebarMenuSubItem key={item.to}>
                       <SidebarMenuSubButton
                         isActive={location.pathname === item.to}

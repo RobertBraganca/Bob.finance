@@ -34,6 +34,7 @@ import { PricingDashboard } from './deals/PricingDashboard'
 import { ClientsTab } from './clients/ClientsTab'
 import { ClientPicker } from './clients/ClientPicker'
 import { ServicesTab } from './services/ServicesTab'
+import { PartnersTab } from './Partners'
 import { IssuerCard } from './proposals/IssuerCard'
 import { todayIso } from '../lib/period'
 
@@ -121,20 +122,23 @@ type PricingSettings = { availableHoursPerMonth: number; billablePercentageBps: 
 
 type DirectCostDraft = { label: string; value: string }
 
-type PricingTab = 'painel' | 'negocios' | 'clientes' | 'servicos' | 'parametros'
-const PRICING_TABS: PricingTab[] = ['painel', 'negocios', 'clientes', 'servicos', 'parametros']
+type PricingTab = 'painel' | 'negocios' | 'clientes' | 'servicos' | 'parceiros' | 'parametros'
+const PRICING_TABS: PricingTab[] = ['painel', 'negocios', 'clientes', 'servicos', 'parceiros', 'parametros']
 
 const TAB_SUBTITLE: Record<PricingTab, string> = {
   painel: 'O resumo dos seus negócios: funil, valor por estágio, clientes e serviços',
   negocios: 'Orçamentos e cotações numa lista só, do rascunho à aprovação',
   clientes: 'Quem compra de você: contatos, negócios e quanto já entrou de cada um',
   servicos: 'O que você vende, com preço de partida e o que cada serviço já rendeu',
+  parceiros: 'Comissões das plataformas parceiras e o que já virou dinheiro em conta',
   parametros: 'Horas, multiplicadores e o que entra no cálculo do preço',
 }
 
 export function PricingPage() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
+  // Comercial (docs/specs/tarefas-comercial-contador, fase 2): Precificação e
+  // Receita de parceiros numa seção só; `/parceiros` abre a aba Parceiros.
   // A aba vive no endereço (`?aba=clientes`), como em Investimentos. O Painel
   // é a padrão e herdou os gráficos da antiga aba Cotações (as cotações em si
   // estão em Negócios); `?aba=cotacoes` e o antigo `?aba=orcamentos` caem
@@ -153,11 +157,12 @@ export function PricingPage() {
   const [simulating, setSimulating] = useState(false)
   const [creatingClient, setCreatingClient] = useState(false)
   const [creatingService, setCreatingService] = useState(false)
+  const [addingPlatform, setAddingPlatform] = useState(false)
 
   return (
     <>
       <PageHeader
-        title="Precificação"
+        title="Comercial"
         subtitle={TAB_SUBTITLE[tab]}
         filters={
           <Segmented
@@ -170,6 +175,7 @@ export function PricingPage() {
               { value: 'negocios', label: 'Negócios' },
               { value: 'clientes', label: 'Clientes' },
               { value: 'servicos', label: 'Serviços' },
+              { value: 'parceiros', label: 'Parceiros' },
               { value: 'parametros', label: 'Parâmetros' },
             ]}
           />
@@ -192,6 +198,10 @@ export function PricingPage() {
             <Button variant="primary" icon="plus" onClick={() => setCreatingService(true)}>
               Novo serviço
             </Button>
+          ) : tab === 'parceiros' ? (
+            <Button variant="primary" icon="plus" onClick={() => setAddingPlatform(true)}>
+              Cadastrar plataforma
+            </Button>
           ) : undefined
         }
       />
@@ -204,6 +214,8 @@ export function PricingPage() {
           <ClientsTab creating={creatingClient} onCreate={() => setCreatingClient(true)} onCloseCreate={() => setCreatingClient(false)} />
         ) : tab === 'servicos' ? (
           <ServicesTab creating={creatingService} onCloseCreate={() => setCreatingService(false)} />
+        ) : tab === 'parceiros' ? (
+          <PartnersTab adding={addingPlatform} onAdd={() => setAddingPlatform(true)} onCloseAdding={() => setAddingPlatform(false)} />
         ) : (
           <ParamsTab />
         )}
