@@ -8,6 +8,7 @@ import { telemetry } from './lib/telemetry'
 import { useAuth } from './lib/auth'
 import { useUserProfile } from './lib/store'
 import { LoginPage } from './pages/Login'
+import { PrivacyPage } from './pages/PrivacyPage'
 import { AccessDenied, AccountantApp, SetPasswordPage } from './pages/accountant/AccountantApp'
 import { api } from './lib/api'
 import { arrivedToSetPassword } from './lib/supabaseClient'
@@ -138,6 +139,7 @@ const PAGE_TITLE_BY_PATH: Record<string, string> = {
   '/': 'Visão geral',
   '/tarefas': 'Tarefas',
   '/contador': 'Contador',
+  '/privacidade': 'Política de privacidade',
   '/patrimonio': 'Patrimônio',
   '/diario': 'Diário',
   '/lancamentos': 'Lançamentos',
@@ -282,6 +284,9 @@ export function App() {
       </Suspense>
     )
   }
+
+  // Política de privacidade: pública, sem login (o Google exige para publicar o app OAuth).
+  if (location.pathname === '/privacidade') return <PrivacyPage />
 
   // Nada renderiza (nem a tela de login) até saber se já existe uma sessão
   // salva — evita o flash de "login" antes do redirect silencioso de quem
