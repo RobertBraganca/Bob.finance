@@ -34,3 +34,6 @@ docs/beta-reviews/
 
 # gerado por `deno check` local
 supabase/functions/*/deno.lock
+
+# Cliente OAuth do Google (segredo): nunca no git
+credentials.json
