@@ -331,6 +331,68 @@ test('barato indisponível e forte também: o erro sobe (nada a aproveitar)', as
   )
 })
 
+test('cliente: 503 "high demand" passageiro, tenta de novo e segue com a resposta', async () => {
+  let calls = 0
+  const fetchImpl = (async () => {
+    calls += 1
+    return calls === 1
+      ? json({ error: { status: 'UNAVAILABLE', message: 'This model is currently experiencing high demand.' } }, 503)
+      : json({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] })
+  }) as unknown as typeof fetch
+  const res = await createGeminiCaller({ apiKey: KEY, fetchImpl })(REQ)
+  assert.equal(calls, 2)
+  assert.equal(res.stop_reason, 'end_turn')
+})
+
+test('cliente: 503 que não passa, desiste depois de duas novas tentativas com o status', async () => {
+  let calls = 0
+  const fetchImpl = (async () => {
+    calls += 1
+    return json({ error: { status: 'UNAVAILABLE', message: 'high demand' } }, 503)
+  }) as unknown as typeof fetch
+  await assert.rejects(createGeminiCaller({ apiKey: KEY, fetchImpl })(REQ), (e: unknown) => (e as AssistantUnavailableError).status === 503)
+  assert.equal(calls, 3)
+})
+
+test('cliente: erro de pedido (400 sem "thinking") não tenta de novo', async () => {
+  let calls = 0
+  const fetchImpl = (async () => {
+    calls += 1
+    return json({ error: { status: 'INVALID_ARGUMENT', message: 'bad field' } }, 400)
+  }) as unknown as typeof fetch
+  await assert.rejects(createGeminiCaller({ apiKey: KEY, fetchImpl })(REQ))
+  assert.equal(calls, 1)
+})
+
+test('barato sobrecarregado (503): o forte responde e vale a proposta dele', async () => {
+  const seenModels: string[] = []
+  const callModel: ModelCaller = async (req) => {
+    seenModels.push(req.model)
+    if (req.model === 'modelo-barato') throw new AssistantUnavailableError('O modelo respondeu com erro (HTTP 503).', 'http', 503, 'UNAVAILABLE: high demand')
+    return submit({ summary: 'Preciso de mais um dado.', actions: [], questions: ['Em qual conta foi o pix?'] })
+  }
+  const result = await proposeFromText('Gastei R$ 16,00 hoje na padaria', CTX, {
+    apiKey: KEY,
+    tools: emptyTools(),
+    callModel,
+    models: { cheap: 'modelo-barato', strong: 'modelo-forte' },
+  })
+  assert.deepEqual(seenModels, ['modelo-barato', 'modelo-forte'])
+  assert.equal(result.model, 'modelo-forte')
+  assert.equal(result.escalated, true)
+  assert.deepEqual(result.proposal.questions, ['Em qual conta foi o pix?'])
+})
+
+test('barato e forte sobrecarregados: sobe o erro do primeiro, com o status 503', async () => {
+  const callModel: ModelCaller = async (req) => {
+    throw new AssistantUnavailableError('O modelo respondeu com erro (HTTP 503).', 'http', 503, `UNAVAILABLE: ${req.model}`)
+  }
+  await assert.rejects(
+    proposeFromText('Gastei R$ 16,00 hoje na padaria', CTX, { apiKey: KEY, tools: emptyTools(), callModel, models: { cheap: 'a', strong: 'b' } }),
+    (error: unknown) => error instanceof AssistantUnavailableError && error.status === 503 && /UNAVAILABLE: a/.test(error.detail ?? ''),
+  )
+})
+
 test('modelo barato igual ao forte: não escala (gastaria cota à toa)', async () => {
   let calls = 0
   const callModel: ModelCaller = async () => {

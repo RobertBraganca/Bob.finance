@@ -105,6 +105,28 @@ export function providerOfKey(apiKey: string): AssistantProvider {
 }
 // 30 s por chamada: os modelos "pensantes" (Gemini 3) levaram mais de 20 s com o raciocínio padrão.
 export const DEFAULT_TIMEOUT_MS = 30_000
+
+/**
+ * Erros passageiros do provedor: limite momentâneo (429), modelo sobrecarregado
+ * (503 "high demand", 529 na Anthropic) ou falha do lado deles (500, 502, 504).
+ * Vale tentar de novo, ou outro modelo; erro de chave ou de pedido, não.
+ */
+export const TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504, 529])
+/** Pausas entre as novas tentativas da MESMA chamada (só se couberem no prazo). */
+export const RETRY_DELAYS_MS = [800, 2_000]
+
+export function isTransientUnavailable(error: unknown): boolean {
+  return error instanceof AssistantUnavailableError && error.status !== undefined && TRANSIENT_STATUSES.has(error.status)
+}
+
+const pause = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer)
+      resolve()
+    }, { once: true })
+  })
 /** Chamadas ao modelo por conversa (ferramentas de leitura + a proposta). */
 export const MAX_TOOL_TURNS = 4
 const MAX_OUTPUT_TOKENS = 1024
@@ -387,12 +409,26 @@ export function createGeminiCaller(opts: AnthropicCallerOptions): ModelCaller {
             body: JSON.stringify(toGeminiBody(req, { thinking })),
             signal: controller.signal,
           })
-        res = await send(true)
+        const started = Date.now()
+        let thinking = true
+        res = await send(thinking)
         // Modelo que não conhece `thinkingLevel` responde 400 falando de "thinking": uma nova
         // tentativa sem a opção, em vez de derrubar a conversa.
         if (res.status === 400) {
           const detail = await describeApiError(res.clone(), opts.apiKey)
-          if (detail && /thinking/i.test(detail)) res = await send(false)
+          if (detail && /thinking/i.test(detail)) {
+            thinking = false
+            res = await send(thinking)
+          }
+        }
+        // Sobrecarga passageira (503 "high demand", 429): espera um pouco e tenta de novo,
+        // até duas vezes, só enquanto couber no prazo da chamada.
+        for (const delay of RETRY_DELAYS_MS) {
+          if (!TRANSIENT_STATUSES.has(res.status)) break
+          if (Date.now() - started + delay + 5_000 > timeoutMs) break
+          await pause(delay, controller.signal)
+          if (controller.signal.aborted) break
+          res = await send(thinking)
         }
         if (!res.ok) {
           throw new AssistantUnavailableError(
@@ -850,24 +886,44 @@ export async function proposeFromText(text: string, ctx: AssistantContext, deps:
   }
   const counter = { calls: 0 }
 
-  const cheap = await runModel(models.cheap, phrase, ctx, deps.tools, call, seen, counter)
-  let chosen = cheap
+  // Modelo rápido sobrecarregado (503, 429): o forte é outro modelo, com outra fila. Tenta
+  // ele antes de desistir; se também falhar, vale o erro do primeiro.
+  let cheap: Run | null = null
+  let fallback: Run | null = null
   let escalated = false
-  const cheapFailed = cheap.result === null
-  const onlyQuestions = cheap.result !== null && cheap.result.proposal.actions.length === 0
-  // Escalar para o MESMO modelo só gastaria cota; e um forte indisponível (modelo aposentado, limite da
-  // camada gratuita) não pode derrubar o que o barato já entregou.
-  if ((cheapFailed || (onlyQuestions && looksClear(phrase))) && models.strong !== models.cheap) {
+  try {
+    cheap = await runModel(models.cheap, phrase, ctx, deps.tools, call, seen, counter)
+  } catch (error) {
+    if (!isTransientUnavailable(error) || models.strong === models.cheap) throw error
     escalated = true
-    let strong: Run | null
+    let strong: Run
     try {
       strong = await runModel(models.strong, phrase, ctx, deps.tools, call, seen, counter)
-    } catch (error) {
-      if (cheap.result !== null && error instanceof AssistantUnavailableError) strong = null
-      else throw error
+    } catch {
+      throw error
     }
-    // O forte vale se entregou algo; senão, fica o que o barato tinha (se tinha).
-    if (strong && strong.result !== null) chosen = strong
+    if (strong.result === null) throw error
+    fallback = strong
+  }
+
+  let chosen: Run = fallback ?? cheap!
+  if (cheap) {
+    const cheapFailed = cheap.result === null
+    const onlyQuestions = cheap.result !== null && cheap.result.proposal.actions.length === 0
+    // Escalar para o MESMO modelo só gastaria cota; e um forte indisponível (modelo aposentado, limite da
+    // camada gratuita) não pode derrubar o que o barato já entregou.
+    if ((cheapFailed || (onlyQuestions && looksClear(phrase))) && models.strong !== models.cheap) {
+      escalated = true
+      let strong: Run | null
+      try {
+        strong = await runModel(models.strong, phrase, ctx, deps.tools, call, seen, counter)
+      } catch (error) {
+        if (cheap.result !== null && error instanceof AssistantUnavailableError) strong = null
+        else throw error
+      }
+      // O forte vale se entregou algo; senão, fica o que o barato tinha (se tinha).
+      if (strong && strong.result !== null) chosen = strong
+    }
   }
 
   if (chosen.result === null) {

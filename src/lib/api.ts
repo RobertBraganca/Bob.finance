@@ -46,8 +46,10 @@ function functionFor(path: string): 'pricing' | 'ledger' | 'insights' | 'assista
   // Área do contador (docs/specs/tarefas-comercial-contador): função própria, a única
   // que aceita outro login além do dono; o caminho já traz o nome dela, como `/pricing`.
   if (path === '/accountant' || path.startsWith('/accountant/')) return 'accountant'
-  // Assistente em linguagem natural (specs/assistente): função Edge própria,
-  // `${SUPABASE_URL}/functions/v1/assistant${path}` (mesma regra de `ledger`).
+  // Assistente em linguagem natural (specs/assistente): função Edge própria. O caminho
+  // já traz o nome dela (`/assistant/message`), então vai como `/pricing`:
+  // `${SUPABASE_URL}/functions/v1/assistant/message`. Até 28/10/2026 ele ia com o nome
+  // duas vezes e a função respondia 404: o assistente nunca chegava ao modelo.
   if (path === '/assistant' || path.startsWith('/assistant/')) return 'assistant'
   if (LEDGER_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}?`)))
     return 'ledger'
@@ -57,7 +59,10 @@ function functionFor(path: string): 'pricing' | 'ledger' | 'insights' | 'assista
 function resolveUrl(path: string): string {
   if (!SUPABASE_URL) return `/api${path}`
   const fn = functionFor(path)
-  return fn === 'pricing' || fn === 'accountant' ? `${SUPABASE_URL}/functions/v1${path}` : `${SUPABASE_URL}/functions/v1/${fn}${path}`
+  // Funções cujos caminhos já começam com o nome delas; `ledger` e `insights` não.
+  return fn === 'pricing' || fn === 'accountant' || fn === 'assistant'
+    ? `${SUPABASE_URL}/functions/v1${path}`
+    : `${SUPABASE_URL}/functions/v1/${fn}${path}`
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
