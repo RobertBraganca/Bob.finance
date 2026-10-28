@@ -824,10 +824,12 @@ test('resposta do modelo sem lista de conteúdo (JSON quebrado) vira unavailable
   )
 })
 
-test('erro do modelo no meio do laço: sem retry, nada de proposta parcial', async () => {
+test('erro do modelo no meio do laço: tenta o modelo forte uma vez e, sem resposta, sobe o erro (nada de proposta parcial)', async () => {
   let calls = 0
-  const caller: ModelCaller = async () => {
+  const models: string[] = []
+  const caller: ModelCaller = async (req) => {
     calls += 1
+    models.push(req.model)
     if (calls === 1) return read('search_pending', { text: 'Coral' })
     throw new AssistantUnavailableError('O modelo respondeu com erro (HTTP 503).', 'http', 503)
   }
@@ -835,7 +837,9 @@ test('erro do modelo no meio do laço: sem retry, nada de proposta parcial', asy
     proposeFromText('Muda a data da Coral', CTX, { apiKey: 'sk-ant-test-secret', callModel: caller, tools: fakeTools().tools }),
     unavailable('http'),
   )
-  assert.equal(calls, 2)
+  // barato: leitura + o 503; forte: uma chamada, também 503
+  assert.equal(calls, 3)
+  assert.notEqual(models[2], models[0])
 })
 
 /* ---- cliente padrão (fetch simulado, sem rede) ---- */
