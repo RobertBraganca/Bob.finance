@@ -3400,6 +3400,156 @@ button {
   gap: 2px;
   font-size: var(--text-sm);
 }
+.task-row__end .select--pill {
+  margin-left: var(--sp-2);
+}
+
+/* Kanban das tarefas: seis colunas que rolam na horizontal; cada uma rola na vertical. */
+.kanban {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(260px, 1fr);
+  gap: var(--sp-3);
+  overflow-x: auto;
+  padding-bottom: var(--sp-2);
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
+}
+.kanban__col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: min(72vh, 820px);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface-muted);
+  scroll-snap-align: start;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+.kanban__col--over {
+  border-color: var(--brand-line);
+  background: var(--brand-wash);
+}
+.kanban__col--locked {
+  opacity: 0.55;
+}
+.kanban__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.kanban__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.kanban__col--overdue .kanban__title {
+  color: var(--status-warning);
+}
+.kanban__count {
+  min-width: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  font-size: var(--text-xs);
+  text-align: center;
+  color: var(--ink-2);
+}
+.kanban__hint {
+  margin: 2px 0 var(--sp-2);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+.kanban__list {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-2);
+  flex: 1;
+  min-height: 64px;
+  margin: 0;
+  padding: 0 2px 2px;
+  overflow-y: auto;
+  list-style: none;
+}
+.kanban__empty {
+  display: grid;
+  place-items: center;
+  min-height: 64px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+.kanban-card {
+  display: grid;
+  gap: 6px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.kanban-card--movable {
+  cursor: grab;
+}
+.kanban-card--movable:active {
+  cursor: grabbing;
+}
+.kanban-card--dragging {
+  opacity: 0.4;
+}
+.kanban-card__title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.kanban-card--done .kanban-card__title {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+.kanban-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--sp-2);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+.kanban-card__meta strong {
+  margin-left: auto;
+  color: var(--ink-1);
+}
+.kanban-card__late {
+  color: var(--status-warning);
+  font-weight: 600;
+}
+.kanban-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 28px;
+}
+.kanban-card__auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kanban__col {
+    transition: none;
+  }
+}
+@media (max-width: 640px) {
+  .kanban {
+    grid-auto-columns: 84%;
+  }
+}
 
 /* App do contador (docs/specs/tarefas-comercial-contador, fase 5): uma tela só, sem a sidebar. */
 .accountant-app {

@@ -610,6 +610,18 @@ app.post('/tasks/complete', async (c) => {
   await google.syncQuietly(googleConfig(), [body.key])
   return c.json(result)
 })
+app.post('/tasks/stage', async (c) => {
+  const body = z
+    .object({
+      key: z.string().min(3).max(120),
+      stage: z.enum(['overdue', 'todo', 'doing', 'paused', 'done', 'closed']),
+      reference: z.string().max(120).nullable().optional(),
+    })
+    .parse(await c.req.json())
+  const result = await tasksService.setTaskStage(body.key, body.stage, body)
+  await google.syncQuietly(googleConfig(), [body.key])
+  return c.json(result)
+})
 
 // ---- Google Agenda (fase 3) ----
 app.get('/google/status', async (c) => c.json(await google.status(googleConfig())))

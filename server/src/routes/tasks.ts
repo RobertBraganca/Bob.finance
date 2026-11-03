@@ -33,6 +33,11 @@ export const taskCompleteBody = z.object({
   reference: z.string().max(120).nullable().optional(),
   note: z.string().max(500).nullable().optional(),
 })
+export const taskStageBody = z.object({
+  key: z.string().min(3).max(120),
+  stage: z.enum(['overdue', 'todo', 'doing', 'paused', 'done', 'closed']),
+  reference: z.string().max(120).nullable().optional(),
+})
 
 async function guarded<T>(reply: FastifyReply, work: () => Promise<T>) {
   try {
@@ -77,6 +82,14 @@ export async function tasksRoutes(app: FastifyInstance) {
     guarded(reply, async () => {
       const body = taskCompleteBody.parse(req.body)
       const result = body.done ? await tasksService.completeTask(body.key, body) : await tasksService.reopenTask(body.key)
+      await google.syncQuietly(googleConfig(), [body.key])
+      return result
+    }),
+  )
+  app.post('/tasks/stage', async (req, reply) =>
+    guarded(reply, async () => {
+      const body = taskStageBody.parse(req.body)
+      const result = await tasksService.setTaskStage(body.key, body.stage, body)
       await google.syncQuietly(googleConfig(), [body.key])
       return result
     }),
