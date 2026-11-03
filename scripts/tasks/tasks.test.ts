@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { after, describe, test } from 'node:test'
 import { sql } from 'drizzle-orm'
-import { bucketOf, clampedDate, occurrenceDates, type TaskTemplate } from '../../server/src/core/tasks'
+import { bucketOf, clampedDate, occurrenceDates, stageOf, type TaskTemplate } from '../../server/src/core/tasks'
 
 /**
  * Tarefas financeiras (docs/specs/tarefas-comercial-contador, fase 1). A parte
@@ -59,6 +59,17 @@ test('grupos da tela: feita, atrasada, hoje, semana e depois', () => {
   assert.equal(bucketOf('2026-10-30', false, today, weekEnd), 'later')
 })
 
+test('colunas do Kanban: a fazer e atrasada saem da data; o resto, do que foi gravado', () => {
+  const today = '2026-11-03'
+  assert.equal(stageOf('2026-11-02', null, false, today), 'overdue')
+  assert.equal(stageOf('2026-11-03', null, false, today), 'todo')
+  assert.equal(stageOf('2026-11-02', 'doing', false, today), 'doing', 'em andamento não vira atrasada')
+  assert.equal(stageOf('2026-11-10', 'paused', false, today), 'paused')
+  assert.equal(stageOf('2026-11-10', 'done', true, today), 'done')
+  assert.equal(stageOf('2026-11-10', 'skipped', true, today), 'closed')
+  assert.equal(stageOf('2026-10-20', null, true, today), 'done', 'a fonte fechou sozinha (DAS pago)')
+})
+
 /* ------------------------------------------------------------------ *
  * Banco (em transação que sempre desfaz)
  * ------------------------------------------------------------------ */
@@ -77,7 +88,9 @@ const loaded = hasDb
     }
   : null
 
-const MIGRATION = readFileSync(new URL('../../supabase/migrations/20261022120000_tasks.sql', import.meta.url), 'utf8')
+const MIGRATION = ['20261022120000_tasks.sql', '20261103120000_task_stages.sql']
+  .map((name) => readFileSync(new URL(`../../supabase/migrations/${name}`, import.meta.url), 'utf8'))
+  .join(';\n')
 const TAG = '[teste]'
 class Rollback extends Error {}
 type Tx = import('../../server/src/db/client').DbExecutor
@@ -137,6 +150,42 @@ describe('tarefas no banco (rollback)', { skip }, () => {
       await rejectsTask(() => svc.createTask({ title: `${TAG} Anual`, recurrence: 'yearly', dueDay: 31 }, tx), /mês/)
       await rejectsTask(() => svc.completeTask('pending:123', {}, tx), /resolve na própria tela/)
       await rejectsTask(() => svc.completeTask('closing:2026-09:categorization', {}, tx), /resolve na própria tela|sozinho/)
+    })
+  })
+
+  test('etapas: fazendo e pausada ficam abertas; feita e encerrada resolvem; a fazer apaga o estado', async () => {
+    await inRollback(async (tx) => {
+      const svc = loaded!.tasks
+      const { todayIso, addDays } = loaded!.dates
+      const today = todayIso()
+      const task = await svc.createTask({ title: `${TAG} Kanban`, recurrence: 'once', dueOn: addDays(today, 2) }, tx)
+      const window = { from: addDays(today, -1), to: addDays(today, 5) }
+      const key = `manual:${task.id}:${addDays(today, 2)}`
+      const find = async () => (await svc.listTasks(window, tx)).tasks.find((t) => t.key === key)!
+
+      assert.equal((await find()).stage, 'todo')
+      await svc.setTaskStage(key, 'doing', {}, tx)
+      let t = await find()
+      assert.deepEqual([t.stage, t.status, t.done], ['doing', 'doing', false])
+      await svc.setTaskStage(key, 'paused', {}, tx)
+      t = await find()
+      assert.deepEqual([t.stage, t.done], ['paused', false])
+      await svc.setTaskStage(key, 'closed', {}, tx)
+      t = await find()
+      assert.deepEqual([t.stage, t.status, t.done, t.bucket], ['closed', 'skipped', true, 'done'])
+      await svc.setTaskStage(key, 'done', { reference: 'NF 9' }, tx)
+      t = await find()
+      assert.deepEqual([t.stage, t.reference], ['done', 'NF 9'])
+      await svc.setTaskStage(key, 'todo', {}, tx)
+      t = await find()
+      assert.deepEqual([t.stage, t.status, t.done], ['todo', null, false])
+
+      const listed = await svc.listTasks(window, tx)
+      const counted = Object.values(listed.stages).reduce((a, b) => a + b, 0)
+      assert.equal(counted, listed.tasks.length, 'toda ocorrência cai em uma coluna')
+
+      await rejectsTask(() => svc.setTaskStage('pending:123', 'doing', {}, tx), /resolve na própria tela/)
+      await rejectsTask(() => svc.setTaskStage('closing:2026-09:dre-review', 'paused', {}, tx), /feita ou reaberta/)
     })
   })
 

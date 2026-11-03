@@ -2,15 +2,33 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { money } from '../../lib/format'
+import { todayIso } from '../../lib/period'
 import { PageHeader } from '../../components/shell/Shell'
 import { Button, Card, ConfirmDeleteModal, EmptyState, KpiTile, LoadError, Segmented, SkeletonLines, useToast } from '../../components/ui'
 import { GoogleCalendarCard } from './GoogleCalendarCard'
 import { TaskFormModal } from './TaskFormModal'
+import { TaskBoard } from './TaskBoard'
 import { TaskList } from './TaskList'
-import { BUCKET_LABEL, recurrenceLabel, type ManualTask, type TaskBucket, type TasksResponse } from './types'
+import { STAGES, STAGE_HINT, STAGE_LABEL, recurrenceLabel, type ManualTask, type TasksResponse } from './types'
 
-type View = 'open' | 'done'
-const OPEN_BUCKETS: TaskBucket[] = ['overdue', 'today', 'week', 'later']
+type View = 'list' | 'board'
+const VIEW_KEY = 'bob-finance:tasks-view'
+/** Até onde a tela olha: 90 dias à frente, para o cronograma das metas aparecer inteiro em "A fazer". */
+const AHEAD_DAYS = 90
+
+function readView(): View {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'board'
+  } catch {
+    return 'board'
+  }
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
 
 /**
  * Tarefas financeiras (docs/specs/tarefas-comercial-contador, fase 1): o que
@@ -21,11 +39,20 @@ const OPEN_BUCKETS: TaskBucket[] = ['overdue', 'today', 'week', 'later']
 export function TasksPage() {
   const toast = useToast()
   const queryClient = useQueryClient()
-  const [view, setView] = useState<View>('open')
+  const [view, setViewState] = useState<View>(readView)
+  const setView = (next: View) => {
+    setViewState(next)
+    try {
+      localStorage.setItem(VIEW_KEY, next)
+    } catch {
+      // sem armazenamento: a escolha vale só nesta visita
+    }
+  }
   const [editing, setEditing] = useState<ManualTask | 'new' | null>(null)
   const [deleting, setDeleting] = useState<ManualTask | null>(null)
 
-  const list = useQuery({ queryKey: ['tasks', 'list'], queryFn: () => api.get<TasksResponse>('/tasks') })
+  const to = addDaysIso(todayIso(), AHEAD_DAYS)
+  const list = useQuery({ queryKey: ['tasks', 'board', to], queryFn: () => api.get<TasksResponse>(`/tasks?to=${to}`) })
   const manual = useQuery({
     queryKey: ['tasks', 'manual'],
     queryFn: () => api.get<{ tasks: Array<{ task: ManualTask; clientName: string | null }> }>('/tasks/manual'),
@@ -42,7 +69,8 @@ export function TasksPage() {
 
   const data = list.data
   const s = data?.summary
-  const openTotal = s ? s.overdue + s.today + s.week + s.later : 0
+  const st = data?.stages
+  const weekOpen = (data?.tasks ?? []).filter((t) => !t.done && (t.bucket === 'today' || t.bucket === 'week')).length
   const dueSoonCents = (data?.tasks ?? [])
     .filter((t) => !t.done && (t.bucket === 'overdue' || t.bucket === 'today' || t.bucket === 'week') && t.source !== 'pending_income' && t.amountCents !== null)
     .reduce((sum, t) => sum + (t.amountCents ?? 0), 0)
@@ -61,9 +89,9 @@ export function TasksPage() {
       <div className="page">
         <div className="stack stack--loose">
           <div className="kpi-row">
-            <KpiTile accent label="Atrasadas" value={s ? String(s.overdue) : '-'} foot={<span>venceram e ainda estão abertas</span>} />
-            <KpiTile label="Hoje" value={s ? String(s.today) : '-'} />
-            <KpiTile label="Próximos 7 dias" value={s ? String(s.week) : '-'} />
+            <KpiTile accent label="Atrasadas" value={st ? String(st.overdue) : '-'} foot={<span>venceram e ainda não começaram</span>} />
+            <KpiTile label="Fazendo" value={st ? String(st.doing) : '-'} foot={<span>em andamento</span>} />
+            <KpiTile label="Hoje e próximos 7 dias" value={s ? String(weekOpen) : '-'} foot={<span>abertas, inclusive as em andamento</span>} />
             <KpiTile
               label="A pagar até 7 dias"
               value={data ? money(dueSoonCents) : '-'}
@@ -72,15 +100,23 @@ export function TasksPage() {
             />
           </div>
 
-          <Segmented
-            ariaLabel="Mostrar"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'open', label: s ? `Abertas (${openTotal})` : 'Abertas' },
-              { value: 'done', label: s ? `Feitas (${s.done})` : 'Feitas' },
-            ]}
-          />
+          <div className="row row--between" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+            <Segmented
+              ariaLabel="Visualização"
+              value={view}
+              onChange={setView}
+              options={[
+                { value: 'board', label: 'Kanban' },
+                { value: 'list', label: 'Lista' },
+              ]}
+            />
+            {data && (
+              <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                Vencidas há até 60 dias e as dos próximos {AHEAD_DAYS} dias
+                {view === 'board' ? '. Arraste o cartão ou use a etapa dele.' : '.'}
+              </span>
+            )}
+          </div>
 
           {list.isError ? (
             <Card>
@@ -90,22 +126,16 @@ export function TasksPage() {
             <Card>
               <SkeletonLines lines={6} />
             </Card>
-          ) : view === 'done' ? (
-            <Card title="Feitas" subtitle="As que venceram nos últimos dois meses e já foram resolvidas">
-              {s!.done === 0 ? (
-                <p className="muted" style={{ fontSize: 'var(--text-sm)', margin: 0 }}>Nada feito na janela ainda.</p>
-              ) : (
-                <TaskList tasks={data.tasks.filter((t) => t.bucket === 'done')} today={data.window.today} />
-              )}
-            </Card>
-          ) : openTotal === 0 ? (
+          ) : data.tasks.length === 0 ? (
             <Card>
-              <EmptyState icon="check" title="Nada em aberto" body="Nenhuma conta, nota, DAS ou aporte vencendo nos próximos 30 dias." />
+              <EmptyState icon="check" title="Nada por aqui" body={`Nenhuma conta, nota, DAS ou aporte entre os últimos 60 dias e os próximos ${AHEAD_DAYS}.`} />
             </Card>
+          ) : view === 'board' ? (
+            <TaskBoard tasks={data.tasks} today={data.window.today} />
           ) : (
-            OPEN_BUCKETS.filter((b) => s![b] > 0).map((bucket) => (
-              <Card key={bucket} title={BUCKET_LABEL[bucket]} subtitle={`${s![bucket]} ${s![bucket] === 1 ? 'tarefa' : 'tarefas'}`}>
-                <TaskList tasks={data.tasks.filter((t) => t.bucket === bucket)} today={data.window.today} />
+            STAGES.filter((stage) => st![stage] > 0).map((stage) => (
+              <Card key={stage} title={STAGE_LABEL[stage]} subtitle={`${st![stage]} ${st![stage] === 1 ? 'tarefa' : 'tarefas'} · ${STAGE_HINT[stage].toLowerCase()}`}>
+                <TaskList tasks={data.tasks.filter((t) => t.stage === stage)} today={data.window.today} withStage />
               </Card>
             ))
           )}

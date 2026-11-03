@@ -26,7 +26,11 @@ const loaded = hasDb
     }
   : null
 
-const MIGRATION = ['../../supabase/migrations/20261022120000_tasks.sql', '../../supabase/migrations/20261022130000_google_calendar.sql']
+const MIGRATION = [
+  '../../supabase/migrations/20261022120000_tasks.sql',
+  '../../supabase/migrations/20261022130000_google_calendar.sql',
+  '../../supabase/migrations/20261103120000_task_stages.sql',
+]
   .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8'))
   .join('\n')
 class Rollback extends Error {}
@@ -57,6 +61,9 @@ async function inRollback(fn: (tx: Tx) => Promise<void>): Promise<void> {
     await db.transaction(async (tx) => {
       await tx.execute(sql`set local client_min_messages = warning`)
       await tx.execute(sql.raw(MIGRATION))
+      // A conexão, os eventos e as tarefas reais saem só dentro desta transação (que desfaz):
+      // o teste parte do zero mesmo com a conta do dono conectada.
+      await tx.execute(sql`delete from google_calendar_events; delete from google_calendar_connection; delete from task_completions; delete from tasks`)
       await fn(tx)
       throw new Rollback()
     })

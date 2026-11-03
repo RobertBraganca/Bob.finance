@@ -2,6 +2,9 @@
 
 export type TaskSource = 'manual' | 'nf' | 'pending_income' | 'pending_expense' | 'card' | 'das' | 'dasn' | 'closing' | 'goal' | 'partner'
 export type TaskBucket = 'overdue' | 'today' | 'week' | 'later' | 'done'
+/** Coluna do Kanban. "Atrasada" e "A fazer" saem da data; as outras, do que foi gravado. */
+export type TaskStage = 'overdue' | 'todo' | 'doing' | 'paused' | 'done' | 'closed'
+export type TaskStatus = 'done' | 'skipped' | 'doing' | 'paused'
 
 export type TaskOccurrence = {
   key: string
@@ -12,7 +15,7 @@ export type TaskOccurrence = {
   amountCents: number | null
   done: boolean
   doneAt: string | null
-  status: 'done' | 'skipped' | null
+  status: TaskStatus | null
   reference: string | null
   auto: boolean
   completable: boolean
@@ -21,12 +24,61 @@ export type TaskOccurrence = {
   clientId: number | null
   clientName: string | null
   bucket: TaskBucket
+  stage: TaskStage
 }
 
 export type TasksResponse = {
   tasks: TaskOccurrence[]
   summary: Record<TaskBucket, number>
+  stages: Record<TaskStage, number>
   window: { from: string; to: string; today: string }
+}
+
+/** Ordem das colunas do Kanban e das seções da lista. */
+export const STAGES: TaskStage[] = ['overdue', 'todo', 'doing', 'paused', 'done', 'closed']
+
+export const STAGE_LABEL: Record<TaskStage, string> = {
+  overdue: 'Atrasadas',
+  todo: 'A fazer',
+  doing: 'Fazendo',
+  paused: 'Pausadas',
+  done: 'Feitas',
+  closed: 'Encerradas',
+}
+
+export const STAGE_HINT: Record<TaskStage, string> = {
+  overdue: 'Venceram e ainda não começaram',
+  todo: 'O que vem pela frente',
+  doing: 'Em andamento',
+  paused: 'Paradas por enquanto; saem do Google Agenda',
+  done: 'Resolvidas',
+  closed: 'Não vão ser feitas',
+}
+
+/** Tom do seletor de etapa (as classes `select--pill` que já existem). */
+export const STAGE_TONE: Record<TaskStage, string> = {
+  overdue: 'select--critical',
+  todo: '',
+  doing: 'select--info',
+  paused: 'select--warning',
+  done: 'select--good',
+  closed: '',
+}
+
+/** Dá para mover de coluna aqui; as que a própria tela resolve (pendência a baixar, DAS pago) não. */
+export const isMovable = (t: TaskOccurrence) => t.completable
+
+/** Para onde a ocorrência pode ir. A revisão do fechamento só fica feita ou volta. */
+export function stageOptions(t: TaskOccurrence): Array<{ value: TaskStage; label: string }> {
+  const todo = { value: 'todo' as const, label: t.stage === 'overdue' ? 'Atrasada' : 'A fazer' }
+  if (t.key.startsWith('closing:')) return [todo, { value: 'done', label: 'Feita' }]
+  return [
+    todo,
+    { value: 'doing', label: 'Fazendo' },
+    { value: 'paused', label: 'Pausada' },
+    { value: 'done', label: 'Feita' },
+    { value: 'closed', label: 'Encerrada' },
+  ]
 }
 
 export type ManualTask = {

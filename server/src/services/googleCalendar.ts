@@ -137,7 +137,7 @@ export async function sync(config: GoogleConfig, options: { onlyKeys?: string[] 
     const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
 
     const { tasks } = await listTasks({ from: addDays(today, -7), to: addDays(today, 30) }, executor)
-    const wanted = new Map(tasks.filter((t) => !t.done && t.dueOn >= addDays(today, -7)).map((t) => [t.key, t] as const))
+    const wanted = new Map(tasks.filter((t) => !t.done && t.status !== 'paused' && t.dueOn >= addDays(today, -7)).map((t) => [t.key, t] as const))
     const only = options.onlyKeys ? new Set(options.onlyKeys) : null
     const mapped = only
       ? await executor.select().from(googleCalendarEvents).where(inArray(googleCalendarEvents.taskKey, [...only]))

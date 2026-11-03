@@ -2,7 +2,18 @@ import { asc, eq, like, sql } from 'drizzle-orm'
 import { db, type DbExecutor } from '../db/client'
 import { clients, investmentGoals, taskCompletions, tasks } from '../db/schema'
 import { addDays, addMonths, periodBounds, todayIso } from '../core/dates'
-import { bucketOf, clampedDate, occurrenceDates, type TaskBucket, type TaskRecurrence } from '../core/tasks'
+import {
+  TASK_STAGES,
+  bucketOf,
+  clampedDate,
+  isResolved,
+  occurrenceDates,
+  stageOf,
+  type TaskBucket,
+  type TaskRecurrence,
+  type TaskStage,
+  type TaskStatus,
+} from '../core/tasks'
 import { listPending } from './cashFlow'
 import { listCards } from './creditCards'
 import { dasStatus } from './company'
@@ -37,7 +48,8 @@ export type TaskOccurrence = {
   amountCents: number | null
   done: boolean
   doneAt: string | null
-  status: 'done' | 'skipped' | null
+  /** o que está gravado: feita, encerrada, em andamento ou pausada (null = a fazer) */
+  status: TaskStatus | null
   /** número da nota ou comprovante informado ao concluir */
   reference: string | null
   /** some ou fecha sozinha quando a fonte resolve (a pendência foi baixada, o DAS foi pago) */
@@ -50,6 +62,8 @@ export type TaskOccurrence = {
   clientId: number | null
   clientName: string | null
   bucket: TaskBucket
+  /** coluna do Kanban */
+  stage: TaskStage
 }
 
 export type TaskInput = {
@@ -88,16 +102,16 @@ export async function listTasks(window = defaultWindow(), executor: DbExecutor =
   const today = todayIso()
   const weekEnd = addDays(today, 7)
   const period = today.slice(0, 7)
-  const out: Omit<TaskOccurrence, 'bucket'>[] = []
+  const out: Omit<TaskOccurrence, 'bucket' | 'stage'>[] = []
 
   const completions = new Map(
     (await executor.select().from(taskCompletions)).map((c) => [c.taskKey, c] as const),
   )
   const doneOf = (key: string) => {
     const c = completions.get(key)
-    return c
-      ? { done: true, doneAt: c.doneAt, status: (c.status === 'skipped' ? 'skipped' : 'done') as 'done' | 'skipped', reference: c.reference }
-      : { done: false, doneAt: null, status: null, reference: null }
+    if (!c) return { done: false, doneAt: null, status: null, reference: null }
+    const status = (['skipped', 'doing', 'paused'].includes(c.status) ? c.status : 'done') as TaskStatus
+    return { done: isResolved(status), doneAt: isResolved(status) ? c.doneAt : null, status, reference: c.reference }
   }
   const base = { taskId: null, clientId: null, clientName: null, amountCents: null, detail: null, link: null }
 
@@ -279,12 +293,14 @@ export async function listTasks(window = defaultWindow(), executor: DbExecutor =
   }
 
   const list = out
-    .map((t) => ({ ...t, bucket: bucketOf(t.dueOn, t.done, today, weekEnd) }))
+    .map((t) => ({ ...t, bucket: bucketOf(t.dueOn, t.done, today, weekEnd), stage: stageOf(t.dueOn, t.status, t.done, today) }))
     .sort((a, b) => Number(a.done) - Number(b.done) || a.dueOn.localeCompare(b.dueOn) || a.title.localeCompare(b.title, 'pt-BR'))
   const count = (bucket: TaskBucket) => list.filter((t) => t.bucket === bucket).length
+  const stages = Object.fromEntries(TASK_STAGES.map((s) => [s, list.filter((t) => t.stage === s).length])) as Record<TaskStage, number>
   return {
     tasks: list,
     summary: { overdue: count('overdue'), today: count('today'), week: count('week'), later: count('later'), done: count('done') },
+    stages,
     window: { ...window, today },
   }
 }
@@ -295,21 +311,45 @@ export async function listTasks(window = defaultWindow(), executor: DbExecutor =
 
 export async function completeTask(
   key: string,
-  input: { status?: 'done' | 'skipped'; reference?: string | null; note?: string | null } = {},
+  input: { status?: TaskStatus; reference?: string | null; note?: string | null } = {},
   executor: DbExecutor = db,
 ) {
   if (!KEY_PATTERN.test(key)) throw new TaskError('esta tarefa se resolve na própria tela (ela some ou fecha sozinha)')
+  const status = input.status ?? 'done'
   const closing = key.match(/^closing:(\d{4}-\d{2}):(.+)$/)
   if (closing) {
     if (closing[2] !== 'dre-review') throw new TaskError('este item do fechamento se resolve sozinho, na tela indicada')
+    if (status !== 'done') throw new TaskError('a revisão do fechamento só pode ser marcada como feita ou reaberta')
     await setClosingReview(closing[1]!, true)
     return { key, done: true }
   }
-  const values = { status: input.status ?? 'done', reference: input.reference?.trim() || null, note: input.note?.trim() || null }
+  const values = { status, reference: input.reference?.trim() || null, note: input.note?.trim() || null }
   const existing = (await executor.select({ id: taskCompletions.id }).from(taskCompletions).where(eq(taskCompletions.taskKey, key)))[0]
-  if (existing) await executor.update(taskCompletions).set(values).where(eq(taskCompletions.id, existing.id))
+  if (existing) await executor.update(taskCompletions).set({ ...values, doneAt: sql`now_iso()` }).where(eq(taskCompletions.id, existing.id))
   else await executor.insert(taskCompletions).values({ taskKey: key, ...values })
-  return { key, done: true }
+  return { key, done: isResolved(status) }
+}
+
+/** Colunas do Kanban que se gravam. "A fazer" (e "Atrasada", que é a mesma coisa vencida) apaga o estado. */
+const STATUS_OF_STAGE: Record<Exclude<TaskStage, 'overdue' | 'todo'>, TaskStatus> = {
+  doing: 'doing',
+  paused: 'paused',
+  done: 'done',
+  closed: 'skipped',
+}
+
+/** Move a ocorrência de coluna no Kanban (ou pelo seletor de etapa da lista). */
+export async function setTaskStage(
+  key: string,
+  stage: TaskStage,
+  input: { reference?: string | null } = {},
+  executor: DbExecutor = db,
+) {
+  if (stage === 'todo' || stage === 'overdue') {
+    if (!KEY_PATTERN.test(key)) throw new TaskError('esta tarefa se resolve na própria tela (ela some ou fecha sozinha)')
+    return reopenTask(key, executor)
+  }
+  return completeTask(key, { status: STATUS_OF_STAGE[stage], reference: input.reference }, executor)
 }
 
 export async function reopenTask(key: string, executor: DbExecutor = db) {

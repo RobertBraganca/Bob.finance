@@ -50,6 +50,26 @@ export function occurrenceDates(t: TaskTemplate, from: string, to: string): stri
 
 export type TaskBucket = 'overdue' | 'today' | 'week' | 'later' | 'done'
 
+/** O que está gravado da ocorrência: feita, encerrada, em andamento ou pausada. */
+export type TaskStatus = 'done' | 'skipped' | 'doing' | 'paused'
+
+/** Coluna do Kanban. "Atrasada" e "A fazer" não se gravam: saem da data. */
+export type TaskStage = 'overdue' | 'todo' | 'doing' | 'paused' | 'done' | 'closed'
+
+export const TASK_STAGES: TaskStage[] = ['overdue', 'todo', 'doing', 'paused', 'done', 'closed']
+
+/** Resolvida (some da agenda e das contas de "abertas"): feita ou encerrada. */
+export const isResolved = (status: TaskStatus | null) => status === 'done' || status === 'skipped'
+
+/** Em que coluna a ocorrência cai. `done` vale para as que a fonte fecha sozinha (DAS pago). */
+export function stageOf(dueOn: string, status: TaskStatus | null, done: boolean, today: string): TaskStage {
+  if (status === 'skipped') return 'closed'
+  if (done || status === 'done') return 'done'
+  if (status === 'doing') return 'doing'
+  if (status === 'paused') return 'paused'
+  return dueOn < today ? 'overdue' : 'todo'
+}
+
 /** Em que grupo da tela a ocorrência cai. */
 export function bucketOf(dueOn: string, done: boolean, today: string, weekEnd: string): TaskBucket {
   if (done) return 'done'
