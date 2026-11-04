@@ -37,7 +37,9 @@ export const taskStageBody = z.object({
   key: z.string().min(3).max(120),
   stage: z.enum(['overdue', 'todo', 'doing', 'paused', 'done', 'closed']),
   reference: z.string().max(120).nullable().optional(),
+  note: z.string().max(500).nullable().optional(),
 })
+export const taskNoteBody = z.object({ key: z.string().min(3).max(120), body: z.string().trim().min(1).max(2000) })
 
 async function guarded<T>(reply: FastifyReply, work: () => Promise<T>) {
   try {
@@ -93,6 +95,19 @@ export async function tasksRoutes(app: FastifyInstance) {
       await google.syncQuietly(googleConfig(), [body.key])
       return result
     }),
+  )
+  // Detalhe da tarefa: comentários e histórico de etapas
+  app.get('/tasks/detail', async (req, reply) =>
+    guarded(reply, () => tasksService.taskDetail(z.object({ key: z.string().min(3).max(120) }).parse(req.query).key)),
+  )
+  app.post('/tasks/notes', async (req, reply) =>
+    guarded(reply, () => {
+      const body = taskNoteBody.parse(req.body)
+      return tasksService.addTaskNote(body.key, body.body)
+    }),
+  )
+  app.delete('/tasks/notes/:id', async (req) =>
+    tasksService.deleteTaskNote(z.object({ id: z.coerce.number().int().positive() }).parse(req.params).id),
   )
 
   /* ---- Google Agenda (fase 3) ---- */

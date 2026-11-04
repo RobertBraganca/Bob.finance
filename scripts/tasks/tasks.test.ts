@@ -88,7 +88,7 @@ const loaded = hasDb
     }
   : null
 
-const MIGRATION = ['20261022120000_tasks.sql', '20261103120000_task_stages.sql']
+const MIGRATION = ['20261022120000_tasks.sql', '20261103120000_task_stages.sql', '20261103130000_task_notes.sql']
   .map((name) => readFileSync(new URL(`../../supabase/migrations/${name}`, import.meta.url), 'utf8'))
   .join(';\n')
 const TAG = '[teste]'
@@ -186,6 +186,61 @@ describe('tarefas no banco (rollback)', { skip }, () => {
 
       await rejectsTask(() => svc.setTaskStage('pending:123', 'doing', {}, tx), /resolve na própria tela/)
       await rejectsTask(() => svc.setTaskStage('closing:2026-09:dre-review', 'paused', {}, tx), /feita ou reaberta/)
+    })
+  })
+
+  test('detalhe: comentário, histórico de etapas com motivo e as ocorrências anteriores da recorrente', async () => {
+    await inRollback(async (tx) => {
+      const svc = loaded!.tasks
+      const { todayIso, addDays } = loaded!.dates
+      const today = todayIso()
+      const task = await svc.createTask({ title: `${TAG} Detalhe`, recurrence: 'monthly', dueDay: 10, startsOn: addDays(today, -70) }, tx)
+      const window = { from: addDays(today, -65), to: addDays(today, 40) }
+      const keys = (await svc.listTasks(window, tx)).tasks.filter((t) => t.taskId === task.id).map((t) => t.key)
+      assert.ok(keys.length >= 2, 'a recorrente tem mais de uma ocorrência na janela')
+      const [older, key] = [keys[0]!, keys[keys.length - 1]!]
+
+      await svc.addTaskNote(key, '  ligar para o cliente  ', tx)
+      await svc.setTaskStage(key, 'doing', {}, tx)
+      await svc.setTaskStage(key, 'paused', { note: 'aguardando retorno' }, tx)
+      await svc.setTaskStage(key, 'paused', {}, tx)
+      let detail = await svc.taskDetail(key, tx)
+      const kinds = detail.notes.map((n) => [n.kind, n.fromStage, n.toStage, n.body])
+      assert.deepEqual(
+        [...kinds].sort(),
+        [
+          ['comment', null, null, 'ligar para o cliente'],
+          ['stage', 'doing', 'paused', 'aguardando retorno'],
+          ['stage', 'todo', 'doing', null],
+        ].sort(),
+        'mover para onde já estava, sem motivo, não entra no histórico',
+      )
+      const listed = (await svc.listTasks(window, tx)).tasks.find((t) => t.key === key)!
+      assert.equal(listed.noteCount, 1, 'só comentário conta no cartão')
+
+      await svc.setTaskStage(older, 'done', { reference: 'NF 7' }, tx)
+      await svc.addTaskNote(older, 'enviada por e-mail', tx)
+      detail = await svc.taskDetail(key, tx)
+      assert.equal(detail.history.length, 1)
+      assert.deepEqual([detail.history[0]!.key, detail.history[0]!.stage, detail.history[0]!.reference], [older, 'done', 'NF 7'])
+      assert.ok(detail.history[0]!.notes.some((n) => n.body === 'enviada por e-mail'))
+
+      await svc.setTaskStage(key, 'todo', {}, tx)
+      detail = await svc.taskDetail(key, tx)
+      assert.ok(detail.notes.some((n) => n.kind === 'stage' && n.fromStage === 'paused' && n.toStage === 'todo'), 'voltar para a fazer também fica')
+
+      const stageNote = detail.notes.find((n) => n.kind === 'stage')!
+      assert.equal((await svc.deleteTaskNote(stageNote.id, tx)).removed, 0, 'o histórico de etapas não se apaga')
+      const comment = detail.notes.find((n) => n.kind === 'comment')!
+      assert.equal((await svc.deleteTaskNote(comment.id, tx)).removed, 1)
+
+      await svc.addTaskNote('pending:123', 'cobrado por WhatsApp', tx)
+      assert.equal((await svc.taskDetail('pending:123', tx)).notes.length, 1, 'as automáticas também aceitam comentário')
+      await rejectsTask(() => svc.addTaskNote(key, '   ', tx), /escreva/)
+      await rejectsTask(() => svc.taskDetail('qualquer:coisa', tx), /não encontrada/)
+
+      await svc.deleteTask(task.id, tx)
+      assert.equal((await svc.taskDetail(key, tx)).notes.length, 0, 'excluir a tarefa leva os comentários junto')
     })
   })
 

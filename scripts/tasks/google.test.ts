@@ -30,6 +30,7 @@ const MIGRATION = [
   '../../supabase/migrations/20261022120000_tasks.sql',
   '../../supabase/migrations/20261022130000_google_calendar.sql',
   '../../supabase/migrations/20261103120000_task_stages.sql',
+  '../../supabase/migrations/20261103130000_task_notes.sql',
 ]
   .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8'))
   .join('\n')

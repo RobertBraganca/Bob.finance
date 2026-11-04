@@ -28,6 +28,7 @@ import {
   IconSparklesFilled,
   IconBuildingBank,
   IconPencilFilled,
+  IconMessageFilled,
   IconFilterFilled,
   IconHomeFilled,
   IconClockFilled,
@@ -156,6 +157,8 @@ const ICONS: Record<string, TablerIcon> = {
   image: IconPhotoFilled,
   // Ligar itens antigos a um serviço do catálogo; `link` não tem filled.
   link: IconLink,
+  // Comentários no detalhe da tarefa.
+  message: IconMessageFilled,
 }
 
 export type IconName = keyof typeof ICONS

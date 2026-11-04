@@ -851,8 +851,10 @@ export function Modal({
 /* ------------------------------------------------------------------ *
  * Toasts
  * ------------------------------------------------------------------ */
-type Toast = { id: number; message: string; tone: 'info' | 'error' }
-const ToastContext = createContext<(message: string, tone?: 'info' | 'error') => void>(() => {})
+/** Uma ação no aviso, como "Desfazer": clicar roda e dispensa. */
+export type ToastAction = { label: string; run: () => void }
+type Toast = { id: number; message: string; tone: 'info' | 'error'; action?: ToastAction }
+const ToastContext = createContext<(message: string, tone?: 'info' | 'error', options?: { action?: ToastAction }) => void>(() => {})
 
 export const useToast = () => useContext(ToastContext)
 
@@ -888,10 +890,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [schedule])
 
   const push = useCallback(
-    (message: string, tone: 'info' | 'error' = 'info') => {
+    (message: string, tone: 'info' | 'error' = 'info', options?: { action?: ToastAction }) => {
       const id = Date.now() + Math.floor(performance.now() % 1000)
-      setToasts((current) => [...current, { id, message, tone }])
-      schedule(id, tone === 'error' ? 9000 : 5200)
+      setToasts((current) => [...current, { id, message, tone, action: options?.action }])
+      // Com ação, fica mais um pouco: dá tempo de ler e decidir desfazer.
+      schedule(id, tone === 'error' ? 9000 : options?.action ? 8000 : 5200)
     },
     [schedule],
   )
@@ -922,6 +925,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           >
             <Icon name={toast.tone === 'error' ? 'alert' : 'check'} size={14} strokeWidth={2.2} />
             <span className="toast__text">{toast.message}</span>
+            {toast.action && (
+              <button
+                type="button"
+                className="toast__action"
+                onClick={() => {
+                  toast.action!.run()
+                  dismiss(toast.id)
+                }}
+              >
+                {toast.action.label}
+              </button>
+            )}
             <button type="button" className="toast__close" aria-label="Dispensar aviso" onClick={() => dismiss(toast.id)}>
               <Icon name="x" size={13} />
             </button>

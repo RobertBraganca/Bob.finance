@@ -1,6 +1,6 @@
-import { asc, eq, like, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, like, ne, sql } from 'drizzle-orm'
 import { db, type DbExecutor } from '../db/client'
-import { clients, investmentGoals, taskCompletions, tasks } from '../db/schema'
+import { clients, investmentGoals, taskCompletions, taskNotes, tasks } from '../db/schema'
 import { addDays, addMonths, periodBounds, todayIso } from '../core/dates'
 import {
   TASK_STAGES,
@@ -64,6 +64,8 @@ export type TaskOccurrence = {
   bucket: TaskBucket
   /** coluna do Kanban */
   stage: TaskStage
+  /** comentários escritos no detalhe da tarefa */
+  noteCount: number
 }
 
 export type TaskInput = {
@@ -102,7 +104,7 @@ export async function listTasks(window = defaultWindow(), executor: DbExecutor =
   const today = todayIso()
   const weekEnd = addDays(today, 7)
   const period = today.slice(0, 7)
-  const out: Omit<TaskOccurrence, 'bucket' | 'stage'>[] = []
+  const out: Omit<TaskOccurrence, 'bucket' | 'stage' | 'noteCount'>[] = []
 
   const completions = new Map(
     (await executor.select().from(taskCompletions)).map((c) => [c.taskKey, c] as const),
@@ -113,6 +115,15 @@ export async function listTasks(window = defaultWindow(), executor: DbExecutor =
     const status = (['skipped', 'doing', 'paused'].includes(c.status) ? c.status : 'done') as TaskStatus
     return { done: isResolved(status), doneAt: isResolved(status) ? c.doneAt : null, status, reference: c.reference }
   }
+  const noteCounts = new Map(
+    (
+      await executor
+        .select({ key: taskNotes.taskKey, count: sql<number>`count(*)::int` })
+        .from(taskNotes)
+        .where(eq(taskNotes.kind, 'comment'))
+        .groupBy(taskNotes.taskKey)
+    ).map((n) => [n.key, Number(n.count)] as const),
+  )
   const base = { taskId: null, clientId: null, clientName: null, amountCents: null, detail: null, link: null }
 
   // ---- manuais (inclui "emitir nota fiscal") ----
@@ -293,7 +304,12 @@ export async function listTasks(window = defaultWindow(), executor: DbExecutor =
   }
 
   const list = out
-    .map((t) => ({ ...t, bucket: bucketOf(t.dueOn, t.done, today, weekEnd), stage: stageOf(t.dueOn, t.status, t.done, today) }))
+    .map((t) => ({
+      ...t,
+      bucket: bucketOf(t.dueOn, t.done, today, weekEnd),
+      stage: stageOf(t.dueOn, t.status, t.done, today),
+      noteCount: noteCounts.get(t.key) ?? 0,
+    }))
     .sort((a, b) => Number(a.done) - Number(b.done) || a.dueOn.localeCompare(b.dueOn) || a.title.localeCompare(b.title, 'pt-BR'))
   const count = (bucket: TaskBucket) => list.filter((t) => t.bucket === bucket).length
   const stages = Object.fromEntries(TASK_STAGES.map((s) => [s, list.filter((t) => t.stage === s).length])) as Record<TaskStage, number>
@@ -321,12 +337,19 @@ export async function completeTask(
     if (closing[2] !== 'dre-review') throw new TaskError('este item do fechamento se resolve sozinho, na tela indicada')
     if (status !== 'done') throw new TaskError('a revisão do fechamento só pode ser marcada como feita ou reaberta')
     await setClosingReview(closing[1]!, true)
+    await logStage(key, 'todo', 'done', null, executor)
     return { key, done: true }
   }
   const values = { status, reference: input.reference?.trim() || null, note: input.note?.trim() || null }
-  const existing = (await executor.select({ id: taskCompletions.id }).from(taskCompletions).where(eq(taskCompletions.taskKey, key)))[0]
+  const existing = (
+    await executor
+      .select({ id: taskCompletions.id, status: taskCompletions.status })
+      .from(taskCompletions)
+      .where(eq(taskCompletions.taskKey, key))
+  )[0]
   if (existing) await executor.update(taskCompletions).set({ ...values, doneAt: sql`now_iso()` }).where(eq(taskCompletions.id, existing.id))
   else await executor.insert(taskCompletions).values({ taskKey: key, ...values })
+  await logStage(key, stageOfStatus(existing?.status ?? null), stageOfStatus(status), values.note, executor)
   return { key, done: isResolved(status) }
 }
 
@@ -342,24 +365,145 @@ const STATUS_OF_STAGE: Record<Exclude<TaskStage, 'overdue' | 'todo'>, TaskStatus
 export async function setTaskStage(
   key: string,
   stage: TaskStage,
-  input: { reference?: string | null } = {},
+  input: { reference?: string | null; note?: string | null } = {},
   executor: DbExecutor = db,
 ) {
   if (stage === 'todo' || stage === 'overdue') {
     if (!KEY_PATTERN.test(key)) throw new TaskError('esta tarefa se resolve na própria tela (ela some ou fecha sozinha)')
     return reopenTask(key, executor)
   }
-  return completeTask(key, { status: STATUS_OF_STAGE[stage], reference: input.reference }, executor)
+  return completeTask(key, { status: STATUS_OF_STAGE[stage], reference: input.reference, note: input.note }, executor)
 }
 
 export async function reopenTask(key: string, executor: DbExecutor = db) {
   const closing = key.match(/^closing:(\d{4}-\d{2}):dre-review$/)
   if (closing) {
     await setClosingReview(closing[1]!, false)
+    await logStage(key, 'done', 'todo', null, executor)
     return { key, done: false }
   }
-  await executor.delete(taskCompletions).where(eq(taskCompletions.taskKey, key))
+  const removed = await executor
+    .delete(taskCompletions)
+    .where(eq(taskCompletions.taskKey, key))
+    .returning({ status: taskCompletions.status })
+  if (removed[0]) await logStage(key, stageOfStatus(removed[0].status), 'todo', null, executor)
   return { key, done: false }
+}
+
+/* ------------------------------------------------------------------ *
+ * Detalhe: comentários e histórico de etapas
+ * ------------------------------------------------------------------ */
+
+export type TaskNote = {
+  id: number
+  taskKey: string
+  kind: 'comment' | 'stage'
+  body: string | null
+  fromStage: TaskStage | null
+  toStage: TaskStage | null
+  createdAt: string
+}
+
+export type TaskHistoryEntry = {
+  key: string
+  dueOn: string
+  stage: TaskStage
+  doneAt: string | null
+  reference: string | null
+  notes: TaskNote[]
+}
+
+/** O que está gravado vira etapa; sem linha, "A fazer" (a data decide se está atrasada). */
+const stageOfStatus = (status: string | null): TaskStage =>
+  status === 'skipped' ? 'closed' : status === 'doing' || status === 'paused' || status === 'done' ? status : 'todo'
+
+/** Toda ocorrência que a tela lista tem detalhe, inclusive as que fecham sozinhas. */
+const isTaskKey = (key: string) => KEY_PATTERN.test(key) || /^(pending|partner):\d+$/.test(key)
+const taskIdOf = (key: string) => {
+  const match = key.match(/^manual:(\d+):/)
+  return match ? Number(match[1]) : null
+}
+
+const toNote = (n: typeof taskNotes.$inferSelect): TaskNote => ({
+  id: Number(n.id),
+  taskKey: n.taskKey,
+  kind: n.kind === 'stage' ? 'stage' : 'comment',
+  body: n.body,
+  fromStage: (n.fromStage as TaskStage | null) ?? null,
+  toStage: (n.toStage as TaskStage | null) ?? null,
+  createdAt: n.createdAt,
+})
+
+/** Grava a mudança de etapa no histórico; mover para onde já estava, sem motivo, não conta. */
+async function logStage(key: string, from: TaskStage, to: TaskStage, reason: string | null, executor: DbExecutor) {
+  if (from === to && !reason) return
+  await executor.insert(taskNotes).values({ taskKey: key, taskId: taskIdOf(key), kind: 'stage', body: reason, fromStage: from, toStage: to })
+}
+
+/**
+ * Detalhe de uma ocorrência: comentários e mudanças de etapa, do mais novo ao
+ * mais antigo. Nas manuais, também as outras ocorrências da mesma tarefa com
+ * algo gravado, sem o limite de 60 dias da tela.
+ */
+export async function taskDetail(key: string, executor: DbExecutor = db) {
+  if (!isTaskKey(key)) throw new TaskError('tarefa não encontrada')
+  const today = todayIso()
+  const notes = (
+    await executor.select().from(taskNotes).where(eq(taskNotes.taskKey, key)).orderBy(desc(taskNotes.createdAt), desc(taskNotes.id))
+  ).map(toNote)
+
+  const taskId = taskIdOf(key)
+  const history: TaskHistoryEntry[] = []
+  if (taskId !== null) {
+    const byKey = new Map<string, TaskHistoryEntry>()
+    const entry = (k: string) => {
+      let e = byKey.get(k)
+      if (!e) {
+        const dueOn = k.slice(-10)
+        e = { key: k, dueOn, stage: stageOf(dueOn, null, false, today), doneAt: null, reference: null, notes: [] }
+        byKey.set(k, e)
+      }
+      return e
+    }
+    const completions = await executor
+      .select()
+      .from(taskCompletions)
+      .where(and(like(taskCompletions.taskKey, `manual:${taskId}:%`), ne(taskCompletions.taskKey, key)))
+    for (const c of completions) {
+      const e = entry(c.taskKey)
+      const stage = stageOfStatus(c.status)
+      if (stage !== 'todo') e.stage = stage
+      e.doneAt = stage === 'done' || stage === 'closed' ? c.doneAt : null
+      e.reference = c.reference
+    }
+    const others = await executor
+      .select()
+      .from(taskNotes)
+      .where(and(eq(taskNotes.taskId, taskId), ne(taskNotes.taskKey, key)))
+      .orderBy(desc(taskNotes.createdAt), desc(taskNotes.id))
+    for (const n of others) entry(n.taskKey).notes.push(toNote(n))
+    history.push(...[...byKey.values()].sort((a, b) => b.dueOn.localeCompare(a.dueOn)).slice(0, 24))
+  }
+  return { key, notes, history }
+}
+
+export async function addTaskNote(key: string, body: string, executor: DbExecutor = db) {
+  if (!isTaskKey(key)) throw new TaskError('tarefa não encontrada')
+  const text = body.trim()
+  if (!text) throw new TaskError('escreva o comentário')
+  const row = (
+    await executor.insert(taskNotes).values({ taskKey: key, taskId: taskIdOf(key), kind: 'comment', body: text }).returning()
+  )[0]!
+  return toNote(row)
+}
+
+/** Só comentário se apaga; o histórico de etapas fica. */
+export async function deleteTaskNote(id: number, executor: DbExecutor = db) {
+  const removed = await executor
+    .delete(taskNotes)
+    .where(and(eq(taskNotes.id, id), eq(taskNotes.kind, 'comment')))
+    .returning({ id: taskNotes.id })
+  return { removed: removed.length }
 }
 
 /* ------------------------------------------------------------------ *

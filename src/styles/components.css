@@ -3391,7 +3391,7 @@ button {
   color: var(--ink-2);
 }
 .task-row--overdue .task-row__meta > span:nth-child(2) {
-  color: var(--status-warning);
+  color: var(--task-late-ink);
   font-weight: 600;
 }
 .task-row__end {
@@ -3402,6 +3402,16 @@ button {
 }
 .task-row__end .select--pill {
   margin-left: var(--sp-2);
+}
+
+/* "Venceu há": o âmbar do --status-warning dá 4,3:1 em 12px, abaixo dos 4,5
+   (revisão de 03/11/2026). Um passo mais escuro no claro e mais claro no escuro,
+   só aqui, sem mexer no token que o resto do app usa em selos e ícones. */
+:root {
+  --task-late-ink: #8a5800;
+}
+:root[data-theme='dark'] {
+  --task-late-ink: #e3a640;
 }
 
 /* Kanban das tarefas: seis colunas que rolam na horizontal; cada uma rola na vertical. */
@@ -3448,7 +3458,7 @@ button {
   font-weight: 600;
 }
 .kanban__col--overdue .kanban__title {
-  color: var(--status-warning);
+  color: var(--task-late-ink);
 }
 .kanban__count {
   min-width: 24px;
@@ -3462,7 +3472,7 @@ button {
 .kanban__hint {
   margin: 2px 0 var(--sp-2);
   font-size: var(--text-xs);
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 .kanban__list {
   display: grid;
@@ -3482,7 +3492,7 @@ button {
   border: 1px dashed var(--line);
   border-radius: var(--r-md);
   font-size: var(--text-xs);
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 .kanban-card {
   display: grid;
@@ -3523,7 +3533,7 @@ button {
   color: var(--ink-1);
 }
 .kanban-card__late {
-  color: var(--status-warning);
+  color: var(--task-late-ink);
   font-weight: 600;
 }
 .kanban-card__foot {
@@ -3538,7 +3548,7 @@ button {
   align-items: center;
   gap: 4px;
   font-size: var(--text-xs);
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 @media (prefers-reduced-motion: reduce) {
   .kanban__col {
@@ -3549,6 +3559,353 @@ button {
   .kanban {
     grid-auto-columns: 84%;
   }
+}
+
+/* Detalhe da tarefa: o cartão e o título da lista abrem o modal. */
+.task-row__open,
+.kanban-card__open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.task-row__open:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.kanban-card {
+  position: relative;
+  transition: border-color 120ms ease;
+}
+.kanban-card:hover {
+  border-color: var(--line-strong, var(--ink-3));
+}
+/* O botão do título cobre o cartão: clicar em qualquer lugar abre; o arrastar continua no <li>. */
+.kanban-card__open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.kanban-card__open:focus-visible {
+  outline: none;
+}
+.kanban-card__open:focus-visible::after {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-md);
+}
+.kanban-card--movable .kanban-card__open {
+  cursor: grab;
+}
+.kanban-card__foot {
+  position: relative;
+  z-index: 1;
+}
+.task-notes-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--ink-2);
+}
+
+.task-detail {
+  display: grid;
+  gap: var(--sp-4);
+}
+.task-detail__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: calc(var(--sp-3) * -1);
+}
+.task-detail__note {
+  margin: 0;
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+}
+.task-detail__section {
+  display: grid;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+.task-detail__confirm {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+}
+.task-detail__auto {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+.task-detail__composer {
+  display: grid;
+  gap: var(--sp-2);
+}
+.task-detail__empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+
+/* Linha do tempo: comentários com bolinha de ícone; mudanças de etapa, mais discretas. */
+.task-timeline {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-timeline__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+.task-timeline__item:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 22px;
+  bottom: calc(var(--sp-3) * -1);
+  left: 9.5px;
+  width: 1px;
+  background: var(--line);
+}
+.task-timeline__dot {
+  display: block;
+  width: 9px;
+  height: 9px;
+  margin: 5px 0 0 5.5px;
+  border-radius: 50%;
+  background: var(--line);
+}
+.task-timeline__dot--comment {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.task-timeline__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+.task-timeline__item--stage .task-timeline__body {
+  color: var(--ink-2);
+}
+.task-timeline__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.task-timeline__reason {
+  color: var(--ink-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.task-timeline__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 28px;
+}
+.task-timeline__when {
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+
+.task-history {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-history__item {
+  display: grid;
+  gap: 4px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-size: var(--text-sm);
+}
+.task-history__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--sp-2);
+}
+.task-history__note {
+  margin: 0;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* "Desfazer" no aviso: texto em destaque sobre o fundo escuro, alvo de toque com folga. */
+.toast__action {
+  flex: none;
+  min-height: 28px;
+  margin: -4px 0;
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.toast__action:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+@media (pointer: coarse) {
+  .toast__action {
+    min-height: 44px;
+    margin: -12px 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kanban-card {
+    transition: none;
+  }
+}
+
+/* Barra de filtros das Tarefas: busca, escopo, meta e a troca Kanban/Lista. */
+.task-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.task-toolbar__search {
+  flex: 1 1 240px;
+  min-width: 200px;
+  max-width: 360px;
+}
+.task-toolbar__goal {
+  min-width: 220px;
+  max-width: 320px;
+}
+.task-toolbar__spacer {
+  flex: 1;
+}
+.task-toolbar__note {
+  margin: calc(var(--sp-2) * -1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+@media (max-width: 640px) {
+  .task-toolbar__search,
+  .task-toolbar__goal {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .task-toolbar__spacer {
+    display: none;
+  }
+}
+
+/* Progresso da meta escolhida no filtro. */
+.goal-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+.goal-progress__bar {
+  flex: 1 1 160px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+.goal-progress__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--status-good);
+}
+.goal-progress__count {
+  color: var(--ink-2);
+}
+
+/* "A fazer" por distância: o subtítulo de cada faixa dentro da coluna. */
+.kanban__group {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 2px 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.kanban__group:not(:first-child) {
+  margin-top: var(--sp-2);
+}
+.kanban__more {
+  display: grid;
+}
+.kanban-card__goal {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.kanban-card__level {
+  font-weight: 400;
+}
+.task-row__goal {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.task-period {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+}
+.task-period > .task-list {
+  justify-self: stretch;
+}
+.task-period__title {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.task-period__title .tabular {
+  font-weight: 400;
 }
 
 /* App do contador (docs/specs/tarefas-comercial-contador, fase 5): uma tela só, sem a sidebar. */
