@@ -3944,3 +3944,197 @@ button {
 .legal-page code {
   font-size: 0.92em;
 }
+
+/* ---------- Pilha de cartões (/cartoes) ----------
+   Cada cartão é um slot absoluto deslocado por translateY; o de trás só
+   mostra a faixa de cima. Ao puxar um cartão, o slot desce até a frente
+   (transição do transform) e a face faz um pequeno "levanta e assenta"
+   (animação), para ler como um cartão tirado do maço. */
+/* Flex com quebra, não grade por media query: a largura que importa é a
+   do conteúdo (barra lateral aberta ou não), e o total não pode ficar
+   espremido numa coluna fina ao lado da pilha. */
+.cards-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-5) var(--sp-6);
+}
+.cards-hero > :first-child {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.card-stack {
+  --card-face-h: 204px;
+  position: relative;
+  flex: 1 1 340px;
+  max-width: 460px;
+  min-width: 0;
+}
+.card-stack__slot {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: var(--card-face-h);
+  transition: transform 560ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.card-face {
+  --card-ink: #fff;
+  --card-ink-2: rgba(255, 255, 255, 0.8);
+  --card-track: rgba(255, 255, 255, 0.26);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-4) var(--sp-5);
+  border: 0;
+  border-radius: 18px;
+  /* Chapado: cor sólida do banco, sem degradê nem sombra. O que separa um
+     cartão do de trás é um corte fino na cor do fundo do quadro. */
+  background: var(--card-bg);
+  color: var(--card-ink);
+  text-align: left;
+  font: inherit;
+  box-shadow: 0 0 0 2px var(--card-cut, var(--slab));
+  transition:
+    transform 220ms var(--ease-out),
+    filter 220ms var(--ease-out);
+}
+.card-face--dark {
+  --card-ink: #111214;
+  --card-ink-2: rgba(17, 18, 20, 0.76);
+  --card-track: rgba(17, 18, 20, 0.2);
+}
+.card-face:focus-visible {
+  outline: 2px solid var(--ink-1);
+  outline-offset: 3px;
+}
+.card-face--front:focus {
+  outline: none;
+}
+.card-face--front:focus-visible {
+  outline: 2px solid var(--ink-1);
+  outline-offset: 3px;
+}
+
+.card-face--back {
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .card-face--back:hover {
+    transform: translateY(-6px);
+    filter: brightness(1.05);
+  }
+}
+.card-face--back:active {
+  transform: translateY(-2px);
+}
+
+.card-face--pulled {
+  animation: card-pull 600ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes card-pull {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    transform: translateY(-16px) scale(1.03);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.card-face__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 20px;
+}
+.card-face__name {
+  font-weight: 600;
+  font-size: var(--text-md);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-face__peek {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--card-ink-2);
+  white-space: nowrap;
+}
+.card-face__chip {
+  flex: none;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-pill);
+  background: var(--card-track);
+  white-space: nowrap;
+}
+.card-face__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+}
+.card-face__label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--card-ink-2);
+}
+.card-face__value {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-2xl);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+.card-face__sub {
+  font-size: var(--text-xs);
+  color: var(--card-ink-2);
+}
+.card-face__meter {
+  display: block;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--card-track);
+  overflow: hidden;
+}
+.card-face__meter > span {
+  display: block;
+  height: 100%;
+  background: var(--card-ink);
+}
+.card-face__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--text-xs);
+  color: var(--card-ink-2);
+  white-space: nowrap;
+}
+@media (max-width: 420px) {
+  .card-stack {
+    --card-face-h: 196px;
+  }
+  .card-face {
+    padding: var(--sp-4);
+  }
+  .card-face__foot {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-face--pulled {
+    animation: none;
+  }
+}

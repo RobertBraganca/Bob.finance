@@ -23,6 +23,7 @@ import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
 import { InvoiceHistoryChart, type InvoiceHistoryPoint } from '../components/charts/InvoiceHistoryChart'
 import { todayIso } from '../lib/period'
+import { CardStack } from './cards/CardStack'
 
 export type CardRow = {
   id: number
@@ -80,6 +81,8 @@ function SourceNote({ card }: { card: CardRow }) {
 export function CreditCardsPage() {
   const [editing, setEditing] = useState<CardRow | 'new' | null>(null)
   const [snapshotFor, setSnapshotFor] = useState<CardRow | null>(null)
+  // O cartão da frente da pilha é o mesmo da fatura logo abaixo.
+  const [selectedId, setSelectedId] = useState<number | null>(null)
 
   const cards = useQuery({
     queryKey: ['credit-cards'],
@@ -90,6 +93,7 @@ export function CreditCardsPage() {
   const totalLimitCents = data.reduce((s, c) => s + c.creditLimitCents, 0)
   const totalAvailableCents = data.reduce((s, c) => s + c.availableLimitCents, 0)
   const totalUsedCents = data.reduce((s, c) => s + c.usedCents, 0)
+  const frontId = data.some((c) => c.id === selectedId) ? selectedId! : (data[0]?.id ?? null)
 
   return (
     <>
@@ -138,15 +142,21 @@ export function CreditCardsPage() {
           </Bento>
         ) : (
           <Bento>
-            <Slab span={12} accent>
-              <HeroFigure label="Limite disponível" value={money(totalAvailableCents)}>
-                <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
-                  <span className="kv__k">Limite total</span>
-                  <span className="kv__v">{money(totalLimitCents)}</span>
-                  <span className="kv__k">Usado</span>
-                  <span className="kv__v neg">{money(totalUsedCents)}</span>
-                </div>
-              </HeroFigure>
+            <Slab span={12}>
+              <div className="cards-hero">
+                <HeroFigure
+                  label={data.length === 1 ? 'Limite disponível' : `Disponível nos ${data.length} cartões`}
+                  value={money(totalAvailableCents)}
+                >
+                  <div className="kv" style={{ marginTop: 'var(--sp-3)' }}>
+                    <span className="kv__k">Limite total</span>
+                    <span className="kv__v">{money(totalLimitCents)}</span>
+                    <span className="kv__k">Usado</span>
+                    <span className="kv__v neg">{money(totalUsedCents)}</span>
+                  </div>
+                </HeroFigure>
+                {frontId !== null && <CardStack cards={data} selectedId={frontId} onSelect={setSelectedId} />}
+              </div>
             </Slab>
 
             <Card span={12} flush title="Cartões cadastrados">
@@ -216,7 +226,7 @@ export function CreditCardsPage() {
               </div>
             </Card>
 
-            <CardInvoiceCard cards={data} />
+            {frontId !== null && <CardInvoiceCard cards={data} selectedId={frontId} onSelect={setSelectedId} />}
           </Bento>
         )}
       </div>
@@ -276,9 +286,16 @@ type InvoiceCycle = { closingOn: string; dueOn: string; amountCents: number; tra
  * app não tem isso, só importação de CSV): o atraso possível é de
  * IMPORTAÇÃO, não de sincronização ao vivo.
  */
-function CardInvoiceCard({ cards }: { cards: CardRow[] }) {
-  const [cardId, setCardId] = useState<number | null>(cards[0]?.id ?? null)
-  const selected = cards.find((c) => c.id === cardId) ?? cards[0] ?? null
+function CardInvoiceCard({
+  cards,
+  selectedId,
+  onSelect,
+}: {
+  cards: CardRow[]
+  selectedId: number
+  onSelect: (id: number) => void
+}) {
+  const selected = cards.find((c) => c.id === selectedId) ?? cards[0] ?? null
 
   const invoices = useQuery({
     queryKey: ['credit-card-invoices', selected?.id],
@@ -300,9 +317,9 @@ function CardInvoiceCard({ cards }: { cards: CardRow[] }) {
       actions={
         <div style={{ minWidth: 200 }}>
           <Select
-            value={cardId}
+            value={selected?.id ?? null}
             options={cards.map((c) => ({ value: c.id, label: c.name }))}
-            onChange={setCardId}
+            onChange={(id) => id !== null && onSelect(id)}
           />
         </div>
       }
