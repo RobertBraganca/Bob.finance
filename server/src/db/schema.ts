@@ -1713,6 +1713,22 @@ export const taskCompletions = pgTable(
   (t) => [uniqueIndex('task_completions_key_uq').on(t.taskKey)],
 )
 
+/** Comentários e mudanças de etapa de uma ocorrência (o detalhe da tarefa). */
+export const taskNotes = pgTable(
+  'task_notes',
+  {
+    id: id(),
+    taskKey: text('task_key').notNull(),
+    taskId: int('task_id').references(() => tasks.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull().default('comment'),
+    body: text('body'),
+    fromStage: text('from_stage'),
+    toStage: text('to_stage'),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (t) => [index('task_notes_key_idx').on(t.taskKey, t.createdAt), index('task_notes_task_idx').on(t.taskId)],
+)
+
 /* ------------------------------------------------------------------ *
  * Google Agenda (docs/specs/tarefas-comercial-contador, fase 3)
  * ------------------------------------------------------------------ */

@@ -25,6 +25,24 @@ export type TaskOccurrence = {
   clientName: string | null
   bucket: TaskBucket
   stage: TaskStage
+  noteCount: number
+}
+
+export type TaskNote = {
+  id: number
+  taskKey: string
+  kind: 'comment' | 'stage'
+  body: string | null
+  fromStage: TaskStage | null
+  toStage: TaskStage | null
+  createdAt: string
+}
+
+/** `/tasks/detail`: comentários e etapas da ocorrência e, nas manuais, das outras ocorrências. */
+export type TaskDetailResponse = {
+  key: string
+  notes: TaskNote[]
+  history: Array<{ key: string; dueOn: string; stage: TaskStage; doneAt: string | null; reference: string | null; notes: TaskNote[] }>
 }
 
 export type TasksResponse = {
@@ -44,6 +62,16 @@ export const STAGE_LABEL: Record<TaskStage, string> = {
   paused: 'Pausadas',
   done: 'Feitas',
   closed: 'Encerradas',
+}
+
+/** A etapa de uma tarefa só, para selo e histórico ("Pausada", não "Pausadas"). */
+export const STAGE_ONE: Record<TaskStage, string> = {
+  overdue: 'Atrasada',
+  todo: 'A fazer',
+  doing: 'Fazendo',
+  paused: 'Pausada',
+  done: 'Feita',
+  closed: 'Encerrada',
 }
 
 export const STAGE_HINT: Record<TaskStage, string> = {
@@ -133,4 +161,26 @@ export function recurrenceLabel(t: ManualTask): string {
   if (t.recurrence === 'once') return t.dueOn ? `em ${t.dueOn.split('-').reverse().join('/')}` : 'uma vez'
   if (t.recurrence === 'monthly') return `todo dia ${t.dueDay}`
   return `todo ${t.dueDay} de ${MONTH_LABEL[(t.dueMonth ?? 1) - 1]}`
+}
+
+const pad = (n: number) => String(n).padStart(2, '0')
+
+/** Dia local de um instante gravado ("2026-11-03T17:17:00Z"); uma data pura fica como está. */
+export function localDay(iso: string): string {
+  if (iso.length <= 10) return iso
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** "03/11", ou "03/11/2025" quando não é deste ano. */
+export function dayLabel(iso: string, today: string): string {
+  const [y, m, d] = localDay(iso).split('-')
+  return y === today.slice(0, 4) ? `${d}/${m}` : `${d}/${m}/${y}`
+}
+
+/** "03/11 às 14:17": quando um comentário ou mudança de etapa foi gravado. */
+export function whenLabel(iso: string, today: string): string {
+  const d = new Date(iso)
+  if (iso.length <= 10 || Number.isNaN(d.getTime())) return dayLabel(iso, today)
+  return `${dayLabel(iso, today)} às ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }

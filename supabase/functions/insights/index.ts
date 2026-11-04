@@ -616,12 +616,22 @@ app.post('/tasks/stage', async (c) => {
       key: z.string().min(3).max(120),
       stage: z.enum(['overdue', 'todo', 'doing', 'paused', 'done', 'closed']),
       reference: z.string().max(120).nullable().optional(),
+      note: z.string().max(500).nullable().optional(),
     })
     .parse(await c.req.json())
   const result = await tasksService.setTaskStage(body.key, body.stage, body)
   await google.syncQuietly(googleConfig(), [body.key])
   return c.json(result)
 })
+// Detalhe da tarefa: comentários e histórico de etapas
+app.get('/tasks/detail', async (c) =>
+  c.json(await tasksService.taskDetail(z.object({ key: z.string().min(3).max(120) }).parse(c.req.query()).key)),
+)
+app.post('/tasks/notes', async (c) => {
+  const body = z.object({ key: z.string().min(3).max(120), body: z.string().trim().min(1).max(2000) }).parse(await c.req.json())
+  return c.json(await tasksService.addTaskNote(body.key, body.body))
+})
+app.delete('/tasks/notes/:id', async (c) => c.json(await tasksService.deleteTaskNote(taskIdParam.parse(c.req.param()).id)))
 
 // ---- Google Agenda (fase 3) ----
 app.get('/google/status', async (c) => c.json(await google.status(googleConfig())))
