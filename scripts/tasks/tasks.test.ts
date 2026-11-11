@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { after, describe, test } from 'node:test'
-import { sql } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { bucketOf, clampedDate, occurrenceDates, stageOf, type TaskTemplate } from '../../server/src/core/tasks'
 
 /**
@@ -49,6 +49,17 @@ test('ocorrências: uma vez, todo mês e todo ano, dentro da janela e respeitand
   assert.deepEqual(occurrenceDates(template({ recurrence: 'monthly' }), '2026-01-01', '2026-12-31'), [], 'sem dia, nada')
 })
 
+test('semanal: o dia da semana pedido, de 7 em 7, dentro do início e do fim', () => {
+  // 13/11/2026 é sexta (5); a janela começa numa terça.
+  assert.deepEqual(
+    occurrenceDates(template({ recurrence: 'weekly', dueDay: 5, startsOn: '2026-11-13', endsOn: '2026-12-18' }), '2026-11-10', '2027-02-08'),
+    ['2026-11-13', '2026-11-20', '2026-11-27', '2026-12-04', '2026-12-11', '2026-12-18'],
+  )
+  assert.deepEqual(occurrenceDates(template({ recurrence: 'weekly', dueDay: 1 }), '2026-11-09', '2026-11-16'), ['2026-11-09', '2026-11-16'], 'segunda, nas duas pontas')
+  assert.deepEqual(occurrenceDates(template({ recurrence: 'weekly', dueDay: 7 }), '2026-11-09', '2026-11-14'), [], 'domingo fora da janela')
+  assert.deepEqual(occurrenceDates(template({ recurrence: 'weekly', dueDay: 8 }), '2026-11-09', '2026-12-31'), [], 'dia inválido, nada')
+})
+
 test('grupos da tela: feita, atrasada, hoje, semana e depois', () => {
   const today = '2026-10-22'
   const weekEnd = '2026-10-29'
@@ -83,12 +94,15 @@ const skip = hasDb ? false : 'sem credenciais do banco (.env ou BOB_ENV_FILE)'
 const loaded = hasDb
   ? {
       client: await import('../../server/src/db/client'),
+      schema: await import('../../server/src/db/schema'),
       tasks: await import('../../server/src/services/tasks'),
       dates: await import('../../server/src/core/dates'),
     }
   : null
 
-const MIGRATION = ['20261022120000_tasks.sql', '20261103120000_task_stages.sql', '20261103130000_task_notes.sql']
+// A de subtarefas acrescenta valores de enum: precisa estar aplicada no banco
+// (num `add value` dentro desta transação, o valor novo ainda não pode ser usado).
+const MIGRATION = ['20261022120000_tasks.sql', '20261103120000_task_stages.sql', '20261103130000_task_notes.sql', '20261110120000_task_subtasks.sql']
   .map((name) => readFileSync(new URL(`../../supabase/migrations/${name}`, import.meta.url), 'utf8'))
   .join(';\n')
 const TAG = '[teste]'
@@ -241,6 +255,47 @@ describe('tarefas no banco (rollback)', { skip }, () => {
 
       await svc.deleteTask(task.id, tx)
       assert.equal((await svc.taskDetail(key, tx)).notes.length, 0, 'excluir a tarefa leva os comentários junto')
+    })
+  })
+
+  test('tarefa principal: junta as subtarefas, não vence, e leva as subtarefas ao ser excluída', async () => {
+    await inRollback(async (tx) => {
+      const svc = loaded!.tasks
+      const { todayIso, addDays } = loaded!.dates
+      const today = todayIso()
+      const window = { from: addDays(today, -1), to: addDays(today, 10) }
+      const group = await svc.createTask({ title: `${TAG} Dentista`, kind: 'group', notes: 'Nível 2' }, tx)
+      assert.deepEqual([group.kind, group.dueOn, group.parentId], ['group', null, null], 'a principal não precisa de data')
+      const a = await svc.createTask({ title: 'Marcar a consulta', parentId: group.id, dueOn: addDays(today, 1) }, tx)
+      const b = await svc.createTask({ title: 'Ir à consulta', parentId: group.id, recurrence: 'weekly', dueDay: 5, endsOn: addDays(today, 10) }, tx)
+
+      const listed = await svc.listTasks(window, tx)
+      assert.equal(listed.tasks.some((t) => t.taskId === group.id), false, 'a principal não vira ocorrência')
+      const steps = listed.tasks.filter((t) => t.taskId === a.id || t.taskId === b.id)
+      assert.ok(steps.length >= 2)
+      for (const s of steps) assert.deepEqual(s.group, { key: `group:${group.id}`, title: `${TAG} Dentista`, taskId: group.id })
+      const info = listed.groups.find((g) => g.taskId === group.id)!
+      assert.deepEqual([info.subtasks, info.notes], [2, 'Nível 2'])
+      for (const t of listed.tasks.filter((t) => t.source === 'pending_expense')) assert.equal(t.group?.key, 'auto:pending_expense')
+
+      await rejectsTask(() => svc.createTask({ title: `${TAG} Dentro de outra`, kind: 'group', parentId: group.id }, tx), /principal não fica dentro/)
+      await rejectsTask(() => svc.createTask({ title: `${TAG} Pai errado`, parentId: a.id, dueOn: today }, tx), /principal que exista/)
+      await rejectsTask(() => svc.updateTask(group.id, { kind: 'custom', dueOn: today }, tx), /tem subtarefas/)
+      await rejectsTask(() => svc.createTask({ title: `${TAG} Semana`, recurrence: 'weekly', dueDay: 9 }, tx), /dia da semana/)
+
+      // Pausar a principal tira as subtarefas da lista.
+      await svc.updateTask(group.id, { active: false }, tx)
+      assert.equal((await svc.listTasks(window, tx)).tasks.some((t) => t.taskId === a.id), false)
+      await svc.updateTask(group.id, { active: true }, tx)
+
+      const key = `manual:${a.id}:${addDays(today, 1)}`
+      await svc.completeTask(key, {}, tx)
+      const removed = await svc.deleteTask(group.id, tx)
+      assert.deepEqual([removed.removed, removed.subtasks], [1, 2])
+      const left = await tx.select().from(loaded!.schema.tasks).where(inArray(loaded!.schema.tasks.id, [group.id, a.id, b.id]))
+      assert.equal(left.length, 0, 'as subtarefas saem junto')
+      const done = await tx.select().from(loaded!.schema.taskCompletions).where(eq(loaded!.schema.taskCompletions.taskKey, key))
+      assert.equal(done.length, 0, 'e o "feito" delas também')
     })
   })
 

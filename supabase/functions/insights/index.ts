@@ -557,11 +557,12 @@ app.post('/financial-health/closing-checklist', async (c) => {
 const taskDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const taskFields = {
   title: z.string().trim().min(1).max(160),
-  kind: z.enum(['custom', 'nf']).optional(),
+  kind: z.enum(['custom', 'nf', 'group']).optional(),
+  parentId: z.number().int().positive().nullable().optional(),
   clientId: z.number().int().positive().nullable().optional(),
   amountCents: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
   notes: z.string().max(1000).nullable().optional(),
-  recurrence: z.enum(['once', 'monthly', 'yearly']).optional(),
+  recurrence: z.enum(['once', 'monthly', 'yearly', 'weekly']).optional(),
   dueOn: taskDate.nullable().optional(),
   dueDay: z.number().int().min(1).max(31).nullable().optional(),
   dueMonth: z.number().int().min(1).max(12).nullable().optional(),

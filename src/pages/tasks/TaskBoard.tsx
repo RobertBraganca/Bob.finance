@@ -2,9 +2,9 @@ import { useState, type DragEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { money } from '../../lib/format'
 import { Button, Icon } from '../../components/ui'
-import { CompleteWithReference, NoteCount, StageSelect, doneLabel, useSetStage } from './TaskList'
-import { PERIOD_LABEL, PERIOD_MORE, goalOf, periodGroups, type PeriodKey } from './filters'
-import { SOURCE_LABEL, STAGES, STAGE_HINT, STAGE_LABEL, dueLabel, isMovable, stageOptions, type TaskOccurrence, type TaskStage } from './types'
+import { CompleteWithReference, GroupBadge, GroupProgressBar, NoteCount, StageSelect, doneLabel, useSetStage } from './TaskList'
+import { PERIOD_LABEL, PERIOD_MORE, periodGroups, type PeriodKey, type TaskGroupItem, type TaskItem } from './filters'
+import { SOURCE_LABEL, STAGES, STAGE_HINT, STAGE_LABEL, dueLabel, isMovable, stageOptions, stepTitle, type TaskOccurrence, type TaskStage } from './types'
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ')
 
@@ -17,16 +17,22 @@ const target = (stage: TaskStage): TaskStage => (stage === 'overdue' ? 'todo' : 
  * celular). As que a própria tela resolve (pendência a baixar, DAS pago) não se
  * movem: ficam onde a fonte manda. Clicar no cartão abre o detalhe. "A fazer"
  * vem partido por distância, com o que está longe recolhido.
+ *
+ * A tarefa principal é um cartão só, com o progresso e o próximo passo; a
+ * coluna dela sai das subtarefas, e ela não se arrasta: os passos se movem no
+ * detalhe dela, cada um na sua etapa.
  */
 export function TaskBoard({
-  tasks,
+  items,
   today,
   onOpen,
+  onOpenGroup,
   expandAll,
 }: {
-  tasks: TaskOccurrence[]
+  items: TaskItem[]
   today: string
   onOpen: (task: TaskOccurrence) => void
+  onOpenGroup: (group: TaskGroupItem) => void
   /** com busca ou filtro, "Mais adiante" já vem aberto: o que sobrou é o que se procurou */
   expandAll?: boolean
 }) {
@@ -37,7 +43,8 @@ export function TaskBoard({
   const [askingReference, setAskingReference] = useState<TaskOccurrence | null>(null)
   const [opened, setOpened] = useState<PeriodKey[]>([])
 
-  const dragged = dragKey ? (tasks.find((t) => t.key === dragKey) ?? null) : null
+  const draggedItem = dragKey ? items.find((i) => i.kind === 'task' && i.key === dragKey) : undefined
+  const dragged = draggedItem?.kind === 'task' ? draggedItem.task : null
   const canDrop = (stage: TaskStage) =>
     !!dragged && target(stage) !== target(dragged.stage) && stageOptions(dragged).some((o) => o.value === target(stage))
 
@@ -55,9 +62,9 @@ export function TaskBoard({
     endDrag()
   }
 
-  const renderCard = (t: TaskOccurrence) => {
+  const renderTask = (t: TaskOccurrence) => {
     const movable = isMovable(t)
-    const goal = goalOf(t)
+    const mine = t.group?.taskId ? t.group : null
     return (
       <li
         key={t.key}
@@ -70,18 +77,13 @@ export function TaskBoard({
         }}
         onDragEnd={endDrag}
       >
-        {goal && (
-          <span className="kanban-card__goal">
-            {goal.name}
-            {goal.level && <span className="kanban-card__level"> · Nível {goal.level}</span>}
-          </span>
-        )}
+        {mine && <span className="kanban-card__goal">{mine.title}</span>}
         {/* O botão cobre o cartão todo (::after); o seletor e o atalho ficam por cima. */}
-        <button type="button" className="kanban-card__title kanban-card__open" onClick={() => onOpen(t)} aria-label={goal ? t.title : undefined}>
-          {goal ? goal.step : t.title}
+        <button type="button" className="kanban-card__title kanban-card__open" onClick={() => onOpen(t)} aria-label={mine ? `${mine.title}: ${t.title}` : undefined}>
+          {mine ? stepTitle(t) : t.title}
         </button>
         <span className="kanban-card__meta">
-          {!goal && <span className="badge">{SOURCE_LABEL[t.source]}</span>}
+          {!mine && <span className="badge">{SOURCE_LABEL[t.source]}</span>}
           <span className={cx(t.stage === 'overdue' && 'kanban-card__late')}>{doneLabel(t, today) ?? dueLabel(t.dueOn, today)}</span>
           {t.noteCount > 0 && <NoteCount count={t.noteCount} />}
           {t.amountCents !== null && <strong className="tabular">{money(t.amountCents)}</strong>}
@@ -101,15 +103,45 @@ export function TaskBoard({
     )
   }
 
+  const renderGroup = (g: TaskGroupItem) => {
+    const late = g.tasks.filter((t) => t.stage === 'overdue').length
+    return (
+      <li key={g.key} className={cx('kanban-card', 'kanban-card--group', g.next === null && 'kanban-card--done')}>
+        <span className="kanban-card__meta">
+          <GroupBadge group={g} />
+          {late > 0 && g.stage === 'overdue' && <span className="kanban-card__late">{late === 1 ? '1 atrasada' : `${late} atrasadas`}</span>}
+          {g.openCents !== null && <strong className="tabular">{money(g.openCents)}</strong>}
+        </span>
+        <button type="button" className="kanban-card__title kanban-card__open kanban-card__group-title" onClick={() => onOpenGroup(g)}>
+          {g.title}
+        </button>
+        <GroupProgressBar group={g} />
+        {g.next ? (
+          <span className="kanban-card__next">
+            <span className="kanban-card__next-label">Próximo</span>
+            <span className="kanban-card__next-step">{stepTitle(g.next)}</span>
+            <span className={cx(g.next.stage === 'overdue' && 'kanban-card__late')}>{dueLabel(g.next.dueOn, today)}</span>
+          </span>
+        ) : (
+          <span className="kanban-card__auto">
+            <Icon name="check" size={14} /> tudo resolvido
+          </span>
+        )}
+      </li>
+    )
+  }
+
+  const renderItem = (item: TaskItem) => (item.kind === 'group' ? renderGroup(item) : renderTask(item.task))
+
   /** "A fazer" por distância: os próximos 7 dias abertos, o resto recolhido até pedir. */
-  const renderTodo = (items: TaskOccurrence[]) =>
-    periodGroups(items, today).flatMap((group) => {
+  const renderTodo = (list: TaskItem[]) =>
+    periodGroups(list, today).flatMap((group) => {
       const collapsible = group.key !== 'week' && !expandAll
       const open = opened.includes(group.key)
       const head = (
         <li key={`group-${group.key}`} className="kanban__group">
           <span>{PERIOD_LABEL[group.key]}</span>
-          <span className="tabular">{group.tasks.length}</span>
+          <span className="tabular">{group.items.length}</span>
         </li>
       )
       if (collapsible && !open)
@@ -117,13 +149,13 @@ export function TaskBoard({
           head,
           <li key={`more-${group.key}`} className="kanban__more">
             <Button size="sm" onClick={() => setOpened((keys) => [...keys, group.key])}>
-              Mostrar {group.tasks.length} {PERIOD_MORE[group.key]}
+              Mostrar {group.items.length} {PERIOD_MORE[group.key]}
             </Button>
           </li>,
         ]
       return [
         head,
-        ...group.tasks.map(renderCard),
+        ...group.items.map(renderItem),
         ...(collapsible
           ? [
               <li key={`less-${group.key}`} className="kanban__more">
@@ -140,12 +172,12 @@ export function TaskBoard({
     <>
       <div className="kanban">
         {STAGES.map((stage) => {
-          const items = tasks.filter((t) => t.stage === stage)
+          const list = items.filter((i) => i.stage === stage)
           return (
             <section
               key={stage}
               className={cx('kanban__col', `kanban__col--${stage}`, over === stage && 'kanban__col--over', dragged && !canDrop(stage) && 'kanban__col--locked')}
-              aria-label={`${STAGE_LABEL[stage]}: ${items.length}`}
+              aria-label={`${STAGE_LABEL[stage]}: ${list.length}`}
               onDragOver={(e) => {
                 if (!canDrop(stage)) return
                 e.preventDefault()
@@ -159,12 +191,12 @@ export function TaskBoard({
             >
               <header className="kanban__head">
                 <span className="kanban__title">{STAGE_LABEL[stage]}</span>
-                <span className="kanban__count tabular">{items.length}</span>
+                <span className="kanban__count tabular">{list.length}</span>
               </header>
               <p className="kanban__hint">{STAGE_HINT[stage]}</p>
               <ul className="kanban__list">
-                {stage === 'todo' ? renderTodo(items) : items.map(renderCard)}
-                {items.length === 0 && <li className="kanban__empty">{dragged && canDrop(stage) ? 'Solte aqui' : 'Nada aqui'}</li>}
+                {stage === 'todo' ? renderTodo(list) : list.map(renderItem)}
+                {list.length === 0 && <li className="kanban__empty">{dragged && canDrop(stage) ? 'Solte aqui' : 'Nada aqui'}</li>}
               </ul>
             </section>
           )

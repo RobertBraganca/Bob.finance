@@ -12,6 +12,7 @@ import {
   dueLabel,
   isMovable,
   stageOptions,
+  stepTitle,
   whenLabel,
   type TaskDetailResponse,
   type TaskNote,
@@ -130,7 +131,7 @@ export function TaskDetail({
 
   return (
     <Modal
-      title={task.title}
+      title={stepTitle(task)}
       onClose={onClose}
       footer={
         <>
@@ -158,7 +159,13 @@ export function TaskDetail({
     >
       <div className="task-detail">
         <div className="task-detail__tags">
-          <span className="badge">{SOURCE_LABEL[task.source]}</span>
+          {task.group ? (
+            <span className="badge" title="Tarefa principal">
+              <Icon name="layers" size={12} /> {task.group.title}
+            </span>
+          ) : (
+            <span className="badge">{SOURCE_LABEL[task.source]}</span>
+          )}
           <span className={STAGE_BADGE[task.stage]}>{STAGE_ONE[task.stage]}</span>
         </div>
 

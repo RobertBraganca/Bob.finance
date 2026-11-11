@@ -7,11 +7,25 @@ import { todayIso } from '../../lib/period'
 import { PageHeader } from '../../components/shell/Shell'
 import { Button, Card, ConfirmDeleteModal, EmptyState, Icon, KpiTile, LoadError, Segmented, Select, SkeletonLines, TextInput, useToast } from '../../components/ui'
 import { GoogleCalendarCard } from './GoogleCalendarCard'
+import { GroupDetail } from './GroupDetail'
 import { TaskFormModal } from './TaskFormModal'
 import { TaskBoard } from './TaskBoard'
 import { TaskDetail } from './TaskDetail'
 import { TaskList } from './TaskList'
-import { PERIOD_LABEL, PERIOD_MORE, SCOPE_OPTIONS, goalOf, goalProgress, inScope, matchesSearch, periodGroups, type PeriodKey, type TaskScope } from './filters'
+import {
+  PERIOD_LABEL,
+  PERIOD_MORE,
+  SCOPE_OPTIONS,
+  buildItems,
+  groupProgress,
+  inScope,
+  matchesSearch,
+  nextOnly,
+  periodGroups,
+  type PeriodKey,
+  type TaskItem,
+  type TaskScope,
+} from './filters'
 import { STAGES, STAGE_HINT, STAGE_LABEL, recurrenceLabel, type ManualTask, type TaskOccurrence, type TasksResponse } from './types'
 
 type View = 'list' | 'board'
@@ -54,10 +68,11 @@ export function TasksPage() {
       // sem armazenamento: a escolha vale só nesta visita
     }
   }
-  const [editing, setEditing] = useState<ManualTask | 'new' | null>(null)
+  const [editing, setEditing] = useState<ManualTask | 'new' | { parentId: number } | null>(null)
   const [deleting, setDeleting] = useState<ManualTask | null>(null)
   // Pela chave, não pelo objeto: o detalhe acompanha a lista quando a etapa muda.
   const [openKey, setOpenKey] = useState<string | null>(null)
+  const [openGroupKey, setOpenGroupKey] = useState<string | null>(null)
   const [openPeriods, setOpenPeriods] = useState<PeriodKey[]>([])
   // Editar e excluir moram no detalhe do cartão; a lista completa fica recolhida.
   const [showManual, setShowManual] = useState(false)
@@ -118,32 +133,44 @@ export function TasksPage() {
     .reduce((sum, t) => sum + (t.amountCents ?? 0), 0)
 
   // Os indicadores acima contam tudo; o filtro só recorta o quadro e a lista.
-  const goals = data ? goalProgress(data.tasks) : []
-  const currentGoal = goalFilter ? (goals.find((g) => g.name === goalFilter) ?? null) : null
-  const shown: TaskOccurrence[] = (data?.tasks ?? []).filter(
-    (t) => inScope(t, scope) && (!goalFilter || goalOf(t)?.name === goalFilter) && matchesSearch(t, search),
+  const groups = data?.groups ?? []
+  const progress = data ? groupProgress(data.tasks, groups) : []
+  const currentGoal = goalFilter ? (progress.find((g) => g.title === goalFilter) ?? null) : null
+  // Das recorrentes, só as atrasadas e a próxima: a conta de dezembro espera a de novembro.
+  const { tasks: upcoming, hidden } = nextOnly(data?.tasks ?? [])
+  const shown: TaskOccurrence[] = upcoming.filter(
+    (t) => inScope(t, scope) && (!goalFilter || t.group?.title === goalFilter) && matchesSearch(t, search),
   )
   const filtered = scope !== 'all' || Boolean(goalFilter) || search.trim() !== ''
   const today = data?.window.today ?? todayIso()
+  // Com uma principal escolhida no filtro, os passos dela aparecem soltos, um cartão cada.
+  const items: TaskItem[] = goalFilter
+    ? shown.map((t) => ({ kind: 'task', key: t.key, task: t, dueOn: t.dueOn, stage: t.stage }))
+    : buildItems(shown, groups)
+  const openedGroup = openGroupKey ? (buildItems(upcoming, groups).find((i) => i.key === openGroupKey && i.kind === 'group') ?? null) : null
+  const openedGroupTask = openedGroup?.kind === 'group' && openedGroup.taskId !== null ? manualOf(openedGroup.taskId) : null
+  const groupChoices = groups.map((g) => ({ id: g.taskId, title: g.title })).sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'))
 
-  const renderStageList = (stage: (typeof STAGES)[number], items: TaskOccurrence[]) => {
-    const listOf = (tasks: TaskOccurrence[]) => <TaskList tasks={tasks} today={today} withStage onOpen={(t) => setOpenKey(t.key)} />
-    if (stage !== 'todo') return listOf(items)
+  const renderStageList = (stage: (typeof STAGES)[number], stageItems: TaskItem[]) => {
+    const listOf = (list: TaskItem[]) => (
+      <TaskList items={list} today={today} withStage onOpen={(t) => setOpenKey(t.key)} onOpenGroup={(g) => setOpenGroupKey(g.key)} />
+    )
+    if (stage !== 'todo') return listOf(stageItems)
     return (
       <div className="stack">
-        {periodGroups(items, today).map((group) => {
+        {periodGroups(stageItems, today).map((group) => {
           const collapsed = group.key !== 'week' && !openPeriods.includes(group.key) && !filtered
           return (
             <section key={group.key} className="task-period" aria-label={PERIOD_LABEL[group.key]}>
               <h3 className="task-period__title">
-                {PERIOD_LABEL[group.key]} <span className="tabular">{group.tasks.length}</span>
+                {PERIOD_LABEL[group.key]} <span className="tabular">{group.items.length}</span>
               </h3>
               {collapsed ? (
                 <Button size="sm" onClick={() => setOpenPeriods((keys) => [...keys, group.key])}>
-                  Mostrar {group.tasks.length} {PERIOD_MORE[group.key]}
+                  Mostrar {group.items.length} {PERIOD_MORE[group.key]}
                 </Button>
               ) : (
-                listOf(group.tasks)
+                listOf(group.items)
               )}
             </section>
           )
@@ -151,6 +178,30 @@ export function TasksPage() {
       </div>
     )
   }
+
+  // "Suas tarefas": cada principal com as subtarefas embaixo, e as soltas no fim.
+  const manualTasks = manual.data?.tasks ?? []
+  const manualGroups = manualTasks.filter(({ task }) => task.kind === 'group')
+  const childrenOf = (id: number) => manualTasks.filter(({ task }) => task.parentId === id)
+  const loose = manualTasks.filter(({ task }) => task.kind !== 'group' && (task.parentId === null || !manualGroups.some((g) => g.task.id === task.parentId)))
+  const renderManual = ({ task, clientName }: { task: ManualTask; clientName: string | null }, nested = false) => (
+    <li key={task.id} className={`row row--between manual-task${nested ? ' manual-task--sub' : ''}`} style={{ gap: 'var(--sp-2)' }}>
+      <span style={{ minWidth: 0 }}>
+        <strong style={{ fontWeight: task.kind === 'group' ? 700 : 600, fontSize: 'var(--text-sm)' }}>{task.title}</strong>
+        {!task.active && <span className="badge" style={{ marginLeft: 6 }}>Pausada</span>}
+        <span className="muted" style={{ display: 'block', fontSize: 'var(--text-xs)' }}>
+          {task.kind === 'group' ? `${childrenOf(task.id).length} subtarefas` : recurrenceLabel(task)}
+          {clientName ? ` · ${clientName}` : ''}
+          {task.amountCents ? ` · ${money(task.amountCents)}` : ''}
+        </span>
+      </span>
+      <span className="row" style={{ gap: 2 }}>
+        {task.kind === 'group' && <Button variant="quiet" size="sm" icon="plus" title={`Nova subtarefa em ${task.title}`} onClick={() => setEditing({ parentId: task.id })} />}
+        <Button variant="quiet" size="sm" icon="pencil" title={`Editar ${task.title}`} onClick={() => setEditing(task)} />
+        <Button variant="quiet" size="sm" icon="trash" title={`Excluir ${task.title}`} onClick={() => setDeleting(task)} />
+      </span>
+    </li>
+  )
 
   return (
     <>
@@ -183,14 +234,14 @@ export function TasksPage() {
               <TextInput value={search} onChange={(next) => setParam('q', next)} placeholder="Buscar por título, cliente ou nota" ariaLabel="Buscar tarefas" />
             </div>
             <Segmented ariaLabel="Quais tarefas" value={scope} onChange={setScope} options={SCOPE_OPTIONS} />
-            {goals.length > 0 && scope !== 'money' && (
+            {progress.length > 0 && scope !== 'money' && (
               <div className="task-toolbar__goal">
                 <Select
-                  ariaLabel="Filtrar por meta"
+                  ariaLabel="Filtrar por tarefa principal"
                   value={goalFilter ?? ALL_GOALS}
                   options={[
-                    { value: ALL_GOALS, label: 'Todas as metas' },
-                    ...goals.map((g) => ({ value: g.name, label: `${g.level ? `N${g.level} · ` : ''}${g.name} · ${g.resolved}/${g.total}` })),
+                    { value: ALL_GOALS, label: 'Todas as principais' },
+                    ...progress.map((g) => ({ value: g.title, label: `${g.level ? `N${g.level} · ` : ''}${g.title} · ${g.resolved}/${g.total}` })),
                   ]}
                   onChange={(next) => setParam('meta', !next || next === ALL_GOALS ? null : next)}
                 />
@@ -209,9 +260,9 @@ export function TasksPage() {
           </div>
 
           {currentGoal && (
-            <div className="goal-progress" role="group" aria-label={`Progresso de ${currentGoal.name}`}>
+            <div className="goal-progress" role="group" aria-label={`Progresso de ${currentGoal.title}`}>
               <span className="goal-progress__label">
-                <strong>{currentGoal.name}</strong>
+                <strong>{currentGoal.title}</strong>
                 {currentGoal.level && <span className="muted"> · Nível {currentGoal.level}</span>}
               </span>
               <span className="goal-progress__bar" aria-hidden="true">
@@ -227,14 +278,15 @@ export function TasksPage() {
             <p className="task-toolbar__note">
               {filtered ? (
                 <>
-                  Mostrando {shown.length} de {data.tasks.length}.{' '}
+                  Mostrando {shown.length} de {upcoming.length}.{' '}
                   <button type="button" className="link-button" onClick={clearFilters}>
                     Limpar filtros
                   </button>
                 </>
               ) : (
                 <>
-                  Vencidas há até 60 dias e as dos próximos {AHEAD_DAYS} dias.
+                  Vencidas há até 60 dias e as dos próximos {AHEAD_DAYS} dias, com os passos dentro da tarefa principal.
+                  {hidden > 0 && ` Das recorrentes, só a próxima de cada uma (${hidden} ${hidden === 1 ? 'futura esperando' : 'futuras esperando'} a vez).`}
                   {view === 'board' ? ' Clique no cartão para ver o detalhe; arraste ou use a etapa dele para mover.' : ' Clique no título para ver o detalhe.'}
                 </>
               )}
@@ -263,13 +315,17 @@ export function TasksPage() {
               />
             </Card>
           ) : view === 'board' ? (
-            <TaskBoard tasks={shown} today={today} onOpen={(t) => setOpenKey(t.key)} expandAll={filtered} />
+            <TaskBoard items={items} today={today} onOpen={(t) => setOpenKey(t.key)} onOpenGroup={(g) => setOpenGroupKey(g.key)} expandAll={filtered} />
           ) : (
-            STAGES.map((stage) => ({ stage, items: shown.filter((t) => t.stage === stage) }))
-              .filter(({ items }) => items.length > 0)
-              .map(({ stage, items }) => (
-                <Card key={stage} title={STAGE_LABEL[stage]} subtitle={`${items.length} ${items.length === 1 ? 'tarefa' : 'tarefas'} · ${STAGE_HINT[stage].toLowerCase()}`}>
-                  {renderStageList(stage, items)}
+            STAGES.map((stage) => ({ stage, stageItems: items.filter((i) => i.stage === stage) }))
+              .filter(({ stageItems }) => stageItems.length > 0)
+              .map(({ stage, stageItems }) => (
+                <Card
+                  key={stage}
+                  title={STAGE_LABEL[stage]}
+                  subtitle={`${stageItems.length} ${stageItems.length === 1 ? 'item' : 'itens'} · ${STAGE_HINT[stage].toLowerCase()}`}
+                >
+                  {renderStageList(stage, stageItems)}
                 </Card>
               ))
           )}
@@ -306,23 +362,15 @@ export function TasksPage() {
               </p>
             ) : (
               <ul className="stack stack--tight">
-                {manual.data.tasks.map(({ task, clientName }) => (
-                  <li key={task.id} className="row row--between" style={{ gap: 'var(--sp-2)' }}>
-                    <span style={{ minWidth: 0 }}>
-                      <strong style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{task.title}</strong>
-                      {!task.active && <span className="badge" style={{ marginLeft: 6 }}>Pausada</span>}
-                      <span className="muted" style={{ display: 'block', fontSize: 'var(--text-xs)' }}>
-                        {recurrenceLabel(task)}
-                        {clientName ? ` · ${clientName}` : ''}
-                        {task.amountCents ? ` · ${money(task.amountCents)}` : ''}
-                      </span>
-                    </span>
-                    <span className="row" style={{ gap: 2 }}>
-                      <Button variant="quiet" size="sm" icon="pencil" title={`Editar ${task.title}`} onClick={() => setEditing(task)} />
-                      <Button variant="quiet" size="sm" icon="trash" title={`Excluir ${task.title}`} onClick={() => setDeleting(task)} />
-                    </span>
+                {manualGroups.map((g) => (
+                  <li key={`g-${g.task.id}`} className="manual-group">
+                    <ul className="stack stack--tight">
+                      {renderManual(g)}
+                      {childrenOf(g.task.id).map((child) => renderManual(child, true))}
+                    </ul>
                   </li>
                 ))}
+                {loose.map((t) => renderManual(t))}
               </ul>
             )}
           </Card>
@@ -352,11 +400,48 @@ export function TasksPage() {
           }
         />
       )}
-      {editing && <TaskFormModal task={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
+      {/* Um modal por vez: abrir um passo ou o formulário esconde a principal, que volta ao fechar. */}
+      {openedGroup?.kind === 'group' && data && !opened && !editing && !deleting && (
+        <GroupDetail
+          group={openedGroup}
+          today={data.window.today}
+          onClose={() => setOpenGroupKey(null)}
+          onOpenTask={(t) => setOpenKey(t.key)}
+          onAddSubtask={openedGroup.taskId !== null ? () => setEditing({ parentId: openedGroup.taskId! }) : undefined}
+          onEdit={
+            openedGroupTask
+              ? () => {
+                  setOpenGroupKey(null)
+                  setEditing(openedGroupTask)
+                }
+              : undefined
+          }
+          onDelete={
+            openedGroupTask
+              ? () => {
+                  setOpenGroupKey(null)
+                  setDeleting(openedGroupTask)
+                }
+              : undefined
+          }
+        />
+      )}
+      {editing && (
+        <TaskFormModal
+          task={editing !== 'new' && 'id' in editing ? editing : undefined}
+          parentId={editing !== 'new' && !('id' in editing) ? editing.parentId : undefined}
+          groups={groupChoices}
+          onClose={() => setEditing(null)}
+        />
+      )}
       {deleting && (
         <ConfirmDeleteModal
           title={`Excluir "${deleting.title}"?`}
-          body="As próximas ocorrências deixam de aparecer, e o histórico de feitas e os comentários desta tarefa saem junto."
+          body={
+            deleting.kind === 'group'
+              ? `As ${childrenOf(deleting.id).length} subtarefas saem junto, com o histórico de feitas e os comentários delas.`
+              : 'As próximas ocorrências deixam de aparecer, e o histórico de feitas e os comentários desta tarefa saem junto.'
+          }
           confirmLabel="Excluir tarefa"
           pending={remove.isPending}
           onCancel={() => setDeleting(null)}

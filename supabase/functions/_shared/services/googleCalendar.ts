@@ -22,12 +22,11 @@ export class GoogleCalendarError extends Error {}
 export type GoogleConfig = { clientId: string; clientSecret: string; redirectUri: string }
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events', 'openid', 'email']
-const TIME_ZONE = 'America/Sao_Paulo'
-/** Lembretes do evento: no horário (9h do dia) e um dia antes. */
-const REMINDERS = [
-  { method: 'popup', minutes: 0 },
-  { method: 'popup', minutes: 24 * 60 },
-]
+/**
+ * Lembrete do evento: às 17h da véspera. Em evento de dia inteiro os minutos
+ * contam da meia-noite do dia, então 7h antes = 17h do dia anterior.
+ */
+const REMINDERS = [{ method: 'popup', minutes: 7 * 60 }]
 
 export function googleConfigFromEnv(get: (name: string) => string | undefined): GoogleConfig | null {
   const clientId = get('GOOGLE_CLIENT_ID')
@@ -106,16 +105,36 @@ async function accessToken(config: GoogleConfig, refreshToken: string): Promise<
   return token.access_token
 }
 
-/** O evento que a tarefa pede: 9h do dia de vencimento, meia hora, com lembrete. */
+/** O evento que a tarefa pede: dia inteiro no vencimento, com lembrete na véspera. */
 export function eventFor(task: TaskOccurrence) {
   const money = task.amountCents !== null ? (task.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : null
+  // Na agenda não há a tarefa principal em volta: a subtarefa leva o nome dela na frente.
+  const title = task.group?.taskId ? `${task.group.title}: ${task.title}` : task.title
   return {
-    summary: money ? `${task.title} (${money})` : task.title,
+    summary: money ? `${title} (${money})` : title,
     description: [task.detail, 'Tarefa do BOB Finanças: marque como feita no app e o evento sai da agenda.'].filter(Boolean).join('\n\n'),
-    start: { dateTime: `${task.dueOn}T09:00:00`, timeZone: TIME_ZONE },
-    end: { dateTime: `${task.dueOn}T09:30:00`, timeZone: TIME_ZONE },
+    // Dia inteiro: `end` é exclusivo, o dia seguinte.
+    start: { date: task.dueOn },
+    end: { date: addDays(task.dueOn, 1) },
     reminders: { useDefault: false, overrides: REMINDERS },
     extendedProperties: { private: { bobTaskKey: task.key } },
+  }
+}
+
+/**
+ * Corpo do PATCH. O PATCH do Google mescla os objetos: um evento com horário
+ * (os antigos, das 9h, ou um que alguém mudou na agenda) ficaria com `date` e
+ * `dateTime` juntos, e o Google recusa ("Invalid start time"). `null` limpa os
+ * campos de horário. E um evento apagado à mão continua existindo como
+ * `cancelled` (o GET devolve 200, não 404): `status: 'confirmed'` o traz de
+ * volta, como o 404 já faria.
+ */
+export function patchBodyFor(event: ReturnType<typeof eventFor>) {
+  return {
+    ...event,
+    status: 'confirmed',
+    start: { ...event.start, dateTime: null, timeZone: null },
+    end: { ...event.end, dateTime: null, timeZone: null },
   }
 }
 
@@ -151,7 +170,7 @@ export async function sync(config: GoogleConfig, options: { onlyKeys?: string[] 
       const current = byKey.get(key)
       if (current && current.signature === signature) continue
       if (current) {
-        const response = await fetch(`${base}/${encodeURIComponent(current.eventId)}`, { method: 'PATCH', headers, body: signature })
+        const response = await fetch(`${base}/${encodeURIComponent(current.eventId)}`, { method: 'PATCH', headers, body: JSON.stringify(patchBodyFor(body)) })
         if (response.status === 404 || response.status === 410) {
           // Apagado à mão na agenda: cria de novo.
           const fresh = await googleJson<{ id: string }>(await fetch(base, { method: 'POST', headers, body: signature }), 'falha ao criar o evento')

@@ -31,6 +31,7 @@ const MIGRATION = [
   '../../supabase/migrations/20261022130000_google_calendar.sql',
   '../../supabase/migrations/20261103120000_task_stages.sql',
   '../../supabase/migrations/20261103130000_task_notes.sql',
+  '../../supabase/migrations/20261110120000_task_subtasks.sql',
 ]
   .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8'))
   .join('\n')
@@ -104,9 +105,15 @@ describe('sincronismo com a agenda (fetch falso, rollback)', { skip }, () => {
         assert.equal((await tx.select().from(googleCalendarEvents)).length, open.length)
         const mine = fake.calls.find((c) => c.method === 'POST' && c.body?.includes('[teste] Emitir nota'))!
         const event = JSON.parse(mine.body!)
-        assert.equal(event.start.timeZone, 'America/Sao_Paulo')
-        assert.match(event.start.dateTime, /T09:00:00$/)
+        // dia inteiro no vencimento, lembrete às 17h da véspera (7h antes da meia-noite)
+        assert.deepEqual(event.start, { date: loaded!.dates.addDays(today, 3) })
+        assert.deepEqual(event.end, { date: loaded!.dates.addDays(today, 4) })
         assert.equal(event.reminders.useDefault, false)
+        assert.deepEqual(event.reminders.overrides, [{ method: 'popup', minutes: 420 }])
+        // o PATCH limpa o horário de um evento antigo, senão o Google recusa
+        const patch = google.patchBodyFor(event)
+        assert.deepEqual(patch.start, { date: event.start.date, dateTime: null, timeZone: null })
+        assert.equal(patch.status, 'confirmed')
         for (const call of fake.calls) assert.ok(!call.url.includes('token-de-atualizacao') || call.url.includes('oauth2'), 'o token só vai ao endpoint de token')
 
         fake.calls.length = 0
