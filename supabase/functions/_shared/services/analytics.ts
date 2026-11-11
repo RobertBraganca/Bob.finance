@@ -334,6 +334,20 @@ export async function categoryBreakdown(
     order by amount desc
   `)
 
+  return toSlices(rows)
+}
+
+type BreakdownRow = {
+  categoryId: number | null
+  parentCategoryId: number | null
+  name: string | null
+  color: string | null
+  amount: number
+  count: number
+}
+
+/** Linhas agregadas (já em ordem) viram fatias com a participação de cada uma no total. */
+function toSlices(rows: BreakdownRow[]): BreakdownSlice[] {
   const total = rows.reduce((sum, r) => sum + r.amount, 0)
   return rows.map((r) => ({
     categoryId: r.categoryId,
@@ -477,15 +491,21 @@ export async function dashboard(range: Range, opts: { includeFutureReceivables?:
           to: addDays(range.from, -1),
           ...scope,
         }
-  // Em sequência, não Promise.all: com as retiradas da PJ, o fan-out passava de 15
-  // consultas e o pooler de transação das Edge Functions trava com isso.
-  const previous = await withWithdrawals(previousRange, await totals(previousRange))
-  const currentReceivableCents = await receivable(range, { includeFuture: opts.includeFutureReceivables })
-  // O período anterior nunca olha pra frente, mesmo com includeFuture —
-  // é só a base de comparação, e "quanto tinha a receber no futuro no
-  // período anterior" não tem leitura útil nenhuma.
-  const previousReceivableCents = await receivable(previousRange)
-  const { byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf } = await categorySpending(range)
+  // Duas frentes, cada uma em sequência (perf, 11/11/2026): no máximo duas
+  // consultas ao mesmo tempo. Um Promise.all de tudo passava de 15 consultas
+  // simultâneas com as retiradas da PJ, e o pooler de transação trava com isso.
+  const [previous, rest] = await Promise.all([
+    totals(previousRange).then((t) => withWithdrawals(previousRange, t)),
+    (async () => {
+      const currentReceivableCents = await receivable(range, { includeFuture: opts.includeFutureReceivables })
+      // O período anterior nunca olha pra frente, mesmo com includeFuture —
+      // é só a base de comparação, e "quanto tinha a receber no futuro no
+      // período anterior" não tem leitura útil nenhuma.
+      const previousReceivableCents = await receivable(previousRange)
+      return { currentReceivableCents, previousReceivableCents, ...(await categorySpending(range)) }
+    })(),
+  ])
+  const { currentReceivableCents, previousReceivableCents, byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf } = rest
 
   return {
     range,
@@ -508,13 +528,76 @@ export async function dashboard(range: Range, opts: { includeFutureReceivables?:
   }
 }
 
-/** As quatro quebras por TAG (despesa e receita, TAG-mãe e folha): o que a tela Categorias e a Visão geral leem. */
+/**
+ * As quatro quebras por TAG (despesa e receita, TAG-mãe e folha): o que a tela
+ * Categorias e a Visão geral leem. Numa consulta só, agregada por folha (perf,
+ * 11/11/2026; eram quatro `categoryBreakdown` em sequência): a quebra por mãe é
+ * a soma das folhas, com o mesmo resultado (conferido em cinco recortes).
+ */
 export async function categorySpending(range: Range) {
-  const byCategory = await categoryBreakdown(range, { flow: 'expense', level: 'parent' })
-  const byCategoryLeaf = await categoryBreakdown(range, { flow: 'expense', level: 'leaf' })
-  const incomeByCategory = await categoryBreakdown(range, { flow: 'income', level: 'parent' })
-  const incomeByCategoryLeaf = await categoryBreakdown(range, { flow: 'income', level: 'leaf' })
-  return { byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf }
+  const rows = await db.execute<{
+    flow: 'expense' | 'income'
+    id: number | null
+    parentId: number | null
+    name: string | null
+    color: string | null
+    groupId: number | null
+    groupParentId: number | null
+    groupName: string | null
+    groupColor: string | null
+    amount: number
+    count: number
+  }>(sql`
+    select
+      x.flow, c.id, c.parent_id as "parentId", c.name, c.color,
+      g.id as "groupId", g.parent_id as "groupParentId", g.name as "groupName", g.color as "groupColor",
+      coalesce(sum(abs(x.amount_cents)), 0) as amount,
+      count(*) as count
+    from (
+      select t.amount_cents, t.category_id, ${FLOW_KIND} as flow
+      from transactions t
+      left join categories c on c.id = t.category_id
+      where t.posted_on between ${range.from} and ${range.to}
+        and t.pending = false and t.ignored = false
+      ${scopeFilter(range)}
+    ) x
+    left join categories c on c.id = x.category_id
+    left join categories g on g.id = coalesce(c.parent_id, c.id)
+    where (x.flow = 'expense' and x.amount_cents < 0) or (x.flow = 'income' and x.amount_cents > 0)
+    group by x.flow, c.id, c.parent_id, c.name, c.color, g.id, g.parent_id, g.name, g.color
+  `)
+
+  const slices = (flow: 'expense' | 'income', level: 'parent' | 'leaf') => {
+    const groups = new Map<string, BreakdownRow>()
+    for (const r of rows) {
+      if (r.flow !== flow) continue
+      const leaf = level === 'leaf'
+      const categoryId = leaf ? r.id : r.groupId
+      const key = String(categoryId)
+      let group = groups.get(key)
+      if (!group) {
+        group = {
+          categoryId,
+          parentCategoryId: leaf ? r.parentId : r.groupParentId,
+          name: leaf ? r.name : r.groupName,
+          color: leaf ? r.color : r.groupColor,
+          amount: 0,
+          count: 0,
+        }
+        groups.set(key, group)
+      }
+      group.amount += Number(r.amount)
+      group.count += Number(r.count)
+    }
+    return toSlices([...groups.values()].sort((a, b) => b.amount - a.amount))
+  }
+
+  return {
+    byCategory: slices('expense', 'parent'),
+    byCategoryLeaf: slices('expense', 'leaf'),
+    incomeByCategory: slices('income', 'parent'),
+    incomeByCategoryLeaf: slices('income', 'leaf'),
+  }
 }
 
 /** No escopo pessoal, a renda inclui as retiradas PJ → PF do recorte (como no Orçamento). */

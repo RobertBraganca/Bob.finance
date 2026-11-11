@@ -88,38 +88,40 @@ do Inter apareceria como "banco não reconhecido" na tela de importação.
 
 ```
 server/src
-  db/         schema (Drizzle), migrações, seed idempotente, reset, backup/restore
+  db/         schema (Drizzle), migrações, seed idempotente
   core/       dinheiro em centavos, datas ISO, normalização e hash de dedupe
   csv/        perfis de banco, parser genérico, detecção por cabeçalho
   categorize/ motor de regras + memória de correções
   services/   toda a lógica de negócio e as agregações SQL
   routes/     Fastify, validação com Zod: ledger (contas, import, lançamentos),
-              insights (tudo derivado), pricing, backups
+              insights (tudo derivado), pricing
 shared
-  transformação pura que o front e o harness de verificação usam igual, sem
-  React e sem banco (hoje: o grafo de duas colunas do Sankey de fluxo entre
-  contas). Alias `@shared/*`
+  regras puras que o front e o servidor usam igual, sem
+  React e sem banco. Alias `@shared/*`
 src
   lib/        tokens de gráfico, formatação pt-BR, cliente HTTP, estado de filtro
   components/ primitivos de UI, gráficos, shell
   pages/      as telas do produto (ver docs/PRD.md, seção 5)
 scripts
-  make-fixtures.ts   gera extratos sintéticos dos 6 bancos
-  verify.ts          harness de verificação ponta a ponta (contagem em "Verificação")
-  verify-backup.ts   verificação da camada de backup, banco e diretório próprios
-  backup.ts          snapshot manual sob demanda
-  restore.ts         lista os snapshots e restaura um, com confirmação explícita
-  backup-prune.ts    limpeza manual, preservando todo backup manual
-  check-contrast.mjs valida contraste dos tokens de texto
-  demo.ts            carrega dados de demonstração
+  make-fixtures.ts     gera extratos sintéticos dos 6 bancos
+  deploy-functions.ts  publica Edge Functions e invalida o cache das leituras
+  demo.ts              carrega dados de demonstração
 ```
+
+**Publicar funções:** `npm run deploy:fn -- insights ledger` (em vez de
+`npx.cmd supabase functions deploy ...`). Publica cada função e depois sobe a
+`data_version`, para nenhuma resposta guardada no cache sobreviver a um deploy
+que mudou o formato dela.
 
 ### Decisões que sustentam o resto
 
 **`transactions` é a única fonte de verdade.** Todo painel — visão geral, diário,
 metas, dívida — é uma agregação SQL sobre essa tabela. Não existe tabela de
-relatório, rollup em cache nem cópia de lançamento em outro lugar. É por isso que
-nenhuma tela discorda de outra.
+relatório, rollup nem cópia de lançamento em outro lugar. É por isso que
+nenhuma tela discorda de outra. O único cache (`api_cache`, desde 11/11/2026)
+guarda a resposta pronta de uma leitura da `insights` e só vale enquanto nenhuma
+tabela mudou no dia: um trigger sobe a `data_version` a cada escrita, e a
+resposta seguinte é calculada de novo (`_shared/core/responseCache.ts`).
 
 **Um banco novo é uma linha, não um `if`.** Delimitador, codificação, formato de
 data, separadores, convenção de sinal, mapa de colunas, assinatura de cabeçalho e

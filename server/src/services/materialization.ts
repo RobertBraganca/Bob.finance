@@ -3,6 +3,7 @@ import { db } from '../db/client'
 import { todayIso } from '../core/dates'
 import { materializeAll } from './cashFlow'
 import { materializeAllDebts } from './debt'
+import { readState, writeState } from './responseCacheStore'
 
 /**
  * Gera as ocorrências futuras de previsões e parcelas de dívida só quando algo
@@ -27,9 +28,14 @@ import { materializeAllDebts } from './debt'
  * geração, a leitura segue direto. Na dúvida, a assinatura muda e a geração
  * roda: errar para esse lado custa só tempo.
  *
- * O estado fica no módulo. Numa Edge Function, cada instância nova paga uma
- * geração completa na primeira leitura, como antes; as seguintes, não.
+ * A última assinatura fica no banco (`api_cache`, chave `__materialization`),
+ * não só na memória da instância (11/11/2026): as instâncias da Edge Function
+ * esfriam rápido e cada instância nova pagava a geração inteira (73 consultas,
+ * ~3 s medidos daqui). `LOGIC_VERSION` entra na assinatura: mudou a regra de
+ * geração, sobe o número e a próxima leitura gera de novo.
  */
+const LOGIC_VERSION = '1'
+const STATE_KEY = '__materialization'
 let lastSignature: string | null = null
 let inFlight: Promise<void> | null = null
 
@@ -44,18 +50,32 @@ async function signature(): Promise<string> {
         where t.pending = true and (t.forecast_id is not null or t.debt_id is not null))
     )) as fp
   `)
-  return `${todayIso().slice(0, 7)}:${rows[0]?.fp ?? ''}`
+  return `${LOGIC_VERSION}:${todayIso().slice(0, 7)}:${rows[0]?.fp ?? ''}`
+}
+
+/** A última assinatura gerada: a da instância, ou a guardada no banco por outra. */
+async function storedSignature(): Promise<string | null> {
+  if (lastSignature) return lastSignature
+  try {
+    return await readState(STATE_KEY)
+  } catch {
+    return null // sem a tabela: gera, como antes
+  }
 }
 
 async function run(): Promise<void> {
-  const before = await signature()
-  if (before === lastSignature) return
+  const [before, stored] = await Promise.all([signature(), storedSignature()])
+  if (before === stored) {
+    lastSignature = before
+    return
+  }
   await materializeAll()
   await materializeAllDebts()
   // Depois de criar linhas, a contagem de pendências vinculadas mudou: a
   // assinatura guardada é a do estado JÁ gerado, senão a próxima leitura
   // rodaria tudo de novo à toa.
   lastSignature = await signature()
+  await writeState(STATE_KEY, lastSignature).catch(() => {})
 }
 
 /** Junta chamadas simultâneas (o Painel pede as três listas ao mesmo tempo). */

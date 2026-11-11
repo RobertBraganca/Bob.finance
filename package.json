@@ -22,7 +22,8 @@
     "test:clients": "tsx --test scripts/clients/*.test.ts",
     "test:tasks": "tsx --test --test-concurrency=1 scripts/tasks/*.test.ts",
     "test:accountant": "tsx --test scripts/accountant/*.test.ts",
-    "test:irpf": "tsx --test scripts/irpf/*.test.ts"
+    "test:irpf": "tsx --test scripts/irpf/*.test.ts",
+    "deploy:fn": "tsx scripts/deploy-functions.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
