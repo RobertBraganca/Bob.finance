@@ -1,5 +1,7 @@
 import '@supabase/functions-js/edge-runtime.d.ts'
 import { runInRequestScope } from '../_shared/core/requestCache.ts'
+import { responseCache } from '../_shared/core/responseCache.ts'
+import { readCached, writeCached } from '../_shared/services/responseCacheStore.ts'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { z, ZodError } from 'zod'
@@ -126,6 +128,20 @@ app.use('*', cors({ origin: '*' }))
 // funções caras várias vezes, e aqui cada uma roda uma vez por requisição.
 app.use('*', (_c, next) => runInRequestScope(next))
 app.use('*', requireAdmin)
+// O runtime das Edge Functions deixa terminar trabalho depois da resposta; fora dele, a gravação é esperada.
+const edgeRuntime = (globalThis as { EdgeRuntime?: { waitUntil(work: Promise<unknown>): void } }).EdgeRuntime
+// Leituras repetidas saem prontas do banco enquanto nenhum dado mudar no dia
+// (core/responseCache). Depois do requireAdmin: nada guardado sai sem login.
+// Google lê a conta conectada lá fora, então passa direto.
+app.use(
+  '*',
+  responseCache({
+    store: { read: readCached, write: writeCached },
+    today: todayIso,
+    skip: (path) => path.includes('/google/'),
+    defer: edgeRuntime ? (work) => edgeRuntime.waitUntil(work) : undefined,
+  }),
+)
 
 app.onError((error, c) => {
   if (error instanceof ZodError) return c.json({ error: 'dados inválidos', issues: error.issues }, 400)
