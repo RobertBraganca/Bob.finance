@@ -6,7 +6,8 @@ import { addMonths, daysInMonth } from './dates.ts'
  * ocorrências entram na lista. Sem banco, para testar.
  */
 
-export type TaskRecurrence = 'once' | 'monthly' | 'yearly'
+/** Na semanal, `dueDay` é o dia da semana: 1 (segunda) a 7 (domingo), como na ISO 8601. */
+export type TaskRecurrence = 'once' | 'monthly' | 'yearly' | 'weekly'
 
 export type TaskTemplate = {
   recurrence: TaskRecurrence
@@ -32,6 +33,18 @@ export function occurrenceDates(t: TaskTemplate, from: string, to: string): stri
   if (t.recurrence === 'once') return t.dueOn && t.dueOn >= lower && t.dueOn <= upper ? [t.dueOn] : []
 
   const out: string[] = []
+  if (t.recurrence === 'weekly') {
+    if (!t.dueDay || t.dueDay < 1 || t.dueDay > 7) return []
+    // Primeiro dia da janela que cai no dia da semana pedido; daí de 7 em 7.
+    const start = Date.parse(`${lower}T00:00:00Z`)
+    const weekday = ((new Date(start).getUTCDay() + 6) % 7) + 1
+    for (let ms = start + (((t.dueDay - weekday + 7) % 7) * 86_400_000); ; ms += 7 * 86_400_000) {
+      const date = new Date(ms).toISOString().slice(0, 10)
+      if (date > upper) break
+      out.push(date)
+    }
+    return out
+  }
   if (t.recurrence === 'monthly') {
     if (!t.dueDay) return []
     for (let p = lower.slice(0, 7); p <= upper.slice(0, 7); p = addMonths(p, 1)) {

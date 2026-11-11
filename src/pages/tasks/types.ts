@@ -26,7 +26,15 @@ export type TaskOccurrence = {
   bucket: TaskBucket
   stage: TaskStage
   noteCount: number
+  /** a tarefa principal que junta esta (uma sua, ou um grupo automático como "Contas a pagar") */
+  group: TaskGroupRef | null
 }
+
+/** Tarefa principal: as suas têm `taskId`; as automáticas (contas, fechamento), não. */
+export type TaskGroupRef = { key: string; title: string; taskId: number | null }
+
+/** As suas tarefas principais, inclusive as ainda sem subtarefa na janela. */
+export type TaskGroupInfo = TaskGroupRef & { taskId: number; notes: string | null; subtasks: number }
 
 export type TaskNote = {
   id: number
@@ -47,6 +55,7 @@ export type TaskDetailResponse = {
 
 export type TasksResponse = {
   tasks: TaskOccurrence[]
+  groups: TaskGroupInfo[]
   summary: Record<TaskBucket, number>
   stages: Record<TaskStage, number>
   window: { from: string; to: string; today: string }
@@ -111,12 +120,16 @@ export function stageOptions(t: TaskOccurrence): Array<{ value: TaskStage; label
 
 export type ManualTask = {
   id: number
+  /** a tarefa principal desta, quando é uma subtarefa */
+  parentId: number | null
   title: string
-  kind: 'custom' | 'nf'
+  /** `group`: tarefa principal, só junta subtarefas (sem data) */
+  kind: 'custom' | 'nf' | 'group'
   clientId: number | null
   amountCents: number | null
   notes: string | null
-  recurrence: 'once' | 'monthly' | 'yearly'
+  /** na semanal, `dueDay` é o dia da semana: 1 (segunda) a 7 (domingo) */
+  recurrence: 'once' | 'monthly' | 'yearly' | 'weekly'
   dueOn: string | null
   dueDay: number | null
   dueMonth: number | null
@@ -148,6 +161,22 @@ export const BUCKET_LABEL: Record<TaskBucket, string> = {
 
 export const MONTH_LABEL = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
 
+/** Dia da semana da recorrência semanal: índice 0 = 1 (segunda), como na ISO 8601. */
+export const WEEKDAY_LABEL = ['segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo']
+
+/**
+ * O título do passo dentro da principal: "Fechamento de outubro de 2026: todas
+ * as transações..." vira "Todas as transações..." quando já está no grupo dele.
+ * Em "Contas a pagar" e "Contas a receber" o "Pagar: " / "Receber: " sai.
+ */
+export function stepTitle(t: TaskOccurrence): string {
+  const verb = t.group?.key === 'auto:pending_expense' ? 'Pagar: ' : t.group?.key === 'auto:pending_income' ? 'Receber: ' : null
+  const prefix = verb ?? (t.group ? `${t.group.title}: ` : null)
+  if (!prefix || !t.title.startsWith(prefix)) return t.title
+  const rest = t.title.slice(prefix.length)
+  return rest.charAt(0).toUpperCase() + rest.slice(1)
+}
+
 /** "venceu há 3 dias", "vence hoje", "vence em 5 dias": a distância, sem julgamento. */
 export function dueLabel(dueOn: string, today: string): string {
   const days = Math.round((Date.parse(`${dueOn}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000)
@@ -158,7 +187,13 @@ export function dueLabel(dueOn: string, today: string): string {
 }
 
 export function recurrenceLabel(t: ManualTask): string {
+  if (t.kind === 'group') return 'tarefa principal'
   if (t.recurrence === 'once') return t.dueOn ? `em ${t.dueOn.split('-').reverse().join('/')}` : 'uma vez'
+  if (t.recurrence === 'weekly') {
+    const day = WEEKDAY_LABEL[(t.dueDay ?? 1) - 1] ?? 'semana'
+    const until = t.endsOn ? ` até ${t.endsOn.split('-').reverse().slice(0, 2).join('/')}` : ''
+    return `${day === 'sábado' || day === 'domingo' ? 'todo' : 'toda'} ${day}${until}`
+  }
   if (t.recurrence === 'monthly') return `todo dia ${t.dueDay}`
   return `todo ${t.dueDay} de ${MONTH_LABEL[(t.dueMonth ?? 1) - 1]}`
 }

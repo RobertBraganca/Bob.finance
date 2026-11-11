@@ -16,7 +16,8 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('pt-BR', { dateStyle: 
 /**
  * Google Agenda (docs/specs/tarefas-comercial-contador, fase 3): conectar a
  * conta, ver quando sincronizou e desconectar. Cada tarefa aberta vira um
- * evento às 9h do dia, com lembrete; marcar como feita tira o evento.
+ * evento de dia inteiro, com lembrete às 17h da véspera; marcar como feita
+ * tira o evento.
  */
 export function GoogleCalendarCard() {
   const toast = useToast()
@@ -65,7 +66,7 @@ export function GoogleCalendarCard() {
   }, [s, sync])
 
   return (
-    <Card title="Google Agenda" subtitle="Cada tarefa aberta vira um evento às 9h do dia, com lembrete na hora e um dia antes">
+    <Card title="Google Agenda" subtitle="Cada tarefa aberta vira um evento de dia inteiro, com lembrete às 17h da véspera">
       {status.isError ? (
         <p className="muted" style={{ margin: 0, fontSize: 'var(--text-sm)' }}>Não foi possível ler a conexão agora.</p>
       ) : !s ? (

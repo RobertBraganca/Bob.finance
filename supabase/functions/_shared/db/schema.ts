@@ -1678,13 +1678,17 @@ export const assistantActions = pgTable(
  * Tarefas financeiras (docs/specs/tarefas-comercial-contador, fase 1).
  * As automáticas são calculadas na leitura; aqui só as manuais e o "feito".
  * ------------------------------------------------------------------ */
-export const taskKindEnum = pgEnum('task_kind', ['custom', 'nf'])
-export const taskRecurrenceEnum = pgEnum('task_recurrence', ['once', 'monthly', 'yearly'])
+/** `group`: a tarefa principal, que só junta subtarefas (não vence, não vira evento). */
+export const taskKindEnum = pgEnum('task_kind', ['custom', 'nf', 'group'])
+/** `weekly`: `due_day` é o dia da semana, 1 (segunda) a 7 (domingo). */
+export const taskRecurrenceEnum = pgEnum('task_recurrence', ['once', 'monthly', 'yearly', 'weekly'])
 
 export const tasks = pgTable(
   'tasks',
   {
     id: id(),
+    /** a tarefa principal (kind = group) desta subtarefa; um nível só */
+    parentId: int('parent_id').references((): AnyPgColumn => tasks.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     kind: taskKindEnum('kind').notNull().default('custom'),
     clientId: int('client_id').references(() => clients.id, { onDelete: 'set null' }),
@@ -1700,7 +1704,7 @@ export const tasks = pgTable(
     createdAt: text('created_at').notNull().default(now),
     updatedAt: text('updated_at').notNull().default(now),
   },
-  (t) => [index('tasks_active_idx').on(t.active), index('tasks_client_idx').on(t.clientId)],
+  (t) => [index('tasks_active_idx').on(t.active), index('tasks_client_idx').on(t.clientId), index('tasks_parent_idx').on(t.parentId)],
 )
 
 export const taskCompletions = pgTable(

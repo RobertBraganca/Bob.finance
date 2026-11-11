@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { money } from '../../lib/format'
 import { Button, Field, Icon, Modal, Select, TextInput, useToast } from '../../components/ui'
-import { goalOf } from './filters'
+import { GROUP_SOURCE_LABEL, type TaskGroupItem, type TaskItem } from './filters'
 import {
   SOURCE_LABEL,
   STAGE_LABEL,
@@ -13,6 +13,7 @@ import {
   dueLabel,
   isMovable,
   stageOptions,
+  stepTitle,
   type TaskOccurrence,
   type TaskStage,
   type TasksResponse,
@@ -128,25 +129,38 @@ export function useCompleteTask() {
  * Linhas de tarefa: caixa para marcar quando dá para resolver aqui; quando a
  * tarefa se resolve na tela dona (pendência a baixar, saque a fazer), em vez da
  * caixa vem o atalho para lá, e ela some ou fecha sozinha.
+ *
+ * Com `items`, a tarefa principal vira uma linha só, com o progresso e o
+ * próximo passo; a seta abre as subtarefas ali mesmo, e o título abre o detalhe
+ * da principal. `inGroup`: a lista já está dentro de uma principal (o detalhe
+ * dela), então o nome da principal não se repete em cada linha.
  */
 export function TaskList({
   tasks,
+  items,
   today,
   compact,
   withStage,
+  inGroup,
   onOpen,
+  onOpenGroup,
 }: {
-  tasks: TaskOccurrence[]
+  tasks?: TaskOccurrence[]
+  items?: TaskItem[]
   today: string
   compact?: boolean
   withStage?: boolean
+  inGroup?: boolean
   /** abre o detalhe (comentários e histórico) ao clicar no título */
   onOpen?: (task: TaskOccurrence) => void
+  /** abre o detalhe da tarefa principal */
+  onOpenGroup?: (group: TaskGroupItem) => void
 }) {
   const navigate = useNavigate()
   const complete = useCompleteTask()
   const setStage = useSetStage()
   const [askingReference, setAskingReference] = useState<TaskOccurrence | null>(null)
+  const [expanded, setExpanded] = useState<string[]>([])
 
   const toggle = (t: TaskOccurrence) => {
     if (t.done) return complete.mutate({ key: t.key, done: false })
@@ -159,59 +173,107 @@ export function TaskList({
     setStage.mutate({ task: t, stage })
   }
 
+  const renderTask = (t: TaskOccurrence, nested: boolean) => {
+    // Fora da principal, a linha diz de qual principal ela é; dentro, só o passo.
+    const showGroup = !nested && !inGroup && t.group !== null
+    const title = nested || inGroup ? stepTitle(t) : t.title
+    return (
+      <li key={t.key} className={`task-row${t.done ? ' task-row--done' : ''}${t.bucket === 'overdue' ? ' task-row--overdue' : ''}`}>
+        {t.completable || (t.done && t.status) ? (
+          <input
+            type="checkbox"
+            className="checkbox"
+            checked={t.done}
+            disabled={complete.isPending || (t.done && !t.completable && t.auto)}
+            onChange={() => toggle(t)}
+            aria-label={t.done ? `Reabrir: ${t.title}` : `Marcar como feita: ${t.title}`}
+          />
+        ) : (
+          <span className="task-row__auto" title="Fecha sozinha quando a pendência é resolvida na tela indicada" aria-hidden="true">
+            <Icon name={t.done ? 'check' : 'clock'} size={14} />
+          </span>
+        )}
+        <span className="task-row__body">
+          {onOpen ? (
+            <button type="button" className="task-row__title task-row__open" onClick={() => onOpen(t)}>
+              {title}
+            </button>
+          ) : (
+            <span className="task-row__title">{title}</span>
+          )}
+          <span className="task-row__meta">
+            {showGroup && t.group?.taskId ? (
+              <span className="task-row__goal">{t.group.title}</span>
+            ) : nested || inGroup ? null : (
+              <span className="badge">{SOURCE_LABEL[t.source]}</span>
+            )}
+            <span>{doneLabel(t, today) ?? dueLabel(t.dueOn, today)}</span>
+            {t.noteCount > 0 && <NoteCount count={t.noteCount} />}
+            {!withStage && (t.stage === 'doing' || t.stage === 'paused') && <span className="badge">{STAGE_LABEL[t.stage]}</span>}
+            {!compact && t.detail && <span className="muted">{t.detail}</span>}
+          </span>
+        </span>
+        <span className="task-row__end">
+          {t.amountCents !== null && <strong className="tabular">{money(t.amountCents)}</strong>}
+          {withStage && <StageSelect task={t} onChange={(stage) => move(t, stage)} />}
+          {t.link && <Button variant="quiet" size="sm" icon="arrowRight" title="Abrir onde se resolve" onClick={() => navigate(t.link!)} />}
+        </span>
+      </li>
+    )
+  }
+
+  const renderGroup = (g: TaskGroupItem) => {
+    const open = expanded.includes(g.key)
+    const listId = `subtasks-${g.key.replace(/[^a-z0-9]/gi, '-')}`
+    return (
+      <li key={g.key} className={`task-group${g.stage === 'overdue' ? ' task-group--overdue' : ''}${g.next === null ? ' task-group--done' : ''}`}>
+        <div className="task-row task-group__row">
+          <button
+            type="button"
+            className="task-group__toggle"
+            aria-expanded={open}
+            aria-controls={listId}
+            aria-label={`${open ? 'Recolher' : 'Mostrar'} as ${g.total} subtarefas de ${g.title}`}
+            onClick={() => setExpanded((keys) => (open ? keys.filter((k) => k !== g.key) : [...keys, g.key]))}
+          >
+            <Icon name={open ? 'chevronDown' : 'chevronRight'} size={16} />
+          </button>
+          <span className="task-row__body">
+            {onOpenGroup ? (
+              <button type="button" className="task-row__title task-row__open task-group__title" onClick={() => onOpenGroup(g)}>
+                {g.title}
+              </button>
+            ) : (
+              <span className="task-row__title task-group__title">{g.title}</span>
+            )}
+            <span className="task-row__meta">
+              <GroupBadge group={g} />
+              <GroupProgressBar group={g} />
+              {g.next ? (
+                <span className="task-group__next">
+                  Próximo: {stepTitle(g.next)} · <span className={g.next.stage === 'overdue' ? 'kanban-card__late' : undefined}>{dueLabel(g.next.dueOn, today)}</span>
+                </span>
+              ) : (
+                <span>tudo resolvido</span>
+              )}
+            </span>
+          </span>
+          <span className="task-row__end">{g.openCents !== null && <strong className="tabular">{money(g.openCents)}</strong>}</span>
+        </div>
+        {open && (
+          <ul id={listId} className="task-list task-list--sub">
+            {g.tasks.map((t) => renderTask(t, true))}
+          </ul>
+        )}
+      </li>
+    )
+  }
+
+  const rows: TaskItem[] = items ?? (tasks ?? []).map((t) => ({ kind: 'task', key: t.key, task: t, dueOn: t.dueOn, stage: t.stage }))
+
   return (
     <>
-      <ul className="task-list">
-        {tasks.map((t) => {
-          const goal = goalOf(t)
-          return (
-            <li key={t.key} className={`task-row${t.done ? ' task-row--done' : ''}${t.bucket === 'overdue' ? ' task-row--overdue' : ''}`}>
-              {t.completable || (t.done && t.status) ? (
-                <input
-                  type="checkbox"
-                  className="checkbox"
-                  checked={t.done}
-                  disabled={complete.isPending || (t.done && !t.completable && t.auto)}
-                  onChange={() => toggle(t)}
-                  aria-label={t.done ? `Reabrir: ${t.title}` : `Marcar como feita: ${t.title}`}
-                />
-              ) : (
-                <span className="task-row__auto" title="Fecha sozinha quando a pendência é resolvida na tela indicada" aria-hidden="true">
-                  <Icon name={t.done ? 'check' : 'clock'} size={14} />
-                </span>
-              )}
-              <span className="task-row__body">
-                {onOpen ? (
-                  <button type="button" className="task-row__title task-row__open" onClick={() => onOpen(t)} aria-label={goal ? t.title : undefined}>
-                    {goal ? goal.step : t.title}
-                  </button>
-                ) : (
-                  <span className="task-row__title">{goal ? goal.step : t.title}</span>
-                )}
-                <span className="task-row__meta">
-                  {goal ? (
-                    <span className="task-row__goal">
-                      {goal.name}
-                      {goal.level && ` · Nível ${goal.level}`}
-                    </span>
-                  ) : (
-                    <span className="badge">{SOURCE_LABEL[t.source]}</span>
-                  )}
-                  <span>{doneLabel(t, today) ?? dueLabel(t.dueOn, today)}</span>
-                  {t.noteCount > 0 && <NoteCount count={t.noteCount} />}
-                  {!withStage && (t.stage === 'doing' || t.stage === 'paused') && <span className="badge">{STAGE_LABEL[t.stage]}</span>}
-                  {!compact && t.detail && !goal && <span className="muted">{t.detail}</span>}
-                </span>
-              </span>
-              <span className="task-row__end">
-                {t.amountCents !== null && <strong className="tabular">{money(t.amountCents)}</strong>}
-                {withStage && <StageSelect task={t} onChange={(stage) => move(t, stage)} />}
-                {t.link && <Button variant="quiet" size="sm" icon="arrowRight" title="Abrir onde se resolve" onClick={() => navigate(t.link!)} />}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
+      <ul className="task-list">{rows.map((item) => (item.kind === 'group' ? renderGroup(item) : renderTask(item.task, false)))}</ul>
       {askingReference && (
         <CompleteWithReference
           task={askingReference}
@@ -221,6 +283,27 @@ export function TaskList({
         />
       )}
     </>
+  )
+}
+
+/** O selo da principal: "Meta · Nível 2" nas suas, a fonte nas automáticas ("A pagar"). */
+export function GroupBadge({ group }: { group: TaskGroupItem }) {
+  if (group.taskId === null) return <span className="badge">{GROUP_SOURCE_LABEL[group.tasks[0]!.source] ?? SOURCE_LABEL[group.tasks[0]!.source]}</span>
+  return <span className="badge">{group.level ? `Nível ${group.level}` : 'Principal'}</span>
+}
+
+/** "3 de 7" com a barrinha: quantas subtarefas já foram feitas ou encerradas. */
+export function GroupProgressBar({ group }: { group: TaskGroupItem }) {
+  const pct = group.total ? Math.round((group.resolved / group.total) * 100) : 0
+  return (
+    <span className="task-progress" role="img" aria-label={`${group.resolved} de ${group.total} resolvidas`}>
+      <span className="task-progress__bar" aria-hidden="true">
+        <span style={{ width: `${pct}%` }} />
+      </span>
+      <span className="tabular" aria-hidden="true">
+        {group.resolved} de {group.total}
+      </span>
+    </span>
   )
 }
 

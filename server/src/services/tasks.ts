@@ -66,11 +66,25 @@ export type TaskOccurrence = {
   stage: TaskStage
   /** comentários escritos no detalhe da tarefa */
   noteCount: number
+  /** a tarefa principal que junta esta: uma sua (com subtarefas) ou um grupo automático (contas a pagar) */
+  group: TaskGroupRef | null
 }
+
+/**
+ * Tarefa principal. As suas têm `taskId` (uma linha `kind = group`); as
+ * automáticas juntam o que vem da mesma fonte (contas a pagar, a receber, o
+ * fechamento do mês) e não existem no banco.
+ */
+export type TaskGroupRef = { key: string; title: string; taskId: number | null }
+
+/** As suas tarefas principais, inclusive as ainda sem subtarefa na janela. */
+export type TaskGroupInfo = TaskGroupRef & { taskId: number; notes: string | null; subtasks: number }
 
 export type TaskInput = {
   title: string
-  kind?: 'custom' | 'nf'
+  kind?: 'custom' | 'nf' | 'group'
+  /** a tarefa principal desta (só para subtarefas) */
+  parentId?: number | null
   clientId?: number | null
   amountCents?: number | null
   notes?: string | null
@@ -104,7 +118,8 @@ export async function listTasks(window = defaultWindow(), executor: DbExecutor =
   const today = todayIso()
   const weekEnd = addDays(today, 7)
   const period = today.slice(0, 7)
-  const out: Omit<TaskOccurrence, 'bucket' | 'stage' | 'noteCount'>[] = []
+  const out: Omit<TaskOccurrence, 'bucket' | 'stage' | 'noteCount' | 'group'>[] = []
+  const groupOf = new Map<string, TaskGroupRef>()
 
   const completions = new Map(
     (await executor.select().from(taskCompletions)).map((c) => [c.taskKey, c] as const),
@@ -133,9 +148,19 @@ export async function listTasks(window = defaultWindow(), executor: DbExecutor =
     .leftJoin(clients, eq(clients.id, tasks.clientId))
     .where(eq(tasks.active, true))
     .orderBy(asc(tasks.id))
+  // A principal não vence: só junta as subtarefas. Pausada, leva as subtarefas junto.
+  const groups = new Map<number, TaskGroupInfo>()
+  for (const { task } of manual) {
+    if (task.kind === 'group') groups.set(task.id, { key: `group:${task.id}`, title: task.title, taskId: task.id, notes: task.notes, subtasks: 0 })
+  }
   for (const { task, clientName } of manual) {
+    if (task.kind === 'group') continue
+    const parent = task.parentId ? groups.get(task.parentId) : undefined
+    if (task.parentId && !parent) continue
+    if (parent) parent.subtasks += 1
     for (const dueOn of occurrenceDates(task, window.from, window.to)) {
       const key = `manual:${task.id}:${dueOn}`
+      if (parent) groupOf.set(key, { key: parent.key, title: parent.title, taskId: parent.taskId })
       out.push({
         ...base,
         key,
@@ -303,22 +328,35 @@ export async function listTasks(window = defaultWindow(), executor: DbExecutor =
     })
   }
 
-  const list = out
+  const list: TaskOccurrence[] = out
     .map((t) => ({
       ...t,
       bucket: bucketOf(t.dueOn, t.done, today, weekEnd),
       stage: stageOf(t.dueOn, t.status, t.done, today),
       noteCount: noteCounts.get(t.key) ?? 0,
+      group: groupOf.get(t.key) ?? autoGroup(t.source, previous),
     }))
     .sort((a, b) => Number(a.done) - Number(b.done) || a.dueOn.localeCompare(b.dueOn) || a.title.localeCompare(b.title, 'pt-BR'))
   const count = (bucket: TaskBucket) => list.filter((t) => t.bucket === bucket).length
   const stages = Object.fromEntries(TASK_STAGES.map((s) => [s, list.filter((t) => t.stage === s).length])) as Record<TaskStage, number>
   return {
     tasks: list,
+    groups: [...groups.values()],
     summary: { overdue: count('overdue'), today: count('today'), week: count('week'), later: count('later'), done: count('done') },
     stages,
     window: { ...window, today },
   }
+}
+
+/**
+ * Grupos automáticos: as contas a pagar e a receber e os itens do fechamento
+ * viram uma tarefa principal cada, em vez de um cartão por conta.
+ */
+function autoGroup(source: TaskSource, closingPeriod: string): TaskGroupRef | null {
+  if (source === 'pending_expense') return { key: 'auto:pending_expense', title: 'Contas a pagar', taskId: null }
+  if (source === 'pending_income') return { key: 'auto:pending_income', title: 'Contas a receber', taskId: null }
+  if (source === 'closing') return { key: `auto:closing:${closingPeriod}`, title: `Fechamento de ${monthName(closingPeriod)}`, taskId: null }
+  return null
 }
 
 /* ------------------------------------------------------------------ *
@@ -512,36 +550,58 @@ export async function deleteTaskNote(id: number, executor: DbExecutor = db) {
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/
 
-function validate(input: TaskInput, current?: typeof tasks.$inferSelect) {
+async function validate(input: TaskInput, executor: DbExecutor, current?: typeof tasks.$inferSelect) {
+  if (input.title !== undefined && !input.title.trim()) throw new TaskError('dê um título à tarefa')
+  const kind = input.kind ?? current?.kind ?? 'custom'
+  const parentId = input.parentId !== undefined ? input.parentId : (current?.parentId ?? null)
+
+  if (kind === 'group') {
+    // A principal só junta: não vence, não tem cliente, e não fica dentro de outra.
+    if (parentId) throw new TaskError('uma tarefa principal não fica dentro de outra')
+    return
+  }
+  if (current?.kind === 'group') {
+    const children = await executor.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentId, current.id)).limit(1)
+    if (children.length > 0) throw new TaskError('esta tarefa principal tem subtarefas: mova ou exclua as subtarefas antes de mudar o tipo')
+  }
+  if (parentId) {
+    if (current && parentId === current.id) throw new TaskError('a tarefa não pode ficar dentro dela mesma')
+    const parent = (await executor.select({ kind: tasks.kind }).from(tasks).where(eq(tasks.id, parentId)))[0]
+    if (!parent || parent.kind !== 'group') throw new TaskError('escolha uma tarefa principal que exista')
+  }
+
   const recurrence = input.recurrence ?? current?.recurrence ?? 'once'
   const dueOn = input.dueOn !== undefined ? input.dueOn : (current?.dueOn ?? null)
   const dueDay = input.dueDay !== undefined ? input.dueDay : (current?.dueDay ?? null)
   const dueMonth = input.dueMonth !== undefined ? input.dueMonth : (current?.dueMonth ?? null)
-  if (input.title !== undefined && !input.title.trim()) throw new TaskError('dê um título à tarefa')
   if (recurrence === 'once' && !(dueOn && ISO.test(dueOn))) throw new TaskError('informe a data da tarefa')
-  if (recurrence !== 'once' && !(dueDay && dueDay >= 1 && dueDay <= 31)) throw new TaskError('informe o dia do vencimento (1 a 31)')
+  if (recurrence === 'weekly' && !(dueDay && dueDay >= 1 && dueDay <= 7)) throw new TaskError('informe o dia da semana')
+  if ((recurrence === 'monthly' || recurrence === 'yearly') && !(dueDay && dueDay >= 1 && dueDay <= 31))
+    throw new TaskError('informe o dia do vencimento (1 a 31)')
   if (recurrence === 'yearly' && !(dueMonth && dueMonth >= 1 && dueMonth <= 12)) throw new TaskError('informe o mês do vencimento')
-  const kind = input.kind ?? current?.kind ?? 'custom'
   const clientId = input.clientId !== undefined ? input.clientId : (current?.clientId ?? null)
   if (kind === 'nf' && !clientId) throw new TaskError('a tarefa de nota fiscal precisa de um cliente')
 }
 
 export async function createTask(input: TaskInput, executor: DbExecutor = db) {
-  validate(input)
-  const recurrence = input.recurrence ?? 'once'
+  await validate(input, executor)
+  const kind = input.kind ?? 'custom'
+  const group = kind === 'group'
+  const recurrence = group ? 'once' : (input.recurrence ?? 'once')
   return (
     await executor
       .insert(tasks)
       .values({
         title: input.title.trim(),
-        kind: input.kind ?? 'custom',
-        clientId: input.clientId ?? null,
-        amountCents: input.amountCents ?? null,
+        kind,
+        parentId: group ? null : (input.parentId ?? null),
+        clientId: group ? null : (input.clientId ?? null),
+        amountCents: group ? null : (input.amountCents ?? null),
         notes: input.notes?.trim() || null,
         recurrence,
-        dueOn: recurrence === 'once' ? (input.dueOn ?? null) : null,
-        dueDay: recurrence === 'once' ? null : (input.dueDay ?? null),
-        dueMonth: recurrence === 'yearly' ? (input.dueMonth ?? null) : null,
+        dueOn: !group && recurrence === 'once' ? (input.dueOn ?? null) : null,
+        dueDay: group || recurrence === 'once' ? null : (input.dueDay ?? null),
+        dueMonth: !group && recurrence === 'yearly' ? (input.dueMonth ?? null) : null,
         startsOn: input.startsOn ?? todayIso(),
         endsOn: input.endsOn ?? null,
         active: input.active ?? true,
@@ -553,18 +613,25 @@ export async function createTask(input: TaskInput, executor: DbExecutor = db) {
 export async function updateTask(id: number, patch: Partial<TaskInput>, executor: DbExecutor = db) {
   const current = (await executor.select().from(tasks).where(eq(tasks.id, id)))[0]
   if (!current) return null
-  validate({ title: current.title, ...patch } as TaskInput, current)
+  await validate({ title: current.title, ...patch } as TaskInput, executor, current)
   const set: Record<string, unknown> = { updatedAt: sql`now_iso()` }
-  for (const field of ['title', 'kind', 'clientId', 'amountCents', 'notes', 'recurrence', 'dueOn', 'dueDay', 'dueMonth', 'startsOn', 'endsOn', 'active'] as const) {
+  const fields = ['title', 'kind', 'parentId', 'clientId', 'amountCents', 'notes', 'recurrence', 'dueOn', 'dueDay', 'dueMonth', 'startsOn', 'endsOn', 'active'] as const
+  for (const field of fields) {
     if (patch[field] !== undefined) set[field] = typeof patch[field] === 'string' && field !== 'dueOn' ? (patch[field] as string).trim() || null : patch[field]
   }
   return (await executor.update(tasks).set(set).where(eq(tasks.id, id)).returning())[0] ?? null
 }
 
-/** Apaga a tarefa e o "feito" das ocorrências dela. */
+/**
+ * Apaga a tarefa e o "feito" das ocorrências dela. Numa principal, as
+ * subtarefas saem junto (o banco apaga em cascata; o "feito" delas, aqui).
+ */
 export async function deleteTask(id: number, executor: DbExecutor = db) {
-  await executor.delete(taskCompletions).where(like(taskCompletions.taskKey, `manual:${id}:%`))
-  return { removed: (await executor.delete(tasks).where(eq(tasks.id, id))).count }
+  const children = await executor.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentId, id))
+  for (const taskId of [id, ...children.map((c) => c.id)]) {
+    await executor.delete(taskCompletions).where(like(taskCompletions.taskKey, `manual:${taskId}:%`))
+  }
+  return { removed: (await executor.delete(tasks).where(eq(tasks.id, id))).count, subtasks: children.length }
 }
 
 export async function listManualTasks(executor: DbExecutor = db) {
