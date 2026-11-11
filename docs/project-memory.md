@@ -1626,3 +1626,44 @@ enxugar telas repetidas, textos técnicos e menu.
   (`OWNER_USER_ID` em `App.tsx`, o mesmo de `auth.ts`); outro login pergunta a
   `/accountant/me`. Pacotes no bucket `accountant-packages` (dono grava; links
   assinados de 7 dias). Deploy da `accountant` com `--no-verify-jwt`.
+
+## 11/11/2026 — Revisão geral: o app recomenda, DRE com IR, telas mais leves
+
+- **ADR 0047 (o app recomenda)** substitui a 0010 e revoga em parte
+  0011/0035/0036/0046: o sistema é pessoal, então sugere em vez de só mostrar.
+  Recomendações novas: estratégia de dívida (`recommendStrategy`, empate em 1%),
+  ordem do Motor ("Comece por"), rebalanceamento no próximo aporte
+  (`rebalanceAdvice`; Caixa fica fora porque é a reserva, e vender só aparece como
+  opção a partir de 5 p.p.), teto do MEI (`ceilingProjection.advice`; citar a LC
+  123 art. 18-A foi de memória, confirmar com o contador), regra automática ao dar
+  TAG (padrão ligado; Pix/TED/transferência nunca viram regra) e "Usar X?" nos
+  sem TAG. O assistente perdeu o filtro de conselho.
+- **Minha empresa** termina no DRE formal (PJ) + card do IR. Saíram as colunas
+  por conta, a reconciliação PJ↔PF, o Sankey (`AccountFlowSankey`,
+  `shared/accountFlowGraph.ts`) e as rotas `/analytics/flows` e `/analytics/dre`.
+  `formalDre` devolve `withdrawnToPfCents`/`keptCents`. O card do mês
+  (`services/company.ts`) passou a contar saída sem categoria como custo, igual
+  ao DRE: os dois fecham o mesmo lucro.
+- **IRPF**: coluna `categories.irpf_group` (enum, migração 20261111120000),
+  `core/irpf.ts` (inferência pela folha; farmácia/academia/pet/curso livre não
+  deduzem; o gravado vence o nome; `none` = não deduz), `GET /analytics/irpf`
+  só nas contas pessoais, campo no editor de Categorias, testes em
+  `scripts/irpf` (`npm run test:irpf`). O card diz o ano-base, não o da declaração.
+- **Performance**: auth com cache de 10 min limitado ao `exp` + dedupe de
+  verificações simultâneas; `postgres` com `fetch_types:false`; prefetch do
+  Painel; query keys unificadas; `performanceSeries` numa query só (2,4 s →
+  ~0,1 s). Pendente: cache entre requisições das funções pesadas, tirar a
+  materialização do GET, `/dashboard` com ~16 queries em série,
+  `netWorthHistory` mês a mês.
+- **Lixo removido**: scripts de backup/restore/verify do SQLite, `better-sqlite3`,
+  `date-fns`, rotas de backup/reset do servidor local, exports sem uso.
+  `/card-connections` agora vai para a `ledger` (dava 404 em prod).
+  Pendente de decisão: rotas sem uso (criteria, renegotiation, quotes
+  analytics), `drizzle-kit` (sqlite), a pasta `data/` (150 MB de bancos
+  antigos com dado real), `src/assets/negociacao-*.xlsx`.
+- **Telemetria (uso)**: painel 525, lançamentos 181, comercial 124,
+  investimentos 105, diário 92, patrimônio 87, saúde 77, DRE 70. Quase sem uso:
+  aposentadoria, categorias, configurações, cartões, importar. Erros: 546
+  (WORKER_LIMIT) no painel e em `/investments`; 401 ×310.
+- Patrimônio ganhou o crescimento por mês (faixa + tooltip + tabela,
+  média composta); as calculadoras viraram cards que abrem uma de cada vez.

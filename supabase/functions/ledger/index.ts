@@ -355,6 +355,7 @@ app.post('/categories', async (c) => {
       color: z.string().optional(),
       icon: z.string().optional(),
       dreGroup: z.enum(['deduction', 'cost', 'financial', 'tax']).nullable().optional(),
+      irpfGroup: z.enum(['health', 'education', 'pension', 'alimony', 'none']).nullable().optional(),
     })
     .parse(await c.req.json())
   try {
@@ -373,6 +374,7 @@ app.patch('/categories/:id', async (c) => {
       icon: z.string().optional(),
       kind: z.enum(['income', 'expense', 'transfer', 'investment']).optional(),
       dreGroup: z.enum(['deduction', 'cost', 'financial', 'tax']).nullable().optional(),
+      irpfGroup: z.enum(['health', 'education', 'pension', 'alimony', 'none']).nullable().optional(),
       sortOrder: z.number().int().optional(),
     })
     .parse(await c.req.json())

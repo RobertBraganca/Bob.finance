@@ -1,6 +1,6 @@
-import { useId, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { centsToInput, money, parseMoneyInput, parsePercentInput, period as fmtPeriod } from '../../lib/format'
+import { centsToInput, money, parsePercentInput, period as fmtPeriod } from '../../lib/format'
 import { currentPeriod, shiftPeriod } from '../../lib/period'
 import {
   chartPoints,
@@ -14,7 +14,8 @@ import {
   type PeriodUnit,
   type RateUnit,
 } from '@shared/calculators'
-import { Button, Card, EmptyState, KpiTile, Segmented } from '../../components/ui'
+import { Button, Card, EmptyState, Icon, KpiTile, Segmented } from '../../components/ui'
+import type { IconName } from '../../components/ui/Icon'
 import { PropertyCalculator } from '../property/PropertyCalculator'
 import { AllocationCompare, type AllocationClass, type AllocationSliceLite } from './AllocationCompare'
 import { InputCard, MoneyField, PeriodField, RateField, annualBps, cents, decimal, dueDate } from './fields'
@@ -22,12 +23,12 @@ import { GoalModal, type Goal } from '../../components/ui/GoalModal'
 import { BalanceChart, GrowthChart } from '../../components/charts/CalculatorCharts'
 
 type CalculatorKey = 'juros' | 'renda' | 'milhao' | 'imovel' | 'alocacoes'
-const CALCULATORS: Array<{ value: CalculatorKey; label: string }> = [
-  { value: 'juros', label: 'Juros compostos' },
-  { value: 'renda', label: 'Renda' },
-  { value: 'milhao', label: 'Primeiro milhão' },
-  { value: 'imovel', label: 'Imóvel' },
-  { value: 'alocacoes', label: 'Comparar alocações' },
+const CALCULATORS: Array<{ value: CalculatorKey; label: string; body: string; icon: IconName }> = [
+  { value: 'juros', label: 'Juros compostos', body: 'Quanto um valor e aportes mensais viram com o tempo', icon: 'trending' },
+  { value: 'renda', label: 'Renda', body: 'Quanto tempo um montante dura com uma retirada por mês', icon: 'banknote' },
+  { value: 'milhao', label: 'Primeiro milhão', body: 'Em quanto tempo chega no alvo, ou quanto aportar por mês', icon: 'target' },
+  { value: 'imovel', label: 'Imóvel', body: 'Comprar à vista, financiar ou consórcio, e virar plano', icon: 'home' },
+  { value: 'alocacoes', label: 'Comparar alocações', body: 'A sua divisão de hoje contra outra, lado a lado', icon: 'layers' },
 ]
 
 /** O que passa de uma calculadora para outra ("Simular retiradas desse montante"): o montante e a mesma taxa. */
@@ -45,34 +46,62 @@ type Props = {
  * Investimentos › Calculadoras: juros compostos, renda e primeiro milhão.
  * Simulação pura (decisions/0010): taxa constante, nada é gravado, e o texto
  * nunca diz o que fazer. As contas moram em `shared/calculators.ts`. A
- * calculadora escolhida fica no endereço (`&calc=renda`).
+ * calculadora escolhida fica no endereço (`&calc=renda`); sem ela, a aba é
+ * só a grade de cartões, e cada cartão abre a sua.
  */
 export function CalculatorsTab({ portfolioValueCents, goalPurposes, allocatableClasses, allocation }: Props) {
   const [params, setParams] = useSearchParams()
-  const calc = (CALCULATORS.find((c) => c.value === params.get('calc'))?.value ?? 'juros') as CalculatorKey
+  const calc = (CALCULATORS.find((c) => c.value === params.get('calc'))?.value ?? null) as CalculatorKey | null
   const [seed, setSeed] = useState<Seed | null>(null)
   // Remonta a calculadora a cada passagem, para os campos nascerem do valor recebido.
   const [handoff, setHandoff] = useState(0)
   const [draft, setDraft] = useState<Partial<Omit<Goal, 'id'>> | null>(null)
 
-  const open = (next: CalculatorKey, nextSeed: Seed | null = null) => {
+  const open = (next: CalculatorKey | null, nextSeed: Seed | null = null) => {
     setSeed(nextSeed)
     setHandoff((n) => n + 1)
     setParams(
       (current) => {
         const fresh = new URLSearchParams(current)
-        fresh.set('calc', next)
+        if (next) fresh.set('calc', next)
+        else fresh.delete('calc')
         return fresh
       },
-      { replace: true },
+      // Abrir uma calculadora entra no histórico: o "voltar" do navegador volta à grade.
+      { replace: false },
     )
   }
 
   const shared = { portfolioValueCents, onCreateGoal: setDraft }
+  const current = CALCULATORS.find((c) => c.value === calc)
+
+  if (!calc) {
+    return (
+      <div className="calc-grid">
+        {CALCULATORS.map((c) => (
+          <button key={c.value} type="button" className="calc-card" onClick={() => open(c.value)}>
+            <span className="icon-chip">
+              <Icon name={c.icon} size={18} />
+            </span>
+            <span className="calc-card__title">{c.label}</span>
+            <span className="calc-card__body">{c.body}</span>
+            <Icon name="arrowRight" size={16} className="calc-card__go" />
+          </button>
+        ))}
+        {draft && <GoalModal goal={null} goalPurposes={goalPurposes} draft={draft} onClose={() => setDraft(null)} />}
+      </div>
+    )
+  }
 
   return (
     <div className="stack stack--loose">
-      <Segmented ariaLabel="Calculadora" className="segmented--nav" value={calc} onChange={(next) => open(next)} options={CALCULATORS} />
+      <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+        <Button variant="quiet" size="sm" icon="arrowLeft" onClick={() => open(null)}>
+          Calculadoras
+        </Button>
+        <span className="muted">/</span>
+        <span style={{ fontWeight: 600 }}>{current?.label}</span>
+      </div>
       {/* `key`: trocar de calculadora (ou chegar com um valor de outra) começa os campos do zero. */}
       {calc === 'juros' && (
         <CompoundCalculator key={`juros-${handoff}`} seed={seed} {...shared} onWithdraw={(next) => open('renda', next)} />

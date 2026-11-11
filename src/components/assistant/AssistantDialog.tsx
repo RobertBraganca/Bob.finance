@@ -136,7 +136,7 @@ export default function AssistantDialog({
               <Icon name="sparkle" size={18} />
               Assistente
             </h2>
-            <p className="assistant-head__sub">Registra e organiza. Não aconselha.</p>
+            <p className="assistant-head__sub">Registra, organiza e recomenda.</p>
           </div>
           <Button variant="quiet" icon="x" onClick={onClose} title="Fechar o assistente" />
         </header>
@@ -168,7 +168,7 @@ export default function AssistantDialog({
             rows={2}
             maxLength={MAX_PHRASE_LENGTH}
             value={draft}
-            placeholder="Descreva o que quer registrar…"
+            placeholder="Descreva o que quer registrar ou pergunte…"
             aria-describedby={`${hintId} ${counterId}`}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onFieldKeyDown}

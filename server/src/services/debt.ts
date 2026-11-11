@@ -13,9 +13,11 @@ import {
   estimatedInterestCents,
   exitCalendar,
   impliedAnnualBps,
+  recommendStrategy,
   scheduledInterestCents,
   type CalendarSource,
   type DebtPlanInput,
+  type PayoffStrategy,
 } from '../core/debtPlan'
 import { TYPICAL_WINDOW_MONTHS, typicalPersonalIncome } from './budget'
 import { idList } from './withdrawals'
@@ -567,12 +569,15 @@ export type Scenario = {
   totalInterestCents: number
   payoffPeriod: string | null
   series: ProjectionPoint[]
-  perDebt: Array<{ debtId: number; name: string; months: number | null; interestCents: number }>
+  /** `aprBps` e `balanceCents` são os de partida: a recomendação escolhe a dívida a atacar por eles */
+  perDebt: Array<{ debtId: number; name: string; months: number | null; interestCents: number; aprBps: number; balanceCents: number }>
 }
 
 type SimDebt = {
   id: number
   name: string
+  aprBps: number
+  startBalance: number
   balance: number
   rate: number
   minimum: number
@@ -606,6 +611,8 @@ export async function projectPaydown(options: {
   const sim: SimDebt[] = (await listDebts()).map((d) => ({
     id: d.id,
     name: d.name,
+    aprBps: d.aprBps,
+    startBalance: d.balanceCents,
     balance: d.balanceCents,
     rate: monthlyRate(d.aprBps),
     minimum: d.minimumPaymentCents,
@@ -712,17 +719,29 @@ export async function projectPaydown(options: {
       name: d.name,
       months: d.months,
       interestCents: Math.round(d.interestPaid),
+      aprBps: d.aprBps,
+      balanceCents: d.startBalance,
     })),
     ...(stalled ? { stalled: true } : {}),
   } as Scenario & { stalled?: boolean }
 }
 
-/** Baseline vs accelerated, aligned on the same month axis for one chart. */
-export async function paydownComparison(extraMonthlyCents: number, strategy: 'avalanche' | 'snowball' = 'avalanche') {
+/**
+ * Baseline vs accelerated, aligned on the same month axis for one chart,
+ * plus the recommended strategy (decisions/0047): the other strategy is
+ * simulated with the same extra, and `recommendStrategy` names the winner
+ * and the debt to attack first from the two results.
+ */
+export async function paydownComparison(extraMonthlyCents: number, strategy: PayoffStrategy = 'avalanche') {
   const [baseline, accelerated] = await Promise.all([
     projectPaydown({ extraMonthlyCents: 0, strategy, label: 'Pagamento atual' }),
     projectPaydown({ extraMonthlyCents, strategy, label: 'Com aporte extra' }),
   ])
+  const other = await projectPaydown({ extraMonthlyCents, strategy: strategy === 'avalanche' ? 'snowball' : 'avalanche' })
+  const recommendation = recommendStrategy(
+    strategy === 'avalanche' ? accelerated : other,
+    strategy === 'avalanche' ? other : accelerated,
+  )
 
   const horizon = Math.max(baseline.series.length, accelerated.series.length)
   const merged = Array.from({ length: horizon }, (_, i) => ({
@@ -743,6 +762,7 @@ export async function paydownComparison(extraMonthlyCents: number, strategy: 'av
           : null,
       interestSavedCents: baseline.totalInterestCents - accelerated.totalInterestCents,
     },
+    recommendation: recommendation ? { ...recommendation, extraMonthlyCents } : null,
   }
 }
 

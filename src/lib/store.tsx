@@ -60,6 +60,10 @@ export type CategoryNode = {
   icon: string
   /** Classificação no DRE formal (specs/dre) — null é o balde padrão (Receita Bruta/Despesa Operacional). Só existe pra categoria-mãe. */
   dreGroup: string | null
+  /** Dedução no IRPF gravada na categoria (`none` = não deduz); null = o app decide pelo nome. */
+  irpfGroup?: string | null
+  /** O que vale de fato no IR: gravado, herdado da mãe ou inferido do nome (core/irpf.ts). */
+  irpf?: { group: 'health' | 'education' | 'pension' | 'alimony' | null; source: 'manual' | 'auto' }
   sortOrder: number
   transactionCount: number
   children: CategoryNode[]

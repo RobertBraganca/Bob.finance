@@ -5,7 +5,9 @@
  * de um acordo e a comparação de uma proposta. Nada aqui lê o banco: o
  * servidor monta as entradas e a tela pode refazer a simulação sozinha.
  *
- * Observação e simulação, nunca recomendação (decisions/0010).
+ * Desde a `decisions/0047` a tela recomenda: `recommendStrategy` lê as duas
+ * simulações (avalanche e bola de neve) e diz qual seguir e por qual dívida
+ * começar, sempre com os números que sustentam a escolha.
  */
 import { amortizationSchedule, impliedMonthlyRate, type AmortizationSystem } from './propertyPlan'
 
@@ -302,6 +304,120 @@ export function compareProposal(input: {
     },
   }
 }
+
+export type PayoffStrategy = 'avalanche' | 'snowball'
+
+/** O que `recommendStrategy` lê de cada simulação (`services/debt#projectPaydown`). */
+export type StrategyOutcome = {
+  /** nulo quando a simulação não quita (pagamentos não cobrem os juros) */
+  months: number | null
+  totalInterestCents: number
+  payoffPeriod: string | null
+  perDebt: Array<{ debtId: number; name: string; months: number | null; interestCents: number; aprBps: number; balanceCents: number }>
+}
+
+export type StrategyRecommendation = {
+  /** nulo quando não há o que escolher (uma dívida só) ou nenhuma estratégia quita */
+  strategy: PayoffStrategy | null
+  /**
+   * - `less_interest`: a vencedora paga menos juros (diferença acima da margem de empate)
+   * - `tie_first_sooner`: juros empatados; a bola de neve quita a primeira dívida antes
+   * - `same`: as duas chegam no mesmo resultado; fica a avalanche, que nunca custa mais
+   * - `single_debt`: só uma dívida aberta, as duas estratégias são a mesma
+   * - `never_ends`: com os pagamentos atuais nenhuma das duas quita
+   */
+  reason: 'less_interest' | 'tie_first_sooner' | 'same' | 'single_debt' | 'never_ends'
+  /** meses e juros da vencedora (ou da avalanche, sem vencedora) */
+  months: number | null
+  totalInterestCents: number
+  payoffPeriod: string | null
+  /** juros da outra estratégia menos os da recomendada (≥ 0 quando há vencedora) */
+  interestSavedCents: number
+  /** meses da outra menos os da recomendada; nulo se alguma não quita */
+  monthsSaved: number | null
+  /** em quantos meses a primeira dívida acaba em cada estratégia */
+  firstClearedMonths: Record<PayoffStrategy, number | null>
+  /** diferença de juros abaixo disto conta como empate */
+  tieThresholdCents: number
+  /** a dívida que recebe todo valor extra primeiro, pela regra da recomendada */
+  attackFirst: {
+    debtId: number
+    name: string
+    aprBps: number
+    balanceCents: number
+    /** em quantos meses ela acaba no plano recomendado */
+    months: number | null
+    why: 'highest_rate' | 'smallest_balance' | 'only_debt'
+  } | null
+}
+
+/** Empate de juros: diferença abaixo de 1% dos juros da avalanche (mínimo R$ 1,00). */
+export const STRATEGY_TIE_SHARE = 0.01
+
+/**
+ * Qual estratégia seguir, a partir das duas simulações com o mesmo aporte
+ * extra (decisions/0047). Nenhuma conta nova: compara os juros totais e os
+ * meses que `projectPaydown` já calculou. A dívida a atacar primeiro segue a
+ * mesma ordem da simulação: maior taxa (empate: menor saldo) na avalanche,
+ * menor saldo (empate: maior taxa) na bola de neve.
+ */
+export function recommendStrategy(avalanche: StrategyOutcome, snowball: StrategyOutcome): StrategyRecommendation | null {
+  const open = avalanche.perDebt.filter((d) => d.balanceCents > 0)
+  if (open.length === 0) return null
+
+  const byRate = [...open].sort((a, b) => b.aprBps - a.aprBps || a.balanceCents - b.balanceCents)[0]!
+  const byBalance = [...open].sort((a, b) => a.balanceCents - b.balanceCents || b.aprBps - a.aprBps)[0]!
+  const monthsIn = (outcome: StrategyOutcome, debtId: number) => outcome.perDebt.find((d) => d.debtId === debtId)?.months ?? null
+  const firstCleared = (outcome: StrategyOutcome) => {
+    const months = outcome.perDebt.map((d) => d.months).filter((m): m is number => m !== null)
+    return months.length > 0 ? Math.min(...months) : null
+  }
+  const firstClearedMonths = { avalanche: firstCleared(avalanche), snowball: firstCleared(snowball) }
+  const tieThresholdCents = Math.max(100, Math.round(avalanche.totalInterestCents * STRATEGY_TIE_SHARE))
+
+  const base = {
+    months: avalanche.months,
+    totalInterestCents: avalanche.totalInterestCents,
+    payoffPeriod: avalanche.payoffPeriod,
+    interestSavedCents: 0,
+    monthsSaved: null,
+    firstClearedMonths,
+    tieThresholdCents,
+  }
+
+  if (open.length === 1) {
+    return { ...base, strategy: null, reason: 'single_debt', attackFirst: { ...pick(byRate), months: monthsIn(avalanche, byRate.debtId), why: 'only_debt' } }
+  }
+  if (avalanche.months === null || snowball.months === null) {
+    return { ...base, strategy: null, reason: 'never_ends', attackFirst: { ...pick(byRate), months: null, why: 'highest_rate' } }
+  }
+
+  const diff = snowball.totalInterestCents - avalanche.totalInterestCents
+  let strategy: PayoffStrategy
+  let reason: StrategyRecommendation['reason']
+  if (diff > tieThresholdCents) [strategy, reason] = ['avalanche', 'less_interest']
+  else if (diff < -tieThresholdCents) [strategy, reason] = ['snowball', 'less_interest']
+  else if (firstClearedMonths.snowball !== null && firstClearedMonths.avalanche !== null && firstClearedMonths.snowball < firstClearedMonths.avalanche)
+    [strategy, reason] = ['snowball', 'tie_first_sooner']
+  else [strategy, reason] = ['avalanche', 'same']
+
+  const [won, lost] = strategy === 'avalanche' ? [avalanche, snowball] : [snowball, avalanche]
+  const target = strategy === 'avalanche' ? byRate : byBalance
+  return {
+    strategy,
+    reason,
+    months: won.months,
+    totalInterestCents: won.totalInterestCents,
+    payoffPeriod: won.payoffPeriod,
+    interestSavedCents: lost.totalInterestCents - won.totalInterestCents,
+    monthsSaved: won.months !== null && lost.months !== null ? lost.months - won.months : null,
+    firstClearedMonths,
+    tieThresholdCents,
+    attackFirst: { ...pick(target), months: monthsIn(won, target.debtId), why: strategy === 'avalanche' ? 'highest_rate' : 'smallest_balance' },
+  }
+}
+
+const pick = (d: StrategyOutcome['perDebt'][number]) => ({ debtId: d.debtId, name: d.name, aprBps: d.aprBps, balanceCents: d.balanceCents })
 
 /**
  * Taxa implícita de um contrato de parcela fixa a partir do saldo, da parcela

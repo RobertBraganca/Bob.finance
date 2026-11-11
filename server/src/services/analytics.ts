@@ -3,7 +3,6 @@ import { db } from '../db/client'
 import { addDays, addMonths, addMonthsToDate, dayRange, periodBounds, periodOf, periodRange, todayIso } from '../core/dates'
 import { memoPerRequest } from '../core/requestCache'
 import { accountScope, idList, pjWithdrawals } from './withdrawals'
-import { merchantSignature } from '../core/normalize'
 
 /**
  * Every number on every dashboard is produced here, by aggregating the
@@ -227,48 +226,6 @@ export async function monthlyTotals(options: {
   })
 }
 
-export type ServiceAverages = {
-  avgRevenuePerTransactionCents: number
-  avgExpensePerTransactionCents: number
-  revenueTransactionCount: number
-  expenseTransactionCount: number
-}
-
-/**
- * "Preço médio de serviço" / "Custo médio de serviço" — deliberately NOT
- * scoped to whatever period the DRE is showing. A PJ account's per-service
- * price and per-expense cost are read as a stable baseline (what does a
- * typical invoice/expense look like, historically), so they average over
- * every posted transaction the account has ever had, ignoring `range`
- * entirely except for which account.
- */
-export async function historicalServiceAverages(accountId: number): Promise<ServiceAverages> {
-  const rows = await db.execute<{ income: number; expense: number; incomeCount: number; expenseCount: number }>(sql`
-    select
-      coalesce(sum(case when flow = 'income'  and amount_cents > 0 then amount_cents else 0 end), 0) as income,
-      coalesce(sum(case when flow = 'expense' and amount_cents < 0 then -amount_cents else 0 end), 0) as expense,
-      coalesce(sum(case when flow = 'income'  and amount_cents > 0 then 1 else 0 end), 0) as "incomeCount",
-      coalesce(sum(case when flow = 'expense' and amount_cents < 0 then 1 else 0 end), 0) as "expenseCount"
-    from (
-      select t.amount_cents, ${FLOW_KIND} as flow
-      from transactions t
-      left join categories c on c.id = t.category_id
-      where t.pending = false and t.ignored = false and t.account_id = ${accountId}
-    ) x
-  `)
-  const row = rows[0]
-
-  const revenueTransactionCount = row?.incomeCount ?? 0
-  const expenseTransactionCount = row?.expenseCount ?? 0
-
-  return {
-    avgRevenuePerTransactionCents: revenueTransactionCount > 0 ? Math.round((row?.income ?? 0) / revenueTransactionCount) : 0,
-    avgExpensePerTransactionCents: expenseTransactionCount > 0 ? Math.round((row?.expense ?? 0) / expenseTransactionCount) : 0,
-    revenueTransactionCount,
-    expenseTransactionCount,
-  }
-}
-
 /* ------------------------------------------------------------------ *
  * Income vs expense per month — the main dashboard chart.
  * Months with no data are filled with zeros so the axis has no gaps.
@@ -450,18 +407,6 @@ export async function dailyStreak(): Promise<{ days: number; lastEntryOn: string
   return { days: streak, lastEntryOn: rows[0]?.day ?? null }
 }
 
-/* ------------------------------------------------------------------ *
- * Balance trajectory — running net position over the range.
- * ------------------------------------------------------------------ */
-export async function netFlowSeries(range: Range) {
-  const months = await monthlySeries(range)
-  let running = 0
-  return months.map((m) => {
-    running += m.netCents
-    return { period: m.period, netCents: m.netCents, cumulativeCents: running }
-  })
-}
-
 /**
  * "A receber": receita ainda pendente (não confirmada pelo banco/pix) com
  * vencimento dentro do período — o lado complementar de `totals()`, que
@@ -541,8 +486,6 @@ export async function dashboard(range: Range, opts: { includeFutureReceivables?:
   // período anterior" não tem leitura útil nenhuma.
   const previousReceivableCents = await receivable(previousRange)
   const { byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf } = await categorySpending(range)
-  const netFlow = await netFlowSeries(range)
-  const topMerchantsList = await topMerchants(range, 8)
 
   return {
     range,
@@ -562,8 +505,6 @@ export async function dashboard(range: Range, opts: { includeFutureReceivables?:
     byCategoryLeaf,
     incomeByCategory,
     incomeByCategoryLeaf,
-    netFlow,
-    topMerchants: topMerchantsList,
   }
 }
 
@@ -596,41 +537,6 @@ async function withWithdrawals<T extends { incomeCents: number; netCents: number
 export function deltaBps(current: number, previous: number): number | null {
   if (previous === 0) return null
   return Math.round(((current - previous) / Math.abs(previous)) * 10_000)
-}
-
-/**
- * Agrupado por `merchantSignature`, não `lower(description)` (achado da
- * auditoria de 07/09/2026) — a mesma normalização usada em toda regra/
- * memória de categorização do app. Duas compras do mesmo comerciante com
- * descrições que só diferem por um número (ex. "UBER *TRIP 384910" vs
- * "UBER *TRIP 552013") viravam DUAS linhas aqui, cada uma com metade do
- * gasto real, o que podia empurrar o comerciante #1 de verdade pra fora
- * do top N. `merchantSignature` já existe só em JS (é onde toda outra
- * agregação por comerciante do projeto também roda), então o agrupamento
- * sai do SQL e vai pra cá.
- */
-export async function topMerchants(range: Range, limit = 8) {
-  const rows = await db.execute<{ description: string; amountCents: number }>(sql`
-    select t.description, t.amount_cents as "amountCents"
-    from transactions t
-    left join categories c on c.id = t.category_id
-    where t.posted_on between ${range.from} and ${range.to}
-      and t.pending = false and t.ignored = false
-      and ${FLOW_KIND} = 'expense'
-      and t.amount_cents < 0
-    ${scopeFilter(range)}
-  `)
-
-  const bySignature = new Map<string, { signature: string; amount: number; count: number }>()
-  for (const row of rows) {
-    const signature = merchantSignature(row.description) || row.description
-    const bucket = bySignature.get(signature) ?? { signature: row.description, amount: 0, count: 0 }
-    bucket.amount += -row.amountCents
-    bucket.count += 1
-    bySignature.set(signature, bucket)
-  }
-
-  return [...bySignature.values()].sort((a, b) => b.amount - a.amount).slice(0, limit)
 }
 
 /* ------------------------------------------------------------------ *

@@ -18,6 +18,7 @@ import * as dailyService from '../_shared/services/daily.ts'
 import * as debtService from '../_shared/services/debt.ts'
 import { ensureMaterialized } from '../_shared/services/materialization.ts'
 import * as dreService from '../_shared/services/dre.ts'
+import { irpfSummary } from '../_shared/services/irpf.ts'
 import * as engineService from '../_shared/services/financialEngine.ts'
 import * as healthService from '../_shared/services/financialHealth.ts'
 import * as goalsService from '../_shared/services/goals.ts'
@@ -32,7 +33,6 @@ import * as subscriptionsService from '../_shared/services/subscriptions.ts'
 import * as tasksService from '../_shared/services/tasks.ts'
 import * as google from '../_shared/services/googleCalendar.ts'
 import { ledgerBounds } from '../_shared/services/transactions.ts'
-import { accountFlows } from '../_shared/services/transfers.ts'
 
 /**
  * Porta de server/src/routes/insights.ts (Fastify) para Hono/Deno.Serve —
@@ -182,26 +182,21 @@ app.get('/dashboard', async (c) => {
   return c.json(await analytics.dashboard(range, { includeFutureReceivables: query.futureReceivables }))
 })
 
-app.get('/analytics/flows', async (c) => {
-  const query = rangeQuery.parse(c.req.query())
-  const range = await resolveRange(query)
-  return c.json(await accountFlows({ from: range.from, to: range.to }))
-})
-
 app.get('/analytics/monthly', async (c) => {
   const range = await resolveRange(rangeQuery.parse(c.req.query()))
   return c.json({ range, series: await analytics.monthlySeries(range) })
 })
 
-app.get('/analytics/dre', async (c) => {
-  const range = await resolveRange(rangeQuery.parse(c.req.query()))
-  return c.json(await dreService.dreReport(range))
-})
-
-/** DRE formal (PJ), ver specs/dre "DRE PJ formal" — accountId é a conta PJ, resolvida no front igual o resto desta tela. */
+/** DRE formal (PJ), ver specs/dre "DRE PJ formal" — sem accountId, lê a conta PJ do Motor financeiro. */
 app.get('/analytics/dre/formal', async (c) => {
   const range = await resolveRange(rangeQuery.parse(c.req.query()))
   return c.json(await dreService.formalDre(range))
+})
+
+/** O que do gasto pessoal deduz no IRPF no ano (decisions/0047, services/irpf.ts). */
+app.get('/analytics/irpf', async (c) => {
+  const { year } = z.object({ year: z.coerce.number().int().min(2000).max(2100) }).parse(c.req.query())
+  return c.json(await irpfSummary(year))
 })
 
 /** As quatro quebras por TAG da tela Categorias, sem o resto do /dashboard. */

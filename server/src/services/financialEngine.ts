@@ -21,15 +21,16 @@ import type { Assumptions } from './financialHealth'
  * is duplicated: every term traces back to the service that owns it, and
  * says so in its `assumptions`.
  *
- * Two rules from `decisions/0010` shape the API itself, not just the copy:
+ * Two rules shape the API itself, not just the copy:
  *
  *   1. Every composed number ships the terms it was composed from, so the
  *      UI can show the memory of calculation instead of a bare total.
- *   2. Destinations come back in a NEUTRAL order (alphabetical). Sorting
- *      them by computed "urgency" would be a recommendation wearing the
- *      costume of a layout decision, which is exactly what the ADR rules
- *      out. If that ever needs to change, it changes to an order the USER
- *      configured, never one the system inferred.
+ *   2. Destinations come back in PRIORITY order, with the reason for each
+ *      position, and the first one still missing money is the
+ *      recommendation ("Comece por ...", `decisions/0047`, which replaced
+ *      the old alphabetical, deliberately neutral order of `decisions/0010`).
+ *      The criterion lives in `prioritizeDestinations` and travels in the
+ *      `assumptions`.
  */
 
 /* ------------------------------------------------------------------ *
@@ -197,7 +198,27 @@ export type Destination = {
    * mês" (specs/dashboard) can color every line the same way.
    */
   state: GoalState
+  /** posição na ordem de prioridade, a partir de 1 (ver `prioritizeDestinations`) */
+  priority: number
+  /** por que o destino está nessa posição, em uma frase curta */
+  priorityReason: string
   assumptions: Assumptions
+}
+
+/**
+ * Por onde começar no período (decisions/0047): o primeiro destino da ordem
+ * de prioridade que ainda tem valor faltando. Sem nenhum faltando, `key` é
+ * `free` e `allClear` é verdadeiro. Nulo em período já encerrado: não há
+ * mais o que começar.
+ */
+export type AllocationRecommendation = {
+  key: DestinationKey
+  label: string
+  /** quanto falta nesse destino; nulo quando `allClear` */
+  missingCents: number | null
+  /** quanto do disponível cobre esse destino: mínimo entre o disponível e o que falta (nunca negativo) */
+  coverableCents: number
+  allClear: boolean
 }
 
 export type AvailableForAllocation = {
@@ -210,7 +231,45 @@ export type AvailableForAllocation = {
     alreadyAllocatedCents: number
   }
   destinations: Destination[]
+  recommendation: AllocationRecommendation | null
   assumptions: Assumptions
+}
+
+/**
+ * Ordem de urgência entre destinos que ainda têm valor faltando: parcela de
+ * dívida do mês (atraso vira multa e juros), reserva de emergência (protege o
+ * resto do plano antes de investir), investimento. "Livre" fecha a lista.
+ */
+const URGENCY: Record<DestinationKey, number> = { debt: 0, reserve: 1, investment: 2, free: 3 }
+
+const PENDING_REASON: Record<Exclude<DestinationKey, 'free'>, string> = {
+  debt: 'parcela do mês em aberto: atraso gera multa e juros',
+  reserve: 'reserva incompleta: protege o resto do plano antes de investir',
+  investment: 'aporte planejado do mês ainda não feito',
+}
+
+export const PRIORITY_CRITERION =
+  'primeiro os destinos com valor faltando, na ordem de urgência: parcela de dívida do mês (atraso gera multa e juros), reserva de emergência (protege antes de investir), investimento; depois os que já estão em dia; Livre por último'
+
+const isPending = (d: Pick<Destination, 'key' | 'differenceCents'>) =>
+  d.key !== 'free' && d.differenceCents !== null && d.differenceCents > 0
+
+/** Ordena por prioridade e escreve a razão de cada posição (decisions/0047). */
+export function prioritizeDestinations(unordered: Array<Omit<Destination, 'priority' | 'priorityReason'>>): Destination[] {
+  return [...unordered]
+    .sort((a, b) => Number(isPending(b)) - Number(isPending(a)) || URGENCY[a.key] - URGENCY[b.key])
+    .map((d, i) => ({
+      ...d,
+      priority: i + 1,
+      priorityReason:
+        d.key === 'free'
+          ? 'o que sobra depois dos outros destinos'
+          : isPending(d)
+            ? PENDING_REASON[d.key]
+            : d.targetCents === null || d.targetCents === 0
+              ? 'sem valor a cumprir neste período'
+              : 'em dia neste período',
+    }))
 }
 
 /** Ajuste hipotético do simulador. Ausente em toda chamada de produção. */
@@ -325,7 +384,7 @@ export async function availableForAllocation(
   const investmentTargetCents = settings.investmentPlannedCents ?? investmentGoalsTargetCents
   const isCurrentPeriod = period === todayIso().slice(0, 7)
 
-  const unorderedDestinations: Destination[] = [
+  const unorderedDestinations: Array<Omit<Destination, 'priority' | 'priorityReason'>> = [
     {
       key: 'reserve',
       label: 'Reserva de emergência',
@@ -394,9 +453,20 @@ export async function availableForAllocation(
     },
   ]
 
-  // Neutral, stable order. Never by amount, never by "urgency": see the
-  // note at the top of this file.
-  const destinations = [...unorderedDestinations].sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'))
+  // Por prioridade (decisions/0047): o primeiro com valor faltando é a recomendação.
+  const destinations = prioritizeDestinations(unorderedDestinations)
+  const first = destinations[0]!
+  const firstPending = isPending(first)
+  const recommendation: AllocationRecommendation | null =
+    period < todayIso().slice(0, 7)
+      ? null
+      : {
+          key: firstPending ? first.key : 'free',
+          label: firstPending ? first.label : 'Livre',
+          missingCents: firstPending ? first.differenceCents : null,
+          coverableCents: Math.max(0, firstPending ? Math.min(availableCents, first.differenceCents!) : availableCents),
+          allClear: !firstPending,
+        }
 
   return {
     period,
@@ -408,6 +478,7 @@ export async function availableForAllocation(
       alreadyAllocatedCents,
     },
     destinations,
+    recommendation,
     assumptions: {
       formula:
         'saldo consolidado, menos compromissos futuros confirmados, menos as faturas abertas dos cartões, menos o valor já destinado a metas no período',
@@ -426,7 +497,7 @@ export async function availableForAllocation(
         investimentoCents: investmentRealizedCents,
         dividaCents: debtRealizedCents,
       },
-      ordemDosDestinos: 'alfabética por rótulo, deliberadamente neutra: a ordem não é calculada a partir dos valores',
+      ordemDosDestinos: PRIORITY_CRITERION,
       ...(balanceDeltaCents !== 0
         ? {
             ajusteHipoteticoSaldoCents: balanceDeltaCents,
@@ -734,9 +805,9 @@ export async function breakEven(
       key: 'planned_reserve',
       label: 'Reserva planejada',
       amountCents: params.reservePlannedCents,
-      // The gap travels alongside without being forced into the month: how
-      // much of it to close, and when, is the user's call, not a number this
-      // service gets to assume (decisions/0010).
+      // The gap travels alongside without being forced into the month: the
+      // break-even counts only what the user planned. Where to start closing
+      // it is the Motor's recommendation (`availableForAllocation`, decisions/0047).
       assumptions: {
         formula: 'valor que o usuário planeja destinar à reserva neste mês',
         gapDaReservaCents: reserve.gapCents,
@@ -775,9 +846,8 @@ export async function breakEven(
    *   alíquotaEfetiva = (RBT12 × alíquotaNominal - parcelaADeduzir) / RBT12
    *
    * O sistema não calcula essa alíquota: ela depende do anexo aplicável,
-   * do Fator R e de tabelas que mudam por lei, e escolher qualquer um
-   * desses pelo usuário seria prescrever (`decisions/0010`). O que ele faz
-   * é EVIDENCIAR o RBT12 ao lado da alíquota digitada, para que uma
+   * do Fator R e de tabelas que mudam por lei, dados que este serviço não
+   * tem. O que ele faz é mostrar o RBT12 ao lado da alíquota digitada, para que uma
    * alíquota nominal digitada no lugar da efetiva, ou uma alíquota que
    * envelheceu enquanto o faturamento mudava de faixa, fique visível na
    * memória de cálculo em vez de ficar embutida silenciosamente no

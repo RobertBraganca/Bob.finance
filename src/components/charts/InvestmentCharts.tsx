@@ -194,68 +194,6 @@ export function AllocationChart({
 }
 
 /* ================================================================== *
- * Carteira atual x carteira objetivo — mesmo dado do AllocationChart
- * acima (actualBps/targetBps por classe), uma segunda leitura visual em
- * barra dupla lado a lado em vez de barra + marca. Não é um cálculo novo,
- * ver `specs/investments`, "Aba Lançamentos e gráficos de carteira objetivo".
- * ================================================================== */
-export function AllocationVsTargetChart({
-  slices,
-  surface = 'paper',
-}: {
-  slices: AllocationSlice[]
-  surface?: Surface
-}) {
-  const theme = themeFor(useEffectiveSurface(surface))
-  const hasData = slices.some((s) => s.valueCents > 0 || (s.targetBps ?? 0) > 0)
-
-  const Tip = makeTooltip<AllocationSlice>((slice) => ({
-    title: slice.label,
-    rows: [
-      { label: 'Carteira atual', value: bps(slice.actualBps), color: theme.series[0]! },
-      {
-        label: 'Carteira objetivo',
-        value: slice.targetBps === null ? 'sem meta configurada' : bps(slice.targetBps),
-        color: theme.series[1]!,
-      },
-    ],
-  }))
-
-  return (
-    <ChartFrame
-      legend={[
-        { label: 'Carteira atual', color: theme.series[0]!, shape: 'block' },
-        { label: 'Carteira objetivo', color: theme.series[1]!, shape: 'block' },
-      ]}
-      isEmpty={!hasData}
-      emptyTitle="Sem alocação para comparar"
-      emptyBody="Cadastre ativos e defina uma política de alocação por classe para ver as duas carteiras lado a lado."
-      table={{
-        caption: 'Carteira atual contra carteira objetivo, por classe',
-        rows: slices,
-        columns: [
-          { header: 'Classe', value: (row) => row.label },
-          { header: 'Atual', value: (row) => bps(row.actualBps), align: 'right' },
-          { header: 'Objetivo', value: (row) => (row.targetBps === null ? '-' : bps(row.targetBps)), align: 'right' },
-        ],
-      }}
-      note="Mesmo número do card 'Alocação por classe', uma segunda leitura visual, lado a lado por classe."
-    >
-      <ResponsiveContainer className="chart__plot" width="100%" height="100%" minHeight={280}>
-        <BarChart data={slices} margin={{ top: 12, right: 12, bottom: 24, left: 0 }}>
-          <CartesianGrid {...gridProps(theme)} />
-          <XAxis dataKey="label" interval={0} angle={-20} textAnchor="end" height={56} {...axisProps(theme)} />
-          <YAxis tickFormatter={(v: number) => `${Math.round(v / 100)}%`} {...axisProps(theme)} />
-          <Tooltip content={<Tip />} cursor={{ fill: theme.grid, opacity: 0.45 }} />
-          <Bar isAnimationActive={false} dataKey="actualBps" fill={theme.series[0]} maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius} />
-          <Bar isAnimationActive={false} dataKey="targetBps" fill={theme.series[1]} maxBarSize={MARK.barMaxWidth} radius={MARK.barRadius} />
-        </BarChart>
-      </ResponsiveContainer>
-    </ChartFrame>
-  )
-}
-
-/* ================================================================== *
  * Evolução do Patrimônio — stacked bar: capital aplicado (base) +
  * ganho de capital (stacked on top). Barra em vez de linha corrida,
  * para uma leitura periodo a periodo. Aplicado stays neutral (a fact, not a

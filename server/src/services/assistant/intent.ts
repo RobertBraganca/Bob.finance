@@ -198,7 +198,7 @@ export const TOOL_DEFINITIONS: ModelToolDefinition[] = [
   {
     name: 'submit_proposal',
     description:
-      'Entrega a proposta final: um resumo, até 5 ações e até 3 perguntas. Chame uma única vez, no fim. Nada é gravado: o usuário confirma na tela. Sem ação segura, devolva só perguntas.',
+      'Entrega a proposta final: um resumo, até 5 ações e até 3 perguntas. Chame uma única vez, no fim. Nada é gravado: o usuário confirma na tela. Sem ação segura, devolva só perguntas. Recomendação vai no resumo, com pelo menos uma pergunta (o dado que falta ou o próximo passo).',
     input_schema: jsonSchemaOf(assistantProposalSchema),
   },
 ]
@@ -461,51 +461,13 @@ export function createModelCaller(opts: AnthropicCallerOptions & { provider?: As
 }
 
 /* ------------------------------------------------------------------ *
- * Filtro de conselho (decisions/0010): antes da chamada e na saída
+ * Texto normalizado (minúsculas, sem acento) para as heurísticas abaixo.
+ * O antigo filtro de conselho (decisions/0010) saiu: o assistente agora
+ * recomenda (decisions/0047). A segurança fica na escrita: nada é gravado
+ * sem o Confirmar do usuário.
  * ------------------------------------------------------------------ */
 function plain(text: string): string {
   return text.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
-}
-
-// Só INFINITIVOS e pedidos de opinião: "comprei", "vendi" e "aporte de" ficam de fora.
-const OPERATION = '(?:comprar|vender|aportar|investir|resgatar|diversificar)'
-const ADVICE_REQUEST = [
-  new RegExp(`\\b(?:devo|devemos|deveria|deveriamos)\\b(?:\\s+\\S+){0,3}?\\s+${OPERATION}\\b`),
-  new RegExp(`\\bvale\\s+(?:a\\s+)?pena\\b[^.?!]{0,50}?\\b(?:${OPERATION}|investimento|aporte|fundo|acao|acoes|ativo)\\b`),
-  new RegExp(`\\b(?:e|seria)\\s+(?:bom|melhor|boa ideia)\\b[^.?!]{0,30}?\\b${OPERATION}\\b`),
-  new RegExp(`\\bcompensa\\b[^.?!]{0,20}?\\b${OPERATION}\\b`),
-  new RegExp(`\\bo\\s+que\\b(?:\\s+\\S+){0,3}?\\s+${OPERATION}\\b`),
-  /\b(?:onde|em\s+que|em\s+qual)\b(?:\s+\S+){0,2}?\s+(?:investir|aportar|comprar)\b/,
-  /\bqual\b[^.?!]{0,12}?\b(?:melhor|ideal)\b[^.?!]{0,30}?\b(?:investimento|ativo|acao|fundo|aporte|opcao)\b/,
-  new RegExp(`\\bquanto\\b(?:\\s+\\S+){0,3}?\\s+${OPERATION}\\b`),
-  /\b(?:recomend\w*|sugir\w*|sugere|indic\w*|aconselh\w*)\b[^.?!]{0,40}?\b(?:investimento|ativo|acao|acoes|fundo|aporte|comprar|vender|aportar|investir)\b/,
-]
-
-/** A frase pede conselho de compra, venda, aporte ou investimento? */
-export function isAdviceRequest(text: string): boolean {
-  const t = plain(text)
-  return ADVICE_REQUEST.some((re) => re.test(t))
-}
-
-const ADVICE_OUTPUT = [
-  new RegExp(`\\b(?:recomend\\w*|sugir\\w*|aconselh\\w*)\\b[^.?!]{0,40}?\\b${OPERATION}\\b`),
-  new RegExp(`\\bvoce\\s+(?:deveria|deve|precisa)\\b[^.?!]{0,30}?\\b${OPERATION}\\b`),
-  /\bmelhor\s+(?:investimento|opcao\s+de\s+investimento)\b/,
-  new RegExp(`\\bvale\\s+(?:a\\s+)?pena\\b[^.?!]{0,50}?\\b${OPERATION}\\b`),
-]
-
-/** O resumo ou as perguntas do modelo soam como conselho? */
-function outputLooksLikeAdvice(proposal: AssistantProposal): boolean {
-  const t = plain([proposal.summary, ...proposal.questions].join(' . '))
-  return ADVICE_OUTPUT.some((re) => re.test(t))
-}
-
-function adviceProposal(): AssistantProposal {
-  return {
-    summary: 'Eu registro e organizo o que você fez; não aconselho sobre comprar, vender ou aportar.',
-    actions: [],
-    questions: ['Quer registrar uma operação que você já fez? Diga o ativo, a quantidade e o preço.'],
-  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -668,7 +630,7 @@ export type IntentDeps = {
 export type ProposeResult = {
   proposal: AssistantProposal
   /** de onde veio a proposta */
-  source: 'model' | 'advice_filter' | 'input_limit' | 'fallback'
+  source: 'model' | 'input_limit' | 'fallback'
   /** modelo que produziu a proposta; null quando não houve chamada ou ela falhou */
   model: string | null
   /** o modelo barato não bastou e o forte foi chamado (uma vez) */
@@ -841,10 +803,10 @@ async function runModel(
 }
 
 /**
- * Frase -> proposta. Nunca grava e nunca aconselha.
+ * Frase -> proposta. Nunca grava. Pedido de conselho vai ao modelo como
+ * qualquer frase e volta como recomendação no resumo (decisions/0047).
  *
- * Ordem: limites da frase, filtro de conselho (sem chamar o modelo), chave,
- * modelo barato; se ele não entregar proposta válida, ou só perguntar para uma
+ * Ordem: limites da frase, chave, modelo barato; se ele não entregar proposta válida, ou só perguntar para uma
  * frase com valor e verbo claros, UMA escalada para o modelo forte.
  * Lança `AssistantUnavailableError` (code `unavailable`) para chave ausente,
  * HTTP de erro, tempo esgotado ou resposta quebrada. Erros das ferramentas
@@ -868,8 +830,6 @@ export async function proposeFromText(text: string, ctx: AssistantContext, deps:
       'input_limit',
     )
   }
-  if (isAdviceRequest(phrase)) return earlyResult(adviceProposal(), 'advice_filter')
-
   if (!deps.apiKey || !deps.apiKey.trim()) {
     throw new AssistantUnavailableError('O assistente não está configurado (falta a chave do modelo).', 'no_key')
   }
@@ -928,9 +888,6 @@ export async function proposeFromText(text: string, ctx: AssistantContext, deps:
 
   if (chosen.result === null) {
     return { ...earlyResult(fallbackProposal(), 'fallback'), escalated, modelCalls: counter.calls }
-  }
-  if (outputLooksLikeAdvice(chosen.result.proposal)) {
-    return { ...earlyResult(adviceProposal(), 'advice_filter'), model: chosen.model, escalated, modelCalls: counter.calls }
   }
   return {
     proposal: chosen.result.proposal,

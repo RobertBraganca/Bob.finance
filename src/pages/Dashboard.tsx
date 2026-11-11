@@ -14,6 +14,7 @@ import {
 } from '../lib/store'
 import { periodBounds, shiftPeriod, singleMonthOf, todayIso } from '../lib/period'
 import { AccountModal, BalanceCheckModal } from './Settings'
+import { categorizeMessage, useSaveAsRulePref, type CategorizeResult } from '../lib/autoRule'
 import {
   bps,
   centsToInput,
@@ -54,13 +55,10 @@ import type { IconName } from '../components/ui/Icon'
 import { IncomeExpenseChart } from '../components/charts/IncomeExpenseChart'
 import { TransactionForm, type TransactionFormValue } from '../components/forms/TransactionForm'
 import { CategoryRing, type Slice } from '../components/charts/CategoryRing'
-import { NetFlowChart } from '../components/charts/NetFlowChart'
 import { SpendingPaceChart, type SpendingPacePoint } from '../components/charts/SpendingPaceChart'
 import { AnnualPaceChart, type AnnualPacePoint } from '../components/charts/AnnualPaceChart'
 import { SpendingHeatmap } from '../components/charts/SpendingHeatmap'
 import { AnnualSpendingHeatmap } from '../components/charts/AnnualSpendingHeatmap'
-import { TasksTodayCard } from './tasks/TasksTodayCard'
-import { HealthSummaryCard } from './health/HealthCards'
 
 type DashboardResponse = {
   range: { from: string; to: string }
@@ -90,8 +88,6 @@ type DashboardResponse = {
   byCategoryLeaf: Slice[]
   incomeByCategory: Slice[]
   incomeByCategoryLeaf: Slice[]
-  netFlow: Array<{ period: string; netCents: number; cumulativeCents: number }>
-  topMerchants: Array<{ signature: string; amount: number; count: number }>
 }
 
 
@@ -231,10 +227,8 @@ export function Dashboard() {
   const accountsQuery = useAccounts()
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [balanceCheckAccount, setBalanceCheckAccount] = useState<Account | null>(null)
-  // Revisão de UX de 26/09/2026 (Direção A do estudo de densidade): o Bento
-  // arrastável/redimensionável saiu desta tela -- layout fixo, e só este
-  // acordeão único controla o que fica sempre visível vs. atrás de um clique.
-  const [showMore, setShowMore] = useState(false)
+  // Layout fixo (revisão de UX de 26/09/2026). O acordeão "Mostrar mais" saiu
+  // em 11/11/2026 com o que restava nele (resultado acumulado, maiores saídas).
 
   const dashboard = useQuery({
     queryKey: ['dashboard', range.from, range.to, range.accountId, range.preset, 'personal'],
@@ -282,16 +276,7 @@ export function Dashboard() {
     )
   }
 
-  const {
-    totals,
-    deltas,
-    byCategory,
-    byCategoryLeaf,
-    incomeByCategory,
-    incomeByCategoryLeaf,
-    netFlow,
-    topMerchants,
-  } = dashboard.data
+  const { totals, deltas, byCategory, byCategoryLeaf, incomeByCategory, incomeByCategoryLeaf } = dashboard.data
 
   // Ordem fixa (revisão de UX de 26/09/2026): saudação -> ritmo do mês lado
   // a lado com o mapa de calor -> composição por TAG -> pendências
@@ -352,10 +337,58 @@ export function Dashboard() {
           <HistoryCard span={6} range={range} />
         </Bento>
 
-        {/* Tarefas e a Saúde financeira dissolvida (docs/specs/tarefas-comercial-contador). */}
+        {/* Contas e atalhos no lugar de Tarefas e Saúde, que saíram do Painel (11/11/2026). */}
         <Bento>
-          <TasksTodayCard span={6} />
-          <HealthSummaryCard span={6} />
+          <Card
+            span={6}
+            title="Contas"
+            subtitle="Saldo derivado dos lançamentos, nunca armazenado"
+            actions={
+              <Link to="/ajustes" className="btn btn--ghost btn--sm">
+                Gerenciar
+              </Link>
+            }
+          >
+            <div className="kv">
+              {(meta.data?.accounts ?? []).map((account) => (
+                <span key={account.id} style={{ display: 'contents' }}>
+                  <span className="kv__k truncate">
+                    {account.name}
+                    <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
+                      {' '}
+                      · {account.institution}
+                    </span>
+                  </span>
+                  <span className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
+                    <span className={`kv__v ${account.balanceCents < 0 ? 'neg' : ''}`}>
+                      {money(account.balanceCents)}
+                    </span>
+                    <Button
+                      variant="quiet"
+                      size="sm"
+                      icon="scale"
+                      title="Conferir saldo"
+                      onClick={() => {
+                        const full = accountsQuery.data?.accounts.find((a) => a.id === account.id)
+                        if (full) setBalanceCheckAccount(full)
+                      }}
+                    />
+                    <Button
+                      variant="quiet"
+                      size="sm"
+                      icon="pencil"
+                      title="Editar conta"
+                      onClick={() => {
+                        const full = accountsQuery.data?.accounts.find((a) => a.id === account.id)
+                        if (full) setEditingAccount(full)
+                      }}
+                    />
+                  </span>
+                </span>
+              ))}
+            </div>
+          </Card>
+          <DetailLinks span={6} />
         </Bento>
 
         <Card title="Pendências e sugestões">
@@ -375,114 +408,6 @@ export function Dashboard() {
             </div>
           </Bento>
         </Card>
-
-        <button
-          type="button"
-          className="btn btn--ghost"
-          style={{ width: '100%', justifyContent: 'center', gap: 'var(--sp-2)' }}
-          aria-expanded={showMore}
-          onClick={() => setShowMore((v) => !v)}
-        >
-          {showMore ? 'Mostrar menos' : 'Mostrar mais'}
-          <span
-            style={{
-              display: 'inline-flex',
-              transition: 'transform 150ms',
-              transform: showMore ? 'rotate(180deg)' : undefined,
-            }}
-          >
-            <Icon name="chevronDown" size={13} />
-          </span>
-        </button>
-
-        {showMore && (
-          <div className="stack stack--loose">
-            <Bento>
-              <Card
-                span={6}
-                title="Contas"
-                subtitle="Saldo derivado dos lançamentos, nunca armazenado"
-                actions={
-                  <Link to="/ajustes" className="btn btn--ghost btn--sm">
-                    Gerenciar
-                  </Link>
-                }
-              >
-                <div className="kv">
-                  {(meta.data?.accounts ?? []).map((account) => (
-                    <span key={account.id} style={{ display: 'contents' }}>
-                      <span className="kv__k truncate">
-                        {account.name}
-                        <span className="muted" style={{ fontSize: 'var(--text-2xs)' }}>
-                          {' '}
-                          · {account.institution}
-                        </span>
-                      </span>
-                      <span className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
-                        <span className={`kv__v ${account.balanceCents < 0 ? 'neg' : ''}`}>
-                          {money(account.balanceCents)}
-                        </span>
-                        <Button
-                          variant="quiet"
-                          size="sm"
-                          icon="scale"
-                          title="Conferir saldo"
-                          onClick={() => {
-                            const full = accountsQuery.data?.accounts.find((a) => a.id === account.id)
-                            if (full) setBalanceCheckAccount(full)
-                          }}
-                        />
-                        <Button
-                          variant="quiet"
-                          size="sm"
-                          icon="pencil"
-                          title="Editar conta"
-                          onClick={() => {
-                            const full = accountsQuery.data?.accounts.find((a) => a.id === account.id)
-                            if (full) setEditingAccount(full)
-                          }}
-                        />
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              </Card>
-              <DetailLinks span={6} />
-            </Bento>
-
-            <Bento>
-              <Card span={6} title="Resultado acumulado" subtitle="Quanto sobrou, somado mês a mês">
-                <NetFlowChart data={netFlow} surface="paper" height={200} />
-              </Card>
-              <Card span={6} title="Onde o dinheiro mais foi" subtitle="Maiores saídas do período">
-                {dashboard.isError ? (
-                  <EmptyState
-                    icon="alert"
-                    title="Falha ao carregar"
-                    body="Não foi possível carregar as maiores saídas agora. Tente novamente em instantes."
-                  />
-                ) : topMerchants.length === 0 ? (
-                  <EmptyState icon="search" title="Nada a listar" body="Sem saídas registradas no período." />
-                ) : (
-                  <ul className="ranked">
-                    {topMerchants.map((merchant) => (
-                      <li
-                        key={merchant.signature}
-                        className="ranked__item"
-                        style={{ gridTemplateColumns: 'minmax(0,1fr) auto auto' }}
-                      >
-                        <span className="truncate">{merchant.signature}</span>
-                        <span className="ranked__share">{merchant.count}x</span>
-                        <span className="ranked__value">{money(merchant.amount)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Card>
-            </Bento>
-
-          </div>
-        )}
       </div>
 
       {editingAccount && <AccountModal account={editingAccount} onClose={() => setEditingAccount(null)} />}
@@ -1679,6 +1604,8 @@ type AutoEntry = {
   amountCents: number
   accountName: string
   categoryName: string | null
+  /** TAG que o mesmo estabelecimento já recebeu antes (decisions/0047); só sem TAG */
+  suggestion: { categoryId: number; categoryName: string; source: 'memory' | 'rule' } | null
 }
 
 const AUTO_ENTRIES_SHOWN = 5
@@ -1694,6 +1621,23 @@ function AutoEntriesSection() {
   const queryClient = useQueryClient()
 
   const entries = useQuery(needsReviewQuery())
+
+  // Sem TAG com sugestão: um clique aplica a TAG e, como em Lançamentos,
+  // cria a regra do estabelecimento se a preferência estiver ligada.
+  const [saveAsRulePref] = useSaveAsRulePref()
+  const applySuggestion = useMutation({
+    mutationFn: (row: AutoEntry) =>
+      api.post<CategorizeResult>('/transactions/categorize', {
+        ids: [row.id],
+        categoryId: row.suggestion!.categoryId,
+        saveAsRule: saveAsRulePref,
+      }),
+    onSuccess: (result) => {
+      toast(categorizeMessage(result))
+      queryClient.invalidateQueries()
+    },
+    onError: (error) => toast(error instanceof Error ? error.message : 'falha ao categorizar', 'error'),
+  })
 
   const markReviewed = useMutation({
     mutationFn: (ids?: number[]) => api.post<{ updated: number }>('/transactions/mark-reviewed', ids ? { ids } : {}),
@@ -1735,6 +1679,25 @@ function AutoEntriesSection() {
             <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
               {fmtDate(row.postedOn)} · {row.accountName} ·{' '}
               {row.categoryName ?? <span style={{ color: 'var(--status-warning)' }}>sem TAG</span>}
+              {row.categoryName === null && row.suggestion && (
+                <>
+                  {' · '}
+                  <button
+                    type="button"
+                    className="badge badge--info"
+                    style={{ cursor: 'pointer', border: 0 }}
+                    disabled={applySuggestion.isPending}
+                    title={
+                      row.suggestion.source === 'memory'
+                        ? 'Este estabelecimento já recebeu esta TAG antes'
+                        : 'Uma regra sua casa com este lançamento'
+                    }
+                    onClick={() => applySuggestion.mutate(row)}
+                  >
+                    Usar {row.suggestion.categoryName}?
+                  </button>
+                </>
+              )}
             </div>
           </div>
           <span className="row" style={{ gap: 'var(--sp-2)' }}>

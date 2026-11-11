@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, like, lte, ne, or, sql, type 
 import { db, type DbExecutor } from '../db/client'
 import { accounts, categories, categoryRules, cashFlowForecasts, debts, transactions } from '../db/schema'
 import { dedupeHash, directionOf, merchantSignature, normalizeDescription } from '../core/normalize'
-import { EXPLICIT_RULE_PRIORITY, learnCorrection } from './categorization'
+import { EXPLICIT_RULE_PRIORITY, learnCorrection, loadCategorizer, recategorize } from './categorization'
 import { deletePending, type PendingDeleteScope } from './cashFlow'
 
 export type TransactionFilter = {
@@ -206,9 +206,10 @@ export async function listTransactions(filter: TransactionFilter) {
       .where(where),
   ])
   const totals = totalsRow[0]
+  const suggestions = await suggestFor(rows)
 
   return {
-    rows,
+    rows: rows.map((row) => ({ ...row, suggestion: suggestions.get(row.id) ?? null })),
     total: totals?.count ?? 0,
     pendingCount: Number(totals?.pendingCount ?? 0),
     inflowCents: totals?.inflowCents ?? 0,
@@ -261,10 +262,29 @@ export async function setCategory(
     }
   }
 
+  // "Sem categoria → regra automática" (decisions/0047, 11/11/2026): a tela
+  // agora oferece a regra marcada por padrão ao dar TAG. Uma regra por
+  // estabelecimento distinto da seleção (antes, só o do primeiro
+  // lançamento), e uma regra existente para o mesmo padrão passa a apontar
+  // para a TAG escolhida agora, que é a intenção mais recente do usuário.
   let ruleId: number | null = null
+  let rulesCreated = 0
+  let alsoCategorized = 0
   if (categoryId !== null && options.saveAsRule && rows.length > 0) {
-    const signature = merchantSignature(rows[0]!.description)
-    if (signature) {
+    // Pix, TED e transferência para pessoa não viram regra (11/11/2026): o
+    // "estabelecimento" é o nome de alguém, e um `contains` com ele pegaria
+    // qualquer transferência futura para essa pessoa, seja qual for o motivo.
+    // A TAG vale para os lançamentos escolhidos, só não vira regra.
+    const TRANSFER_LIKE = /(pix|ted|doc|transf|transferencia|transferência)/i
+    const signatures = [
+      ...new Set(
+        rows
+          .filter((row) => !TRANSFER_LIKE.test(row.description))
+          .map((row) => merchantSignature(row.description))
+          .filter((signature) => signature && signature.length >= 4),
+      ),
+    ]
+    for (const signature of signatures) {
       const existing = (
         await db
           .select()
@@ -277,25 +297,102 @@ export async function setCategory(
             ),
           )
       )[0]
-      ruleId =
-        existing?.id ??
-        (
-          await db
-            .insert(categoryRules)
-            .values({
-              categoryId,
-              field: 'description',
-              matchType: 'contains',
-              pattern: signature,
-              priority: EXPLICIT_RULE_PRIORITY,
-              origin: 'user',
-            })
-            .returning({ id: categoryRules.id })
-        )[0]!.id
+      if (existing) {
+        if (existing.categoryId !== categoryId || !existing.active) {
+          await db.update(categoryRules).set({ categoryId, active: true }).where(eq(categoryRules.id, existing.id))
+        }
+        ruleId ??= existing.id
+        continue
+      }
+      const inserted = (
+        await db
+          .insert(categoryRules)
+          .values({
+            categoryId,
+            field: 'description',
+            matchType: 'contains',
+            pattern: signature,
+            priority: EXPLICIT_RULE_PRIORITY,
+            origin: 'user',
+          })
+          .returning({ id: categoryRules.id })
+      )[0]!.id
+      ruleId ??= inserted
+      rulesCreated++
+    }
+
+    // A regra vale já para os outros "Sem categoria" do mesmo
+    // estabelecimento, não só para o próximo extrato. Pelo motor
+    // (`recategorize`), para a origem ficar "regra" e o contador da regra
+    // subir; lançamento com TAG nunca é tocado.
+    if (signatures.length > 0) {
+      const wanted = new Set(signatures)
+      const sameMerchant = (
+        await db
+          .select({ id: transactions.id, description: transactions.description })
+          .from(transactions)
+          .where(isNull(transactions.categoryId))
+      )
+        .filter((row) => wanted.has(merchantSignature(row.description)))
+        .map((row) => row.id)
+      if (sameMerchant.length > 0) {
+        alsoCategorized = (await recategorize({ ids: sameMerchant, onlyUncategorized: true })).updated
+      }
     }
   }
 
-  return { updated: rows.length, learned, ruleId }
+  return { updated: rows.length, learned, ruleId, rulesCreated, alsoCategorized }
+}
+
+export type CategorySuggestion = {
+  categoryId: number
+  categoryName: string
+  /** `memory`: o mesmo estabelecimento já recebeu esta TAG à mão; `rule`: uma regra criada depois casa */
+  source: 'memory' | 'rule'
+}
+
+/**
+ * Sugestão proativa para lançamentos Sem categoria (decisions/0047): se o
+ * mesmo estabelecimento já foi categorizado antes (memória) ou uma regra
+ * criada depois da importação casa, a tela oferece a TAG em um clique. Só
+ * sugere; quem aplica é o usuário.
+ */
+async function suggestFor(
+  rows: Array<{ id: number; categoryId: number | null }>,
+): Promise<Map<number, CategorySuggestion>> {
+  const out = new Map<number, CategorySuggestion>()
+  const ids = rows.filter((row) => row.categoryId === null).map((row) => row.id)
+  if (ids.length === 0) return out
+  const [categorizer, details, cats] = await Promise.all([
+    loadCategorizer(),
+    db
+      .select({
+        id: transactions.id,
+        description: transactions.description,
+        descriptionNorm: transactions.descriptionNorm,
+        amountCents: transactions.amountCents,
+        rawCategory: transactions.rawCategory,
+        accountId: transactions.accountId,
+      })
+      .from(transactions)
+      .where(inArray(transactions.id, ids)),
+    db.select({ id: categories.id, name: categories.name }).from(categories).where(eq(categories.archived, false)),
+  ])
+  const names = new Map(cats.map((c) => [c.id, c.name]))
+  for (const row of details) {
+    const suggestion = categorizer.suggest({
+      descriptionNorm: row.descriptionNorm,
+      signature: merchantSignature(row.description),
+      amountCents: row.amountCents,
+      rawCategory: row.rawCategory,
+      accountId: row.accountId,
+    })
+    if (suggestion.categoryId === null || (suggestion.source !== 'memory' && suggestion.source !== 'rule')) continue
+    const categoryName = names.get(suggestion.categoryId)
+    if (!categoryName) continue
+    out.set(row.id, { categoryId: suggestion.categoryId, categoryName, source: suggestion.source })
+  }
+  return out
 }
 
 /** Item 4 do backlog de 07/09/2026: oculta/reexibe em lote, nunca uma segunda tabela nem um soft-delete. */
