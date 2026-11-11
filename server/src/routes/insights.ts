@@ -13,6 +13,7 @@ import * as dailyService from '../services/daily'
 import * as debtService from '../services/debt'
 import { ensureMaterialized } from '../services/materialization'
 import * as dreService from '../services/dre'
+import { irpfSummary } from '../services/irpf'
 import * as engineService from '../services/financialEngine'
 import * as healthService from '../services/financialHealth'
 import * as goalsService from '../services/goals'
@@ -24,7 +25,6 @@ import * as propertyPlans from '../services/propertyPlans'
 import * as quotesService from '../services/quotes'
 import * as subscriptionsService from '../services/subscriptions'
 import { ledgerBounds } from '../services/transactions'
-import { accountFlows } from '../services/transfers'
 
 const rangeQuery = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -136,38 +136,20 @@ export async function insightsRoutes(app: FastifyInstance) {
     return analytics.dashboard(range, { includeFutureReceivables: query.futureReceivables })
   })
 
-  /**
-   * Account-to-account flow. Deliberately ignores accountId: a flow diagram
-   * IS the cross-account picture, so scoping it to one account would leave
-   * nothing to draw.
-   */
-  app.get('/analytics/flows', async (req) => {
-    const query = rangeQuery.parse(req.query)
-    const range = await resolveRange(query)
-    return accountFlows({ from: range.from, to: range.to })
-  })
-
   app.get('/analytics/monthly', async (req) => {
     const range = await resolveRange(rangeQuery.parse(req.query))
     return { range, series: await analytics.monthlySeries(range) }
   })
 
-  /**
-   * DRE per account — every leaf category as its own line, plus the
-   * uncategorized rows grouped by merchant so the biggest unclassified
-   * chunks surface first. accountId is required in practice (the DRE
-   * page always calls it once per account) but falls back to the whole
-   * ledger like every other range-scoped endpoint here.
-   */
-  app.get('/analytics/dre', async (req) => {
-    const range = await resolveRange(rangeQuery.parse(req.query))
-    return dreService.dreReport(range)
-  })
-
-  /** DRE formal (PJ), ver specs/dre "DRE PJ formal" — accountId é a conta PJ, resolvida no front igual o resto desta tela. */
+  /** DRE formal (PJ), ver specs/dre "DRE PJ formal" — sem accountId, lê a conta PJ do Motor financeiro. */
   app.get('/analytics/dre/formal', async (req) => {
     const range = await resolveRange(rangeQuery.parse(req.query))
     return dreService.formalDre(range)
+  })
+
+  app.get('/analytics/irpf', async (req) => {
+    const { year } = z.object({ year: z.coerce.number().int().min(2000).max(2100) }).parse(req.query)
+    return irpfSummary(year)
   })
 
   app.get('/analytics/categories', async (req) => {
@@ -1050,11 +1032,9 @@ export async function insightsRoutes(app: FastifyInstance) {
   app.post('/investments/benchmarks/refresh', async () => benchmarksService.refreshBenchmarks())
 
   /**
-   * Desvio de alocação: current share vs the user's own policy, per class.
-   * Returns no suggested asset and no recommended action, by contract
-   * rather than by omission in the UI — see the note above
-   * `allocationDeviation` in services/investments.ts for why that absence
-   * is load-bearing (decisions/0010, Ofício-Circular CVM/SIN 2/2026).
+   * Desvio de alocação: current share vs the user's own policy, per class,
+   * plus the rebalancing recommendation for the next aporte
+   * (`rebalanceAdvice`, decisions/0047).
    */
   app.get('/investments/allocation-deviation', async (req) => {
     const query = z.object({ goalId: z.coerce.number().int().positive().optional() }).parse(req.query)

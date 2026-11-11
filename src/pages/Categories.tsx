@@ -325,6 +325,8 @@ function CategoryModal({
   const [color, setColor] = useState(node?.color ?? parent?.color ?? PALETTE[0]!.hex)
   const [kind, setKind] = useState(node?.kind ?? parent?.kind ?? 'expense')
   const [dreGroup, setDreGroup] = useState(node?.dreGroup ?? parent?.dreGroup ?? '')
+  const [irpfGroup, setIrpfGroup] = useState(node?.irpfGroup ?? '')
+  const irpfFieldId = useId()
   const nameFieldId = useId()
   const kindFieldId = useId()
   const dreGroupFieldId = useId()
@@ -335,8 +337,8 @@ function CategoryModal({
   const save = useMutation({
     mutationFn: () =>
       isEdit
-        ? api.patch(`/categories/${node!.id}`, { name, color, kind, dreGroup: dreGroup || null })
-        : api.post('/categories', { name, color, kind, dreGroup: dreGroup || null, parentId: parent?.id ?? null }),
+        ? api.patch(`/categories/${node!.id}`, { name, color, kind, dreGroup: dreGroup || null, irpfGroup: irpfGroup || null })
+        : api.post('/categories', { name, color, kind, dreGroup: dreGroup || null, irpfGroup: irpfGroup || null, parentId: parent?.id ?? null }),
     onSuccess: () => {
       toast(isEdit ? 'TAG atualizada' : 'TAG criada')
       queryClient.invalidateQueries()
@@ -461,6 +463,26 @@ function CategoryModal({
             SubTAGs herdam cor, tipo e classificação de DRE da mãe automaticamente.
           </p>
         )}
+
+        {(kind === 'expense' || kind === 'investment') && (
+          <div className="field">
+            <label className="field__label" htmlFor={irpfFieldId}>Dedução no Imposto de Renda</label>
+            <Select
+              id={irpfFieldId}
+              value={irpfGroup}
+              options={[
+                { value: '', label: `Automático (pelo nome)${node?.irpf ? `: ${node.irpf.group ? IRPF_LABEL[node.irpf.group] : 'não deduz'}` : ''}` },
+                ...Object.entries(IRPF_LABEL).map(([value, label]) => ({ value, label })),
+                { value: 'none', label: 'Não deduz' },
+              ]}
+              onChange={(value) => setIrpfGroup(value ?? '')}
+            />
+            <span className="field__hint">
+              Saúde (consulta, exame, plano) e pensão deduzem sem limite; educação regular tem teto por pessoa; PGBL até 12% da
+              renda tributável. Farmácia, academia e curso livre não deduzem. Vale para o resumo do IR em Minha empresa.
+            </span>
+          </div>
+        )}
       </div>
         <DialogFooter>
           {isEdit ? (
@@ -478,6 +500,8 @@ function CategoryModal({
     </Dialog>
   )
 }
+
+const IRPF_LABEL: Record<string, string> = { health: 'Saúde', education: 'Educação', pension: 'Previdência (PGBL)', alimony: 'Pensão alimentícia' }
 
 /* ------------------------------------------------------------------ *
  * Rules

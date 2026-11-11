@@ -24,9 +24,26 @@ const authClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUP
  * que a validade do JWT (1h) — ainda revalida com o servidor de Auth
  * periodicamente, não é "verificar uma vez e confiar para sempre".
  */
-const CACHE_TTL_MS = 60_000
+const CACHE_TTL_MS = 10 * 60_000
 const MAX_CACHE_ENTRIES = 20
 const verified = new Map<string, { userId: string; expiresAt: number }>()
+/**
+ * A verificação em curso por token (11/11/2026): o Painel dispara ~15
+ * chamadas ao mesmo tempo numa instância fria, todas erravam o cache juntas
+ * e cada uma ia ao servidor de Auth. Agora a primeira vai e as outras
+ * esperam a mesma resposta.
+ */
+const inFlight = new Map<string, Promise<string | null>>()
+
+/** `exp` do JWT, em ms; só para não guardar no cache além da validade do token. */
+function tokenExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null
+  } catch {
+    return null
+  }
+}
 
 /**
  * Até 29/08/2026 a anon key sozinha bastava para ler/escrever qualquer
@@ -39,21 +56,33 @@ const verified = new Map<string, { userId: string; expiresAt: number }>()
  * JWT localmente sem checar assinatura/expiração.
  */
 /** Verifica o token com o servidor de Auth (com o cache curto acima) e devolve o id do usuário, ou null. */
-async function verifiedUserId(token: string): Promise<string | null> {
+function verifiedUserId(token: string): Promise<string | null> {
   const now = Date.now()
   const cached = verified.get(token)
-  if (cached && cached.expiresAt > now) return cached.userId
+  if (cached && cached.expiresAt > now) return Promise.resolve(cached.userId)
+  const pending = inFlight.get(token)
+  if (pending) return pending
+  const check = verifyWithAuth(token).finally(() => inFlight.delete(token))
+  inFlight.set(token, check)
+  return check
+}
 
-  const { data, error } = await authClient.auth.getUser(token)
-  if (error || !data.user) return null
+async function verifyWithAuth(token: string): Promise<string | null> {
+  // `getClaims` confere a assinatura localmente quando o projeto usa chaves
+  // assimétricas (JWKS em cache) e cai no `getUser` (servidor de Auth) quando não.
+  const { data, error } = await authClient.auth.getClaims(token)
+  const userId = !error && typeof data?.claims?.sub === 'string' ? data.claims.sub : null
+  if (!userId) return null
   if (verified.size >= MAX_CACHE_ENTRIES) {
     // App de um usuário só: nunca deveria crescer de verdade, isto é só
     // um teto de segurança contra o Map crescer sem limite.
     const oldestKey = verified.keys().next().value
     if (oldestKey !== undefined) verified.delete(oldestKey)
   }
-  verified.set(token, { userId: data.user.id, expiresAt: now + CACHE_TTL_MS })
-  return data.user.id
+  const now = Date.now()
+  const exp = tokenExpiry(token)
+  verified.set(token, { userId, expiresAt: Math.min(now + CACHE_TTL_MS, exp ?? now + CACHE_TTL_MS) })
+  return userId
 }
 
 export async function requireAdmin(c: Context, next: Next) {

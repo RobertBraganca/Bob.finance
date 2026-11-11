@@ -81,13 +81,6 @@ export const STATUS_BADGE: Record<ProposalStatus, string> = {
   rejected: 'badge badge--critical',
 }
 
-export const SORT_OPTIONS: Array<{ value: ProposalSort; label: string }> = [
-  { value: 'recent', label: 'Mais recente' },
-  { value: 'oldest', label: 'Mais antigo' },
-  { value: 'value_desc', label: 'Maior valor' },
-  { value: 'value_asc', label: 'Menor valor' },
-]
-
 /** Quantidade como o usuário escreve: "1", "12,5". */
 export function formatQuantity(quantity: number): string {
   return quantity.toLocaleString('pt-BR', { maximumFractionDigits: 2 })

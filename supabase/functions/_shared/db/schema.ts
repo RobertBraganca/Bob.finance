@@ -73,6 +73,8 @@ export const categoryKindEnum = pgEnum('category_kind', ['income', 'expense', 't
  * subcategoria herda da mãe, igual já faz com cor e kind.
  */
 export const dreGroupEnum = pgEnum('dre_group', ['deduction', 'cost', 'financial', 'tax'])
+/** Dedução no IRPF (decisions/0047, core/irpf.ts); `none` = não deduz, nulo = pelo nome. */
+export const irpfGroupEnum = pgEnum('irpf_group', ['health', 'education', 'pension', 'alimony', 'none'])
 export const ruleFieldEnum = pgEnum('rule_field', ['description', 'raw_category'])
 export const ruleMatchTypeEnum = pgEnum('rule_match_type', ['contains', 'starts_with', 'equals', 'regex'])
 export const ruleDirectionEnum = pgEnum('rule_direction', ['any', 'in', 'out'])
@@ -178,6 +180,7 @@ export const categories = pgTable(
     color: text('color').notNull().default('#2a78d6'),
     icon: text('icon').notNull().default('tag'),
     dreGroup: dreGroupEnum('dre_group'),
+    irpfGroup: irpfGroupEnum('irpf_group'),
     /**
      * Grupo do orçamento (decisions/0042). Nulo herda o da mãe; sem grupo
      * na cadeia, a despesa cai em "Sem grupo". Classificação, não meta:

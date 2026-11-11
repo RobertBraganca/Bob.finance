@@ -77,6 +77,10 @@ async function pjMonths(pjAccountId: number, fromPeriod: string, toPeriod: strin
     m.hasMovement = true
     const cents = Number(row.cents)
     if (row.kind === 'income') m.revenueCents += cents
+    // Saída sem categoria conta como custo, igual ao DRE formal (services/dre.ts):
+    // os dois cards fecham o mesmo lucro. Entrada sem categoria fica fora do
+    // faturamento para não inflar o teto do MEI com uma transferência sem TAG.
+    else if (row.kind === null && row.categoryId === null && cents < 0) m.costsCents += -cents
     else if (row.kind === 'expense') {
       if (row.categoryId !== null && das.has(Number(row.categoryId))) m.dasCents += -cents
       else m.costsCents += -cents

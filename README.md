@@ -35,40 +35,9 @@ npm run db:reset
 
 ### Backup e recuperação
 
-Um snapshot do banco é criado **automaticamente antes de toda migração de
-schema** — não a cada boot, só quando o journal de migração muda de fato. Fora
-isso, sob demanda:
-
-```bash
-npm run db:backup -- "antes de importar 2026"
-```
-
-Para listar e restaurar (a listagem é o comportamento sem argumento):
-
-```bash
-npm run db:restore
-npm run db:restore -- 3 --yes
-```
-
-Sem `--yes` o comando mostra o que faria e sai sem tocar em nada. Restaurar
-sempre salva o estado atual como um backup novo antes de sobrescrever, mesmo
-que a restauração seja um engano. Depois de restaurar, reinicie o `npm run dev`:
-o processo mantém um handle aberto do arquivo antigo.
-
-Os snapshots ficam em `data/backups/`, indexados por `manifest.json` — um
-arquivo, deliberadamente fora do banco que ele protege, porque recuperar de um
-banco corrompido não pode depender de abrir esse mesmo banco. Limpeza é sempre
-manual e nunca remove um backup manual:
-
-```bash
-npm run db:backup:prune -- --keep 5 --yes
-```
-
-Também há uma seção "Backups" em Contas e bancos, com a mesma lista e um botão
-de restaurar que abre confirmação explícita. Ver `docs/specs/backup-and-recovery`
-e `docs/decisions/0014`.
-
----
+Desde a migração para o Supabase (decisions/0026), o backup é o do próprio
+Supabase. Os scripts `db:backup`/`db:restore`/`db:backup:prune` eram da era
+SQLite, só falhavam, e saíram em 11/11/2026 (decisions/0032 pausou a tela).
 
 ## Importando os extratos reais
 
@@ -298,11 +267,14 @@ para a fonte de verdade dos tokens. Figuras proporcionais nos números grandes;
 ## Verificação
 
 ```bash
-npm run verify      # 546 checks ponta a ponta + 37 de backup, banco descartável
 npm run typecheck
+npm run test:tasks        # e test:clients, test:accountant, test:assistant
 ```
 
-O harness roda contra `data/verify.db`, nunca contra o banco de trabalho. Cobre,
+> `scripts/verify.ts` saiu em 11/11/2026: depois da migração para o Supabase
+> ele gravava no banco real em vez de num arquivo descartável. Os testes de
+> hoje (`scripts/*/*.test.ts`) rodam dentro de transações que sempre desfazem.
+> O texto abaixo descreve o que o harness antigo cobria. Cobria,
 por módulo:
 
 1. **Importação** — detecção dos 6 perfis pelo cabeçalho, as 4 convenções de sinal,

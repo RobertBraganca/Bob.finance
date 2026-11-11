@@ -10,6 +10,7 @@ import {
   Card,
   EmptyState,
   HeroFigure,
+  Icon,
   Select,
   Slab,
   SkeletonLines,
@@ -17,31 +18,40 @@ import {
   useToast,
   type AssumptionBag,
 } from '../components/ui'
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 
 /**
  * Motor financeiro: alocação do disponível e ponto de equilíbrio.
  *
- * Everything here follows the instrumental-language table in
- * `decisions/0010`. The page never closes a sentence with an instruction:
- * the destinations table reports meta, realizado and diferença and stops
- * there, and the break-even card states what revenue WOULD cover what is
- * configured, in the conditional, never "fature X".
- *
- * The destination list is rendered in the exact order the API returns it.
- * That order is alphabetical on purpose, and re-sorting it here by size or
- * by "what is furthest behind" would reintroduce, as a layout choice, the
- * recommendation the API deliberately refuses to make.
+ * Desde a `decisions/0047` o Motor recomenda: a API devolve os destinos em
+ * ordem de prioridade, com a razão de cada posição, e o primeiro com valor
+ * faltando vira a frase "Comece por ...". A lista é renderizada na ordem
+ * que a API manda; o critério mora em `services/financialEngine`
+ * (`prioritizeDestinations`) e aparece no subtítulo do card.
  */
 
+type DestinationKey = 'debt' | 'investment' | 'free' | 'reserve'
+
 type Destination = {
-  key: string
+  key: DestinationKey
   label: string
   targetCents: number | null
   realizedCents: number
   differenceCents: number | null
+  /** ausentes enquanto a função publicada for anterior à decisions/0047 */
+  priority?: number
+  priorityReason?: string
   assumptions: AssumptionBag
+}
+
+type AllocationRecommendation = {
+  key: DestinationKey
+  label: string
+  missingCents: number | null
+  coverableCents: number
+  allClear: boolean
 }
 
 type Available = {
@@ -54,7 +64,55 @@ type Available = {
     alreadyAllocatedCents: number
   }
   destinations: Destination[]
+  /** nulo em período já encerrado; ausente na função anterior ao deploy */
+  recommendation?: AllocationRecommendation | null
   assumptions: AssumptionBag
+}
+
+/** Por que começar por esse destino, na mesma ordem de urgência da API. */
+const START_REASON: Record<Exclude<DestinationKey, 'free'>, string> = {
+  debt: 'são as parcelas programadas do mês, e parcela atrasada gera multa e juros',
+  reserve: 'para completar a reserva de emergência, que protege o resto do plano antes de investir',
+  investment: 'para o aporte planejado do mês',
+}
+
+const START_WITH: Record<Exclude<DestinationKey, 'free'>, string> = {
+  debt: 'pela dívida',
+  reserve: 'pela reserva de emergência',
+  investment: 'pelo investimento',
+}
+
+/** A frase "Comece por ...", montada a partir de `recommendation` (decisions/0047). */
+function StartHere({ rec, availableCents }: { rec: AllocationRecommendation; availableCents: number }) {
+  if (rec.allClear) {
+    return (
+      <Alert variant="good">
+        <Icon name="check" size={16} />
+        <AlertTitle>Tudo em dia neste período</AlertTitle>
+        <AlertDescription>
+          Parcelas, reserva e aporte não têm valor faltando.{' '}
+          {availableCents > 0 ? `Os ${money(availableCents)} que sobram estão livres.` : 'Não sobra saldo livre além disso.'}
+        </AlertDescription>
+      </Alert>
+    )
+  }
+  const missing = rec.missingCents ?? 0
+  const reason = START_REASON[rec.key as Exclude<DestinationKey, 'free'>]
+  const cover =
+    rec.coverableCents >= missing
+      ? `O disponível cobre tudo: destine ${money(missing)} e o resto segue a ordem abaixo.`
+      : rec.coverableCents > 0
+        ? `O disponível cobre ${money(rec.coverableCents)} disso: vá com ele aqui antes de qualquer outro destino.`
+        : 'Hoje não há saldo livre: ele vem primeiro assim que entrar dinheiro.'
+  return (
+    <Alert variant={rec.key === 'debt' ? 'warning' : 'good'}>
+      <Icon name="target" size={16} />
+      <AlertTitle>Comece {START_WITH[rec.key as Exclude<DestinationKey, 'free'>]}</AlertTitle>
+      <AlertDescription>
+        Faltam {money(missing)}: {reason}. {cover}
+      </AlertDescription>
+    </Alert>
+  )
 }
 
 type BreakEvenLine = { key: string; label: string; amountCents: number; assumptions: AssumptionBag }
@@ -86,11 +144,7 @@ type EngineSettings = {
   investmentPlannedCents: number | null
 }
 
-/**
- * Why a line is zero, when it is zero for a reason the user can act on.
- * States the situation and stops there: what to do about it is not a
- * sentence this product finishes (decisions/0010).
- */
+/** Why a line is zero, when it is zero for a reason the user can act on. */
 function lineHint(line: BreakEvenLine): string | null {
   const origem = typeof line.assumptions.origem === 'string' ? line.assumptions.origem : ''
   if (origem.startsWith('não derivável')) return 'contas PJ e PF não informadas'
@@ -199,8 +253,13 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
             <Card
               span={12}
               title="Por destino"
-              subtitle="Em ordem alfabética, deliberadamente neutra: a ordem não é calculada a partir dos valores"
+              subtitle="Em ordem de prioridade: primeiro o que ainda falta, na ordem parcela de dívida, reserva de emergência e investimento; depois o que está em dia; Livre por último"
             >
+              {available.data.recommendation && (
+                <div style={{ marginBottom: 'var(--sp-4)' }}>
+                  <StartHere rec={available.data.recommendation} availableCents={available.data.availableCents} />
+                </div>
+              )}
               {/* Same wrapper every wide table in the app uses, so a narrow
                   screen scrolls the table instead of the page. */}
               <div className="table-wrap">
@@ -217,10 +276,17 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
                     {available.data.destinations.map((destination) => (
                       <tr key={destination.key}>
                         <td data-label="Destino">
+                          {/* A função anterior ao deploy ainda não manda a prioridade. */}
+                          {destination.priority != null && <span className="muted tabular">{destination.priority}. </span>}
                           {destination.label}
                           {/* A fórmula anda com a própria linha, como ⓘ, não
                               numa pilha de divulgações embaixo da tabela. */}
                           <Assumptions data={destination.assumptions} compact />
+                          {destination.priorityReason && (
+                            <span className="muted" style={{ display: 'block', fontSize: 'var(--text-xs)' }}>
+                              {destination.priorityReason}
+                            </span>
+                          )}
                         </td>
                         <td className="table__num" data-label="Meta">
                           {destination.targetCents === null ? (
@@ -362,8 +428,7 @@ export function MotorFinanceiroTab({ period: resolvedPeriod }: { period: string 
                       corpo duplicava exatamente o tipo de detalhe contábil
                       que confundia mais do que ajudava (09/09/2026). */}
 
-                  {/* The closing sentence stays conditional, per the
-                      instrumental-language table in decisions/0010. */}
+                  {/* Condicional porque é projeção: depende de custos e metas se manterem. */}
                   <p className="chart__note">
                     Se os custos, a retirada planejada e as metas configuradas se mantiverem, os valores
                     acima seriam os necessários para cobrir o mês.

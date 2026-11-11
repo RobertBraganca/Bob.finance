@@ -27,6 +27,15 @@ export type CompanyOverview = {
     projectedShareBps: number
     reachesInPeriod: string | null
     state: 'ok' | 'attention' | 'critical'
+    /** recomendação do teto, `CeilingAdvice` em _shared/core/company.ts (decisions/0047) */
+    advice: {
+      kind: 'none' | 'approaching' | 'projected_over' | 'projected_retroactive' | 'exceeded' | 'retroactive'
+      monthsLeft: number
+      roomCents: number
+      monthlyRoomCents: number | null
+      toleranceLimitCents: number
+      toleranceRoomCents: number
+    }
   }
   coverage: { withdrawalsCents: number; personalSpentCents: number; coverageBps: number | null; livingCostCents: number }
   series: Array<{ period: string; revenueCents: number; withdrawalsCents: number; personalSpentCents: number }>

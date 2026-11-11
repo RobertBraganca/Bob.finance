@@ -156,17 +156,6 @@ const DTI_BANDS: GaugeBand[] = [
   { maxBps: Infinity, label: 'Crítico', tone: 'critical' },
 ]
 
-/**
- * Uso de limite de cartão. Os cortes são os mesmos de `capUsageState`
- * (`components/ui`), para o arco e qualquer badge do mesmo número nunca
- * discordarem — um teto é sobre não passar, então aqui MAIOR é pior.
- */
-export const CARD_USAGE_BANDS: GaugeBand[] = [
-  { maxBps: 8000, label: 'Com folga', tone: 'good' },
-  { maxBps: 10_000, label: 'Apertado', tone: 'warning' },
-  { maxBps: Infinity, label: 'Estourado', tone: 'critical' },
-]
-
 export function DebtServiceGauge({
   ratioBps,
   surface = 'slab',
