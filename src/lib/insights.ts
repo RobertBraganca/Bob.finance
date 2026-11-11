@@ -175,13 +175,13 @@ export function useInsights() {
     enabled: ready,
   })
   const riskQuery = useQuery({
-    queryKey: ['dashboard-risk-radar', currentPeriod],
+    queryKey: ['financial-health-radar', currentPeriod],
     queryFn: () => api.get<{ rules: RiskRule[] }>('/financial-health/risk-radar', { period: currentPeriod }),
     staleTime: INSIGHTS_STALE_MS,
     enabled: ready,
   })
   const checklistQuery = useQuery({
-    queryKey: ['dashboard-closing-checklist', currentPeriod],
+    queryKey: ['financial-health-closing-checklist', currentPeriod],
     queryFn: () => api.get<ClosingChecklist>('/financial-health/closing-checklist', { period: currentPeriod }),
     staleTime: INSIGHTS_STALE_MS,
     enabled: ready,

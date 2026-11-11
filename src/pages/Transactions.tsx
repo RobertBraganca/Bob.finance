@@ -31,6 +31,7 @@ import { PageHeader, RangeFilter } from '../components/shell/Shell'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { TransactionForm, type TransactionFormValue } from '../components/forms/TransactionForm'
 import { todayIso } from '../lib/period'
+import { categorizeMessage, useSaveAsRulePref, type CategorizeResult } from '../lib/autoRule'
 
 /**
  * Substitui os antigos checkboxes "Entradas e saídas / Só entradas / Só
@@ -64,6 +65,12 @@ type Row = {
   forecastId: number | null
   debtId: number | null
   creditCardId: number | null
+  /**
+   * Só em lançamento Sem categoria: a TAG que o mesmo estabelecimento já
+   * recebeu antes (memória) ou que uma regra criada depois daria
+   * (decisions/0047). Um clique aplica.
+   */
+  suggestion: { categoryId: number; categoryName: string; source: 'memory' | 'rule' } | null
 }
 
 type InstallmentRow = {
@@ -308,18 +315,14 @@ export function TransactionsPage() {
     sort !== 'date_desc' ||
     includeHidden
 
+  // Dar TAG cria regra para o mesmo estabelecimento por padrão
+  // (decisions/0047); o checkbox "Criar regra ao dar TAG" desliga.
+  const [saveAsRulePref, setSaveAsRulePref] = useSaveAsRulePref()
   const categorize = useMutation({
     mutationFn: (input: { ids: number[]; categoryId: number | null; saveAsRule: boolean }) =>
-      api.post<{ updated: number; learned: Array<{ signature: string; hits: number; promoted: boolean }>; ruleId: number | null }>(
-        '/transactions/categorize',
-        input,
-      ),
+      api.post<CategorizeResult>('/transactions/categorize', input),
     onSuccess: (result) => {
-      const promoted = result.learned.filter((l) => l.promoted)
-      const parts = [`${result.updated} lançamentos atualizados`]
-      if (result.ruleId) parts.push('regra criada')
-      if (promoted.length > 0) parts.push(`${promoted.length} padrão(ões) promovido(s) a regra`)
-      toast(parts.join(' · '))
+      toast(categorizeMessage(result))
       setSelected(new Set())
       setBulkOpen(false)
       queryClient.invalidateQueries()
@@ -613,6 +616,19 @@ export function TransactionsPage() {
                   />
                   Mostrar ocultos
                 </label>
+                <label
+                  className="row"
+                  style={{ gap: 'var(--sp-2)', fontSize: 'var(--text-sm)' }}
+                  title="Ao escolher a TAG de um lançamento, cria uma regra para o mesmo estabelecimento e aplica nos outros sem TAG"
+                >
+                  <input
+                    type="checkbox"
+                    className="checkbox"
+                    checked={saveAsRulePref}
+                    onChange={(event) => setSaveAsRulePref(event.target.checked)}
+                  />
+                  Criar regra ao dar TAG
+                </label>
                 {hasActiveFilters && (
                   <Button variant="quiet" size="sm" icon="x" onClick={clearFilters}>
                     Limpar filtros
@@ -798,10 +814,36 @@ export function TransactionsPage() {
                                 value={row.categoryId}
                                 direction={row.direction === 'in' ? 'in' : 'out'}
                                 onChange={(value) =>
-                                  categorize.mutate({ ids: [row.id], categoryId: value, saveAsRule: false })
+                                  categorize.mutate({
+                                    ids: [row.id],
+                                    categoryId: value,
+                                    saveAsRule: value !== null && saveAsRulePref,
+                                  })
                                 }
                               />
                             </div>
+                            {row.categoryId === null && row.suggestion && (
+                              <button
+                                type="button"
+                                className="badge badge--info"
+                                style={{ marginTop: 'var(--sp-1)', cursor: 'pointer', border: 0 }}
+                                disabled={categorize.isPending}
+                                title={
+                                  row.suggestion.source === 'memory'
+                                    ? 'Este estabelecimento já recebeu esta TAG antes'
+                                    : 'Uma regra sua casa com este lançamento'
+                                }
+                                onClick={() =>
+                                  categorize.mutate({
+                                    ids: [row.id],
+                                    categoryId: row.suggestion!.categoryId,
+                                    saveAsRule: saveAsRulePref,
+                                  })
+                                }
+                              >
+                                Usar {row.suggestion.categoryName}?
+                              </button>
+                            )}
                           </td>
                           <td className="muted" data-label="Conta">
                             <span className="truncate" style={{ maxWidth: 130, display: 'inline-block' }}>
@@ -869,6 +911,7 @@ export function TransactionsPage() {
       {bulkOpen && (
         <BulkCategorizeModal
           rows={selectedRows}
+          defaultSaveAsRule={saveAsRulePref}
           onClose={() => setBulkOpen(false)}
           onApply={(categoryId, saveAsRule) =>
             categorize.mutate({ ids: [...selected], categoryId, saveAsRule })
@@ -1320,8 +1363,11 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
   const [scopePrompt, setScopePrompt] = useState(false)
   const [creditCardId, setCreditCardId] = useState<number | null>(row.creditCardId)
   const [ignored, setIgnored] = useState(row.ignored)
+  const [saveAsRulePref] = useSaveAsRulePref()
+  const [saveAsRule, setSaveAsRule] = useState(saveAsRulePref)
   const creditCardFieldId = useId()
   const ignoredFieldId = useId()
+  const saveAsRuleFieldId = useId()
 
   const cards = useQuery({
     queryKey: ['credit-cards'],
@@ -1356,7 +1402,7 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
         await api.post('/transactions/categorize', {
           ids: [row.id],
           categoryId: value.categoryId,
-          saveAsRule: false,
+          saveAsRule: value.categoryId !== null && saveAsRule,
         })
       }
       if (creditCardId !== row.creditCardId) {
@@ -1401,6 +1447,23 @@ function EditTransactionModal({ row, onClose }: { row: Row; onClose: () => void 
         }
       >
         <TransactionForm value={value} onChange={(patch) => setValue((current) => ({ ...current, ...patch }))} />
+        {value.categoryId !== null && value.categoryId !== row.categoryId && (
+          <div className="field" style={{ marginTop: 'var(--sp-3)' }}>
+            <label className="row" htmlFor={saveAsRuleFieldId} style={{ gap: 'var(--sp-2)', fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+              <input
+                id={saveAsRuleFieldId}
+                type="checkbox"
+                className="checkbox"
+                checked={saveAsRule}
+                onChange={(event) => setSaveAsRule(event.target.checked)}
+              />
+              Criar regra para este estabelecimento
+            </label>
+            <span className="field__hint">
+              Os próximos lançamentos do mesmo estabelecimento, e os que já estão sem TAG, recebem esta TAG sozinhos.
+            </span>
+          </div>
+        )}
         <div className="field" style={{ marginTop: 'var(--sp-3)' }}>
           <label className="field__label" htmlFor={creditCardFieldId}>Cartão de crédito</label>
           <Select
@@ -1528,24 +1591,27 @@ function NewTransactionModal({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * Bulk re-categorization. "Salvar como regra" is opt-in and separate from
- * the automatic learning: assigning a category always teaches the memory,
- * but only an explicit choice creates a rule that fires on everything
- * matching from now on.
+ * Bulk re-categorization. "Salvar como regra" is separate from the automatic
+ * learning: assigning a category always teaches the memory, and the rule is
+ * what fires on everything matching from now on. Desde decisions/0047 vem
+ * marcado por padrão (a preferência "Criar regra ao dar TAG") e cria uma
+ * regra por estabelecimento da seleção.
  */
 function BulkCategorizeModal({
   rows,
   onClose,
   onApply,
   pending,
+  defaultSaveAsRule,
 }: {
   rows: Row[]
   onClose: () => void
   onApply: (categoryId: number | null, saveAsRule: boolean) => void
   pending: boolean
+  defaultSaveAsRule: boolean
 }) {
   const [categoryId, setCategoryId] = useState<number | null>(null)
-  const [saveAsRule, setSaveAsRule] = useState(false)
+  const [saveAsRule, setSaveAsRule] = useState(defaultSaveAsRule)
   const categoryFieldId = useId()
 
   const distinct = useMemo(() => {
@@ -1574,7 +1640,7 @@ function BulkCategorizeModal({
             variant="primary"
             icon="check"
             disabled={pending}
-            onClick={() => onApply(categoryId, saveAsRule)}
+            onClick={() => onApply(categoryId, categoryId !== null && saveAsRule)}
           >
             Aplicar
           </Button>
@@ -1604,8 +1670,8 @@ function BulkCategorizeModal({
             <strong style={{ fontSize: 'var(--text-sm)' }}>Salvar como regra</strong>
             <br />
             <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-              Cria uma regra a partir do comerciante do primeiro lançamento selecionado, com
-              precedência sobre as regras genéricas.
+              Cria uma regra para o estabelecimento de cada lançamento selecionado, com precedência
+              sobre as regras genéricas, e aplica nos outros sem TAG do mesmo estabelecimento.
             </span>
           </span>
         </label>

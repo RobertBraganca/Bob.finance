@@ -20,8 +20,9 @@ import type { AmortizationSystem } from '@shared/propertyPlan'
 
 /**
  * Endividamento v2 (specs/debt-v2, decisions/0044): as seis perguntas da
- * tela, cada uma numa seção. Observação e simulação, nunca recomendação
- * (decisions/0010): nada aqui diz o que fazer, só mostra o que acontece.
+ * tela, cada uma numa seção. Desde a `decisions/0047` a tela também
+ * recomenda: a estratégia e a dívida a atacar primeiro ficam em
+ * `PayoffRecommendation.tsx`.
  */
 
 export type DebtV2 = {

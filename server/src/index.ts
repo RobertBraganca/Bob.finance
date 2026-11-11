@@ -4,7 +4,6 @@ import { ZodError } from 'zod'
 import { seed } from './db/seed'
 import { ledgerRoutes } from './routes/ledger'
 import { insightsRoutes } from './routes/insights'
-import { backupRoutes } from './routes/backups'
 import { pricingRoutes } from './routes/pricing'
 import { assistantRoutes } from './routes/assistant'
 import { clientsRoutes } from './routes/clients'
@@ -56,7 +55,6 @@ app.setErrorHandler((error: unknown, _req, reply) => {
 await app.register(cors, { origin: true })
 await app.register(ledgerRoutes, { prefix: '/api' })
 await app.register(insightsRoutes, { prefix: '/api' })
-await app.register(backupRoutes, { prefix: '/api' })
 await app.register(pricingRoutes, { prefix: '/api' })
 await app.register(simulateRoutes, { prefix: '/api' })
 await app.register(assistantRoutes, { prefix: '/api' })

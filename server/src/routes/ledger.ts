@@ -311,6 +311,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
         color: z.string().optional(),
         icon: z.string().optional(),
         dreGroup: z.enum(['deduction', 'cost', 'financial', 'tax']).nullable().optional(),
+        irpfGroup: z.enum(['health', 'education', 'pension', 'alimony', 'none']).nullable().optional(),
       })
       .parse(req.body)
     try {
@@ -329,6 +330,7 @@ export async function ledgerRoutes(app: FastifyInstance) {
         icon: z.string().optional(),
         kind: z.enum(['income', 'expense', 'transfer', 'investment']).optional(),
         dreGroup: z.enum(['deduction', 'cost', 'financial', 'tax']).nullable().optional(),
+        irpfGroup: z.enum(['health', 'education', 'pension', 'alimony', 'none']).nullable().optional(),
         sortOrder: z.number().int().optional(),
       })
       .parse(req.body)

@@ -3078,26 +3078,6 @@ button {
 .company-lines--slab .company-line--total dt {
   color: var(--on-slab-1);
 }
-.company-details {
-  display: grid;
-  gap: var(--sp-4);
-}
-.company-details__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  min-height: 44px;
-  padding: 0;
-  border: 0;
-  background: none;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink-1);
-  cursor: pointer;
-  text-align: left;
-}
-
 /* ---- Comparar alocações ------------------------------------------- */
 .alloc-scenarios {
   display: grid;
@@ -4259,4 +4239,162 @@ button {
   margin-left: var(--sp-4);
   padding-left: var(--sp-3);
   border-left: 1px solid var(--line);
+}
+
+/* Investimentos › Calculadoras: a grade de cartões; cada um abre a sua calculadora. */
+.calc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: var(--sp-4);
+}
+
+.calc-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-5);
+  min-height: 148px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.calc-card:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+}
+
+.calc-card:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.calc-card__title {
+  font-weight: 600;
+  font-size: var(--text-base);
+  margin-top: var(--sp-2);
+}
+
+.calc-card__body {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  padding-right: var(--sp-5);
+}
+
+.calc-card__go {
+  position: absolute;
+  right: var(--sp-5);
+  bottom: var(--sp-5);
+  color: var(--ink-3);
+  transition: transform 0.15s ease;
+}
+
+.calc-card:hover .calc-card__go {
+  transform: translateX(2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calc-card,
+  .calc-card__go {
+    transition: none;
+  }
+}
+
+/* Patrimônio › Evolução: crescimento do mês, média e acumulado numa faixa só. */
+.growth-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+}
+.growth-strip__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.growth-strip dt {
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+}
+.growth-strip dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.growth-strip dd.growth-strip__foot {
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+/* Minha empresa › Imposto de Renda: o que deduz. */
+.irpf {
+  display: grid;
+  gap: var(--sp-4);
+}
+.irpf__total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.irpf__total strong {
+  font-size: var(--text-xl);
+}
+.irpf__groups {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: var(--sp-3);
+}
+.irpf__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  min-width: 0;
+}
+.irpf__group-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-weight: 600;
+}
+.irpf__note {
+  font-size: var(--text-2xs);
+  color: var(--ink-3);
+}
+.irpf__recs {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 3px solid var(--brand);
+  background: var(--surface-muted);
+  border-radius: var(--r-sm);
+}
+.irpf__recs-title {
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+.irpf__recs ul {
+  margin: 0;
+  padding-left: var(--sp-4);
+  display: grid;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
 }

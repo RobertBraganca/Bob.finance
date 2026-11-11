@@ -3,12 +3,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { bps, money, period as fmtPeriod, periodLong } from '../../lib/format'
-import { currentPeriod, periodBounds } from '../../lib/period'
+import { currentPeriod, periodBounds, shiftPeriod } from '../../lib/period'
 import { useRange } from '../../lib/store'
 import { Bento, Button, Card, EmptyState, Icon, LoadError, Meter, PageSkeleton, Slab, type MeterState } from '../../components/ui'
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert'
 import { PageHeader, RangeFilter } from '../../components/shell/Shell'
 import { CompanySeriesChart } from '../../components/charts/CompanyCharts'
-import { DreDetails } from '../Dre'
+import { FormalDreCard, IrpfCard } from '../Dre'
 import { CompanySettingsModal } from './CompanySettingsModal'
 import type { CompanyOverview } from './types'
 
@@ -18,12 +19,11 @@ const CEILING_STATE: Record<CompanyOverview['ceiling']['state'], MeterState> = {
  * Minha empresa (MEI), specs/company-mei e decisions/0043: quanto dá para
  * retirar este mês sem a PJ ficar sem o colchão, a cascata do faturamento
  * até o que ficou, o teto do MEI e se as retiradas cobrem o custo de vida.
- * Simulação e observação, nunca recomendação (decisions/0010).
+ * Desde decisions/0047 o teto também recomenda o que fazer (CeilingRecommendation).
  */
 export function CompanyPage() {
   const range = useRange()
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false)
   // O mês de referência é o do fim do período global, nunca depois do mês corrente.
   const today = currentPeriod()
   const period = range.to ? (range.to.slice(0, 7) > today ? today : range.to.slice(0, 7)) : today
@@ -79,16 +79,10 @@ export function CompanyPage() {
               <Card span={12} title="12 meses" subtitle="Faturamento, o que você retirou e o que gastou na vida pessoal">
                 <CompanySeriesChart points={data.series} />
               </Card>
+              <FormalDreCard period={data.period} accountLabel={data.pjAccount.name} />
+              <IrpfCard year={Number(data.period.slice(0, 4))} />
             </Bento>
 
-            <section className="company-details">
-              <button type="button" className="company-details__toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((v) => !v)}>
-                <Icon name={detailsOpen ? 'chevronDown' : 'chevronRight'} size={15} />
-                Detalhe por TAG e DRE contábil
-                <span className="field__hint">colunas por conta, no período do filtro</span>
-              </button>
-              {detailsOpen && <DreDetails />}
-            </section>
           </>
         )}
       </div>
@@ -157,7 +151,86 @@ function CeilingBody({ data }: { data: CompanyOverview }) {
           : 'Sem faturamento nos últimos 3 meses para projetar o ano.'}
         {c.reachesInPeriod && ` Nesse ritmo o teto seria alcançado em ${periodLong(c.reachesInPeriod)}.`}
       </p>
+      <CeilingRecommendation data={data} />
     </div>
+  )
+}
+
+/**
+ * O que fazer com o teto (`decisions/0047`: o app recomenda, não só mostra).
+ * A conta mora em `ceilingProjection` (_shared/core/company.ts, `advice`);
+ * aqui só a redação. Regra legal do desenquadramento em `MEI_TOLERANCE_BPS`.
+ */
+function CeilingRecommendation({ data }: { data: CompanyOverview }) {
+  const c = data.ceiling
+  // `?` : uma Edge Function ainda não publicada com `advice` não derruba a tela.
+  const a = c.advice as CompanyOverview['ceiling']['advice'] | undefined
+  if (!a || a.kind === 'none') return null
+  const next = a.monthsLeft > 0 ? periodLong(shiftPeriod(data.period, 1)).replace(/ de \d{4}$/, '') : null
+  // "fature no máximo R$X por mês de dezembro a dezembro" lê mal: com um mês só, nomeia o mês.
+  const span = next === null ? null : a.monthsLeft === 1 ? `em ${next}` : `por mês de ${next} a dezembro`
+  const fitLine =
+    span === null
+      ? `Até 31 de dezembro ainda cabem ${money(a.roomCents)} no teto.`
+      : a.monthsLeft === 1
+        ? `Para caber no teto, fature no máximo ${money(a.roomCents)} ${span}.`
+        : `Para caber no teto, fature no máximo ${money(a.monthlyRoomCents ?? 0)} ${span} (${money(a.roomCents)} no total).`
+  const tolerance = money(a.toleranceLimitCents)
+  const communicate = 'Comunique o desenquadramento no Portal do Simples Nacional até o último dia útil do mês seguinte ao excesso.'
+
+  const content: { variant: 'warning' | 'critical'; title: string; lines: string[] } =
+    a.kind === 'retroactive'
+      ? {
+          variant: 'critical',
+          title: 'Passou de 20% acima do teto',
+          lines: [
+            `O faturado do ano já passou de ${tolerance} (teto + 20%). Isso desenquadra o MEI retroativamente a 1º de janeiro: o ano inteiro passa a pagar os tributos de ME.`,
+            `Procure um contador agora para migrar para ME no Simples Nacional e calcular a diferença. ${communicate}`,
+          ],
+        }
+      : a.kind === 'exceeded'
+        ? {
+            variant: 'critical',
+            title: 'Passou do teto do MEI',
+            lines: [
+              `Você já faturou ${money(c.yearRevenueCents - c.limitCents)} acima do teto. Até ${tolerance} no ano (teto + 20%), o desenquadramento vale a partir de janeiro do ano que vem e o excesso paga DAS complementar.`,
+              `Segure o faturamento: ainda cabem ${money(a.toleranceRoomCents)} até dezembro sem cair no desenquadramento retroativo a janeiro. ${communicate} Planeje a migração para ME no Simples Nacional com um contador.`,
+            ],
+          }
+        : a.kind === 'projected_retroactive'
+          ? {
+              variant: 'critical',
+              title: 'No ritmo, o ano passa de 20% acima do teto',
+              lines: [
+                fitLine,
+                `Se o ritmo de ${money(c.paceCents)} por mês continuar, passar de ${tolerance} desenquadra o MEI retroativamente a 1º de janeiro. Se não dá para segurar, considere migrar para ME no Simples Nacional antes disso, com um contador.`,
+              ],
+            }
+          : a.kind === 'projected_over'
+            ? {
+                variant: 'warning',
+                title: 'No ritmo, o ano passa do teto',
+                lines: [
+                  fitLine,
+                  `Passando em até 20% (${tolerance} no ano), o desenquadramento vale a partir de janeiro e o excesso paga DAS complementar; acima disso é retroativo a janeiro. Se o faturamento vai seguir crescendo, planeje migrar para ME no Simples Nacional.`,
+                ],
+              }
+            : {
+                variant: 'warning',
+                title: 'Perto do teto',
+                lines: [`${fitLine} Acompanhe mês a mês: passar do teto desenquadra o MEI.`],
+              }
+
+  return (
+    <Alert variant={content.variant}>
+      <Icon name="alert" size={16} />
+      <AlertTitle>{content.title}</AlertTitle>
+      <AlertDescription>
+        {content.lines.map((line) => (
+          <p key={line}>{line}</p>
+        ))}
+      </AlertDescription>
+    </Alert>
   )
 }
 

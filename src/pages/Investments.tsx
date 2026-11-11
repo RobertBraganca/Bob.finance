@@ -17,17 +17,16 @@ import {
   quantity as fmtQuantity,
   signedBps,
   signedPoints,
+  points as fmtPoints,
   date as fmtDate,
 } from '../lib/format'
 import {
-  Assumptions,
   Bento,
   Button,
   Card,
   ConfirmDeleteModal,
   EmptyState,
   FilterSelect,
-  HeroFigure,
   Icon,
   KpiTile,
   Meter,
@@ -45,10 +44,10 @@ import {
   useToast,
   type AssumptionBag,
   type IconName,
-  type MeterState,
   LoadError,
 } from '../components/ui'
 import { PageHeader } from '../components/shell/Shell'
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
 import {
   AllocationChart,
   AssetClassRing,
@@ -546,7 +545,8 @@ function PortfolioTab({
   const targetSumBps = data.allocation.reduce((sum, slice) => sum + (slice.targetBps ?? 0), 0)
   const deviation = useQuery({
     queryKey: ['allocation-deviation'],
-    queryFn: () => api.get<{ assumptions: AssumptionBag }>('/investments/allocation-deviation'),
+    queryFn: () =>
+      api.get<{ advice: RebalanceAdvice; assumptions: AssumptionBag }>('/investments/allocation-deviation'),
   })
 
   const groups = useMemo(() => {
@@ -722,7 +722,13 @@ function PortfolioTab({
 
       <Bento>
         <ReserveCard positions={data.positions} />
-        <BelowTargetCard allocation={data.allocation} targetSumBps={targetSumBps} onOpenAlloc={onOpenAlloc} />
+        <RebalanceCard
+          allocation={data.allocation}
+          advice={deviation.data?.advice ?? null}
+          adviceLoading={deviation.isLoading}
+          targetSumBps={targetSumBps}
+          onOpenAlloc={onOpenAlloc}
+        />
       </Bento>
 
       <Card
@@ -805,11 +811,9 @@ type AllocationView = 'composition' | 'target'
  * de desvio (03/10/2026).
  *
  * Contra a meta: sua carteira hoje contra a política que você configurou,
- * por classe, e nada além disso. Nada aqui sugere ativo, classe ou operação:
- * `decisions/0010` e o raciocínio do Ofício-Circular CVM/SIN 2/2026
- * registrado lá. Um relatório gerencial da composição contra a política do
- * próprio cliente é outra coisa que consultoria, e a diferença mora em não
- * recomendar. A memória de cálculo do endpoint de desvio fica no ⓘ.
+ * por classe. A recomendação do que fazer com o desvio mora no card
+ * Rebalanceamento ao lado (`decisions/0047`, que substituiu `0010` aqui).
+ * A memória de cálculo do endpoint de desvio fica no ⓘ.
  */
 function AllocationCard({
   allocation,
@@ -910,83 +914,143 @@ const RESERVE_MULTIPLE_OPTIONS = [
 ]
 
 /**
- * "Necessário para atingir a meta": how much is still missing per class, in
- * reais, for the classes that are BELOW their configured target.
+ * Rebalanceamento: quanto falta ou sobra em cada classe contra a meta, e o
+ * que fazer com o próximo aporte.
  *
- * This replaced a card that said "aportar R$X" or "reduzir R$Y". "Reduzir"
- * was the problem: the Diagrama do Cerrado never suggests selling to
- * rebalance, it only directs new money (see `specs/investments`, cascata de
- * aporte), so telling the user to reduce a position was the one surface in
- * the product contradicting the very method that inspired the feature, and
- * a Recommendation of the kind `decisions/0010` puts outside the product.
- * See `decisions/0011`.
- *
- * A class at or above its target is simply absent from the list. Not
- * "reduzir R$0", not a zero row: silence. The signed deviation is still
- * available next door, in the chart and in the desvio table.
+ * Até 11/11/2026 este card era "Necessário para atingir a meta" e só listava
+ * as classes ABAIXO da meta: classe acima sumia e "reduzir/vender" nunca
+ * aparecia (`decisions/0010`, `0011`). `decisions/0047` derrubou a regra
+ * "evidenciar, nunca prescrever": agora toda classe com meta aparece, com o
+ * valor assinado (negativo = acima da meta), e o topo do card recomenda onde
+ * pôr o próximo aporte e o que parar de comprar, com o desvio como motivo.
+ * A regra segue a do Diagrama do Cerrado, dinheiro novo primeiro; vender só
+ * entra como opção quando o desvio é grande (`REBALANCE_SELL_OPTION_BPS` no
+ * servidor), e nada é vendido automaticamente.
  */
-function BelowTargetCard({
+type RebalanceAdviceClass = { assetClass: string; label: string; driftBps: number; rebalanceCents: number }
+type RebalanceAdvice = {
+  buy: RebalanceAdviceClass[]
+  stopBuying: RebalanceAdviceClass[]
+  aporteOnlyCents: number | null
+  sellOption: RebalanceAdviceClass[]
+}
+
+/** "A", "A e B", "A, B e C" */
+function joinPt(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  return `${items.slice(0, -1).join(', ')} e ${items[items.length - 1]}`
+}
+
+function RebalanceRecommendation({ advice }: { advice: RebalanceAdvice }) {
+  const { buy, stopBuying, aporteOnlyCents, sellOption } = advice
+  if (buy.length === 0 && stopBuying.length === 0) {
+    return (
+      <Alert variant="good">
+        <Icon name="check" size={16} />
+        <AlertTitle>Carteira na meta</AlertTitle>
+        <AlertDescription>
+          Toda classe está a menos de 1 p.p. da alocação-alvo. Divida o próximo aporte na proporção das metas.
+        </AlertDescription>
+      </Alert>
+    )
+  }
+  const topBuy = buy.slice(0, 3)
+  const first = topBuy[0]
+  const worst = stopBuying[0]
+  return (
+    <Alert variant={sellOption.length > 0 ? 'warning' : 'default'}>
+      <Icon name="target" size={16} />
+      <AlertTitle>No próximo aporte</AlertTitle>
+      <AlertDescription>
+        <div className="stack stack--tight" style={{ marginTop: 'var(--sp-1)' }}>
+          {first && (
+            <span>
+              Coloque em <strong>{joinPt(topBuy.map((c) => c.label))}</strong>
+              {topBuy.length === 1 ? ', que está ' : `. A maior falta é ${first.label}, `}
+              {fmtPoints(Math.abs(first.driftBps))} abaixo da meta (faltam {money(first.rebalanceCents)}).
+            </span>
+          )}
+          {worst && (
+            <span>
+              Pare de comprar <strong>{joinPt(stopBuying.map((c) => c.label))}</strong> até voltar à meta:{' '}
+              {worst.label} está {fmtPoints(worst.driftBps)} acima ({money(-worst.rebalanceCents)} a mais).
+              {aporteOnlyCents !== null && aporteOnlyCents > 0 && (
+                <> Só com aportes, seriam precisos {money(aporteOnlyCents)} de dinheiro novo para corrigir.</>
+              )}
+            </span>
+          )}
+          {sellOption.length > 0 && (
+            <span>
+              Para corrigir de uma vez: vender cerca de{' '}
+              {joinPt(sellOption.map((c) => `${money(-c.rebalanceCents)} de ${c.label}`))}
+              {first ? ` e levar para ${first.label}` : ''}. Pese IR e custos da venda antes; o app não vende nada sozinho.
+            </span>
+          )}
+        </div>
+      </AlertDescription>
+    </Alert>
+  )
+}
+
+function RebalanceCard({
   allocation,
+  advice,
+  adviceLoading,
   targetSumBps,
   onOpenAlloc,
 }: {
   allocation: AllocationSlice[]
+  advice: RebalanceAdvice | null
+  adviceLoading: boolean
   targetSumBps: number
   onOpenAlloc: () => void
 }) {
-  const hasAnyTarget = allocation.some((slice) => slice.rebalanceCents !== null)
-  const below = allocation.filter(
-    (slice) => slice.rebalanceCents !== null && slice.rebalanceCents > 0,
-  )
+  const withTarget = allocation
+    .filter((slice) => slice.rebalanceCents !== null)
+    .sort((a, b) => b.rebalanceCents! - a.rebalanceCents!)
 
   return (
-    <Card
-      span={6}
-      title="Necessário para atingir a meta"
-      subtitle="Quanto ainda falta em cada classe abaixo da alocação configurada"
-    >
-      {!hasAnyTarget ? (
+    <Card span={6} title="Rebalanceamento" subtitle="Quanto falta ou sobra em cada classe, contra a alocação-alvo">
+      {withTarget.length === 0 ? (
         <EmptyState
           icon="scale"
           title="Sem meta de alocação"
-          body="Defina o percentual-alvo por classe para ver o quanto falta em cada uma."
+          body="Defina o percentual-alvo por classe para ver onde pôr o próximo aporte."
           action={
             <Button variant="primary" size="sm" onClick={onOpenAlloc}>
               Definir alocação-alvo
             </Button>
           }
         />
-      ) : below.length === 0 ? (
-        <EmptyState
-          icon="check"
-          title="Nenhuma classe abaixo da meta"
-          body="Toda classe com alocação-alvo configurada está na meta ou acima dela neste momento."
-        />
       ) : (
         <div className="stack stack--tight">
+          {advice ? <RebalanceRecommendation advice={advice} /> : adviceLoading ? <SkeletonLines lines={2} /> : null}
           {/* Sem truncate (revisão de responsividade de 26/09/2026):
               "ETFs Internacionais" cortava num telefone, competindo com o
               desvio+valor na mesma linha — `row--wrap` deixa o valor cair
               pra linha de baixo em vez de espremer o nome da classe. */}
-          {below.map((slice) => (
-            <div key={slice.assetClass} className="row row--between row--wrap" style={{ rowGap: 'var(--sp-1)' }}>
-              <span style={{ minWidth: 0 }}>{slice.label}</span>
-              <span className="row" style={{ gap: 'var(--sp-3)' }}>
-                <span className="muted tabular" style={{ fontSize: 'var(--text-xs)' }}>
-                  {slice.driftBps === null ? '' : signedPoints(slice.driftBps)}
+          {withTarget.map((slice) => {
+            const over = slice.rebalanceCents! < 0
+            // Dentro da tolerância (1 p.p.) não pinta de vermelho: é "na meta".
+            const flagged = (slice.driftBps ?? 0) >= 100
+            return (
+              <div key={slice.assetClass} className="row row--between row--wrap" style={{ rowGap: 'var(--sp-1)' }}>
+                <span style={{ minWidth: 0 }}>{slice.label}</span>
+                <span className="row" style={{ gap: 'var(--sp-3)' }}>
+                  <span className="muted tabular" style={{ fontSize: 'var(--text-xs)' }}>
+                    {slice.driftBps === null ? '' : signedPoints(slice.driftBps)}
+                  </span>
+                  <span className={`tabular${flagged ? ' neg' : ''}`} style={{ minWidth: 108, textAlign: 'right' }}>
+                    {slice.rebalanceCents === 0
+                      ? 'na meta'
+                      : over
+                        ? `${money(-slice.rebalanceCents!)} acima`
+                        : `faltam ${money(slice.rebalanceCents!)}`}
+                  </span>
                 </span>
-                <span className="tabular" style={{ minWidth: 108, textAlign: 'right' }}>
-                  {money(slice.rebalanceCents!)}
-                </span>
-              </span>
-            </div>
-          ))}
-          {/* Simulação, never an instruction: same closing pattern the
-              financial engine uses for its break-even card. */}
-          <p className="chart__note">
-            Considerando a alocação-alvo configurada, estes valores ainda seriam necessários em cada
-            classe para alcançar a meta.
-          </p>
+              </div>
+            )
+          })}
           <TargetSumNote targetSumBps={targetSumBps} />
         </div>
       )}
@@ -1368,9 +1432,10 @@ function AssetGroupCard({
                   <th scope="col" className="table__center">Reserva</th>
                   <th scope="col" className="table__num">% carteira</th>
                   <th scope="col" className="table__num">% ideal</th>
-                  {/* "Comprar? Sim" soava como recomendação (`decisions/0010`):
-                      a coluna mostra quanto falta até o % ideal, e só. */}
-                  <th scope="col" className="table__num">Falta p/ ideal</th>
+                  {/* Até 11/11/2026 só mostrava a falta (`decisions/0010`);
+                      com `decisions/0047` mostra também o excesso, negativo,
+                      para o ativo acima do % ideal parar de receber aporte. */}
+                  <th scope="col" className="table__num">Até o ideal</th>
                   <th scope="col" style={{ width: 132 }}>
                     <span className="sr-only">Ações</span>
                   </th>
@@ -1448,9 +1513,14 @@ function AssetGroupCard({
                       <td className="table__num" data-label="% ideal">
                         {slice === undefined || slice.targetBps === null ? '-' : bps(slice.targetBps, 0)}
                       </td>
-                      <td className="table__num" data-label="Falta p/ ideal">
-                        {slice === undefined || slice.rebalanceCents === null || slice.rebalanceCents <= 0 ? (
+                      <td
+                        className={`table__num${slice?.rebalanceCents != null && slice.rebalanceCents < 0 ? ' neg' : ''}`}
+                        data-label="Até o ideal"
+                      >
+                        {slice === undefined || slice.rebalanceCents === null || slice.rebalanceCents === 0 ? (
                           <span className="muted">-</span>
+                        ) : slice.rebalanceCents > 0 ? (
+                          `+${money(slice.rebalanceCents)}`
                         ) : (
                           money(slice.rebalanceCents)
                         )}
@@ -3143,7 +3213,7 @@ function ContributionPlanner({ goals }: { goals: Goal[] }) {
 
   return (
     <Bento>
-      <Card span={12} title="Quanto você quer aportar agora?" subtitle="O sistema nunca sugere vender, só direciona o dinheiro novo">
+      <Card span={12} title="Quanto você quer aportar agora?" subtitle="O dinheiro novo vai para o que está abaixo da meta; o que está acima para de receber">
         <div className="row row--wrap" style={{ gap: 'var(--sp-3)', alignItems: 'flex-end' }}>
           <div className="field" style={{ width: 220 }}>
             <label className="field__label" htmlFor={amountFieldId}>Valor do aporte (R$)</label>

@@ -45,8 +45,9 @@ export const ASSET_CLASSES = [
  * permite — antes de 01/09/2026 a classe entrava em `allocation()` junto
  * das demais e um único bem de R$3.150 aparecia como "64,1% da carteira,
  * meta 1,0%, desvio +63,1 p.p.", número real na tela do usuário e sem
- * significado nenhum (nada a fazer com ele, já que vender não é sugerido
- * e nunca será, `decisions/0011`).
+ * significado nenhum: um bem físico não se vende em frações para voltar à
+ * meta, então nenhuma recomendação de rebalanceamento (`rebalanceAdvice`,
+ * `decisions/0047`) pode valer para ele.
  */
 export const ILLIQUID_ASSET_CLASS = 'illiquid'
 
@@ -580,25 +581,94 @@ export async function allocation(goalId?: number | null): Promise<AllocationSlic
 }
 
 /* ------------------------------------------------------------------ *
+ * Recomendação de rebalanceamento (`decisions/0047`)
+ *
+ * Até 11/11/2026 o produto só evidenciava o desvio (`decisions/0010`,
+ * `0011`): classe acima da meta sumia da lista e "reduzir/vender" nunca
+ * aparecia. O dono decidiu que o app recomenda. A regra continua a do
+ * Diagrama do Cerrado, dinheiro novo primeiro: o próximo aporte vai para
+ * as classes abaixo da meta e deixa de ir para as que estão acima. Vender
+ * só aparece como OPÇÃO quando o desvio é grande o bastante para que só
+ * aportes demorem a corrigir, e nunca vira uma operação automática.
+ * ------------------------------------------------------------------ */
+
+/** Desvio (p.p. × 100) abaixo do qual a classe conta como "na meta". */
+export const REBALANCE_TOLERANCE_BPS = 100
+/** Desvio a partir do qual vender o excesso entra como opção. */
+export const REBALANCE_SELL_OPTION_BPS = 500
+
+export type RebalanceAdviceClass = {
+  assetClass: string
+  label: string
+  driftBps: number
+  /** signed, like `AllocationSlice.rebalanceCents`: >0 falta, <0 excesso */
+  rebalanceCents: number
+}
+
+export type RebalanceAdvice = {
+  /** classes que devem receber o próximo aporte, maior falta primeiro */
+  buy: RebalanceAdviceClass[]
+  /** classes acima da meta: parar de comprar, maior excesso primeiro */
+  stopBuying: RebalanceAdviceClass[]
+  /**
+   * Dinheiro novo que, sozinho, traria a classe mais acima da meta de volta
+   * a ela (V/meta - total). null sem classe acima da meta.
+   */
+  aporteOnlyCents: number | null
+  /** classes com desvio >= REBALANCE_SELL_OPTION_BPS: vender o excesso é uma opção */
+  sellOption: RebalanceAdviceClass[]
+}
+
+export function rebalanceAdvice(slices: AllocationSlice[]): RebalanceAdvice {
+  const withTarget = slices.filter(
+    (s): s is AllocationSlice & { targetBps: number; driftBps: number; rebalanceCents: number } =>
+      s.targetBps !== null && s.driftBps !== null && s.rebalanceCents !== null,
+  )
+  const pick = (s: (typeof withTarget)[number]): RebalanceAdviceClass => ({
+    assetClass: s.assetClass,
+    label: s.label,
+    driftBps: s.driftBps,
+    rebalanceCents: s.rebalanceCents,
+  })
+  const buy = withTarget
+    .filter((s) => s.driftBps <= -REBALANCE_TOLERANCE_BPS && s.rebalanceCents > 0)
+    .sort((a, b) => b.rebalanceCents - a.rebalanceCents)
+    .map(pick)
+  // Caixa acima da meta é a reserva de emergência: o card da reserva manda o
+  // dinheiro novo para ela primeiro, então "pare de comprar" ou "venda" aqui
+  // contradiria aquele card.
+  const over = withTarget
+    .filter((s) => s.assetClass !== 'cash' && s.driftBps >= REBALANCE_TOLERANCE_BPS && s.rebalanceCents < 0)
+    .sort((a, b) => b.driftBps - a.driftBps)
+  const total = slices.reduce((sum, s) => sum + s.valueCents, 0)
+  const aporteOnlyCents =
+    over.length === 0
+      ? null
+      : Math.max(
+          ...over.map((s) => (s.targetBps > 0 ? Math.round((s.valueCents * 10_000) / s.targetBps) - total : 0)),
+        )
+  return {
+    buy,
+    stopBuying: over.map(pick),
+    aporteOnlyCents,
+    sellOption: over.filter((s) => s.driftBps >= REBALANCE_SELL_OPTION_BPS).map(pick),
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Desvio de alocação
  *
  * The same numbers `allocation()` already derives, narrowed to the one
  * question this view answers: how far is the portfolio from the policy the
- * user set for it. It is a managerial report, not advice.
+ * user set for it, and what to do about it with the next aporte.
  *
- * The shape is deliberately poorer than `allocation()`: no `rebalanceCents`,
- * no suggested asset, no recommended action, no field that could be read as
- * one. That absence is the point. `decisions/0010` draws the line, and the
- * Ofício-Circular CVM/SIN 2/2026 is why the line matters for investments
- * specifically: it distinguishes a report on portfolio composition against
- * the client's own investment policy from consultoria de valores
- * mobiliários, which is the regulated activity of recommending. A field
- * naming what to buy would move this endpoint across that line, so no such
- * field exists to be accidentally rendered later.
- *
- * Order is alphabetical by class label, never by size of the deviation:
- * ranking by "what to fix first" would be a recommendation expressed as a
- * sort order.
+ * Até 11/11/2026 o formato era deliberadamente mais pobre (sem
+ * `rebalanceCents`, sem ação recomendada, ordem alfabética para não
+ * "ranquear o que corrigir primeiro"), por `decisions/0010` e pelo
+ * Ofício-Circular CVM/SIN 2/2026. `decisions/0047` derrubou essa regra:
+ * o app é de um usuário só, o dono, e ele quer a recomendação. Agora cada
+ * classe traz o valor assinado até a meta e a resposta inclui
+ * `rebalanceAdvice`; a ordem é pelo tamanho do desvio, o maior primeiro.
  * ------------------------------------------------------------------ */
 export type AllocationDeviation = {
   assetClass: string
@@ -609,13 +679,17 @@ export type AllocationDeviation = {
   targetBps: number
   /** actual minus target, in basis points; positive = above the policy */
   deviationBps: number
+  /** signed: >0 falta para a meta, <0 excesso acima dela */
+  rebalanceCents: number
 }
 
 export async function allocationDeviation(goalId?: number | null): Promise<{
   classes: AllocationDeviation[]
+  advice: RebalanceAdvice
   assumptions: Record<string, unknown>
 }> {
-  const classes = (await allocation(goalId))
+  const slices = await allocation(goalId)
+  const classes = slices
     .filter((slice) => slice.targetBps !== null)
     .map((slice) => ({
       assetClass: slice.assetClass,
@@ -623,19 +697,24 @@ export async function allocationDeviation(goalId?: number | null): Promise<{
       actualBps: slice.actualBps,
       targetBps: slice.targetBps!,
       deviationBps: slice.actualBps - slice.targetBps!,
+      rebalanceCents: slice.rebalanceCents ?? 0,
     }))
-    .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'))
+    .sort((a, b) => Math.abs(b.deviationBps) - Math.abs(a.deviationBps) || a.label.localeCompare(b.label, 'pt-BR'))
 
   return {
     classes,
+    advice: rebalanceAdvice(slices),
     assumptions: {
       formula: 'percentual atual da classe na carteira menos o percentual definido na política de alocação do usuário',
+      valorAteAMeta: 'meta × total da carteira menos o valor atual da classe; negativo quando a classe está acima da meta',
+      recomendacao: `o próximo aporte vai para as classes mais de ${REBALANCE_TOLERANCE_BPS / 100} p.p. abaixo da meta, e deixa de ir para as mais de ${REBALANCE_TOLERANCE_BPS / 100} p.p. acima; vender o excesso aparece como opção a partir de ${REBALANCE_SELL_OPTION_BPS / 100} p.p. acima, nunca é feito automaticamente (decisions/0047)`,
+      soComAportes: 'dinheiro novo necessário para a classe mais acima da meta voltar a ela sem vender: valor da classe ÷ meta − total da carteira',
       classesComMeta: classes.length,
       goalId: goalId ?? null,
       origem: 'posições derivadas de asset_trades e asset_valuations, metas de target_allocations',
       imobilizadoExcluido:
         'bens da classe Imobilizado ficam fora de 100% da carteira usada aqui; eles aparecem em Patrimônio',
-      ordem: 'alfabética por classe, deliberadamente neutra: a ordem não é calculada a partir do tamanho do desvio',
+      ordem: 'pelo tamanho do desvio, o maior primeiro',
     },
   }
 }
@@ -1192,7 +1271,20 @@ const classFilter = (assetClass?: string | null) =>
     ? sql`and a.asset_class = ${assetClass}`
     : sql`and a.asset_class <> ${ILLIQUID_ASSET_CLASS}`
 
-export async function performanceSeries(months = 24, assetClass?: string | null): Promise<PerformancePoint[]> {
+export function performanceSeries(months = 24, assetClass?: string | null): Promise<PerformancePoint[]> {
+  // A aba Rentabilidade pede a série inteira duas vezes na mesma requisição
+  // (retornos mensais e tabela por ano): calcula uma vez.
+  return memoPerRequest(`performanceSeries:${months}:${assetClass ?? ''}`, () => computePerformanceSeries(months, assetClass))
+}
+
+/**
+ * Uma consulta só para a série inteira (11/11/2026). Antes era um
+ * `snapshotAsOf` por mês desde a primeira compra, todos de uma vez num
+ * `Promise.all`: dezenas de consultas disputando as 5 conexões da Edge
+ * Function, e a aba de Investimentos estourava o limite da função (HTTP 546).
+ * O corte de cada mês e a conta por ativo são os mesmos de `snapshotAsOf`.
+ */
+async function computePerformanceSeries(months: number, assetClass?: string | null): Promise<PerformancePoint[]> {
   const rows = await db.execute<{ first: string | null }>(sql`
     select min(t.traded_on) as first
     from asset_trades t join assets a on a.id = t.asset_id
@@ -1202,22 +1294,55 @@ export async function performanceSeries(months = 24, assetClass?: string | null)
   if (!first?.first) return []
 
   const endPeriod = todayIso().slice(0, 7)
-  const startPeriod = periodOf(first.first)
-  const window = periodRange(startPeriod, endPeriod).slice(-months)
+  const window = periodRange(periodOf(first.first), endPeriod).slice(-months)
+  if (window.length === 0) return []
 
-  return Promise.all(
-    window.map(async (period) => {
-      const cutoff = `${period}-31`
-      const snap = await snapshotAsOf(cutoff, assetClass)
-      return {
-        period,
-        contributedCents: snap.contributedCents,
-        valueCents: snap.valueCents,
-        gainCents: snap.valueCents - snap.contributedCents,
-        dividendsCents: snap.dividendsCents,
-      }
-    }),
-  )
+  const series = await db.execute<{ period: string; contributed: number; value: number; dividends: number }>(sql`
+    with cutoffs as (
+      select to_char(m, 'YYYY-MM') as period, to_char(m, 'YYYY-MM') || '-31' as cutoff
+      from generate_series(${`${window[0]}-01`}::date, ${`${window[window.length - 1]}-01`}::date, interval '1 month') m
+    )
+    select c.period, s.contributed, s.value, s.dividends
+    from cutoffs c
+    cross join lateral (
+      select
+        coalesce(sum(net.contributed), 0) as contributed,
+        coalesce(sum(net.value), 0) as value,
+        coalesce(sum(net.dividends), 0) as dividends
+      from (
+        select
+          a.id,
+          coalesce(sum(case when t.kind = 'buy'  then round(t.quantity * t.unit_price_cents) + t.fees_cents
+                            when t.kind = 'sell' then -round(t.quantity * t.unit_price_cents)
+                            else 0 end), 0) as contributed,
+          coalesce(sum(case when t.kind = 'dividend' then round(t.quantity * t.unit_price_cents) else 0 end), 0) as dividends,
+          round(
+            coalesce(sum(case when t.kind = 'buy' then t.quantity when t.kind = 'sell' then -t.quantity else 0 end), 0)
+            * coalesce(
+                (select v.unit_price_cents from asset_valuations v
+                  where v.asset_id = a.id and v.as_of <= c.cutoff
+                  order by v.as_of desc limit 1),
+                case when coalesce(sum(case when t.kind = 'buy' then t.quantity else 0 end), 0) > 0
+                  then coalesce(sum(case when t.kind = 'buy' then round(t.quantity * t.unit_price_cents) else 0 end), 0)
+                       / coalesce(sum(case when t.kind = 'buy' then t.quantity else 0 end), 1)
+                  else 0 end
+              )
+          ) as value
+        from assets a
+        left join asset_trades t on t.asset_id = a.id and t.traded_on <= c.cutoff
+        where a.archived = false ${classFilter(assetClass)}
+        group by a.id
+      ) net
+    ) s
+    order by c.period
+  `)
+  return series.map((row) => ({
+    period: row.period,
+    contributedCents: row.contributed,
+    valueCents: row.value,
+    gainCents: row.value - row.contributed,
+    dividendsCents: row.dividends,
+  }))
 }
 
 export type MonthlyReturnPoint = { period: string; returnBps: number | null }

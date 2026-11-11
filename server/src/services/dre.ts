@@ -1,87 +1,28 @@
 import { sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { merchantSignature } from '../core/normalize'
-import * as analytics from './analytics'
-import type { BreakdownSlice, Range, Totals } from './analytics'
-
-/**
- * DRE (Demonstração de Resultado) per account: every income/expense leaf
- * category as its own line — never folded into an "Outras" bucket the way
- * the dashboard rings do — plus the uncategorized rows grouped by merchant
- * so the biggest unclassified chunks surface first.
- */
-export type DreReport = {
-  range: Range
-  totals: Totals
-  income: BreakdownSlice[]
-  expense: BreakdownSlice[]
-  uncategorized: {
-    groups: UncategorizedGroup[]
-    groupCount: number
-    totalCount: number
-    hasMore: boolean
-  }
-  /** Only present when the report is scoped to one account — see analytics.historicalServiceAverages. */
-  serviceAverages: analytics.ServiceAverages | null
-}
-
-export type UncategorizedGroup = {
-  signature: string
-  sampleDescription: string
-  count: number
-  netCents: number
-  ids: number[]
-}
-
-const GROUP_LIMIT = 30
-
-async function uncategorizedGroups(range: Range): Promise<{ groups: UncategorizedGroup[]; groupCount: number; totalCount: number }> {
-  const rows = await db.execute<{ id: number; description: string; amountCents: number }>(sql`
-    select id, description, amount_cents as "amountCents"
-    from transactions
-    where posted_on between ${range.from} and ${range.to}
-      and category_id is null
-      and pending = false and ignored = false
-      ${range.accountId ? sql`and account_id = ${range.accountId}` : sql``}
-  `)
-
-  const bySignature = new Map<string, UncategorizedGroup>()
-  for (const row of rows) {
-    const key = merchantSignature(row.description) || row.description.toLowerCase().slice(0, 40)
-    const group = bySignature.get(key) ?? {
-      signature: key,
-      sampleDescription: row.description,
-      count: 0,
-      netCents: 0,
-      ids: [],
-    }
-    group.count += 1
-    group.netCents += row.amountCents
-    group.ids.push(row.id)
-    bySignature.set(key, group)
-  }
-
-  const groups = [...bySignature.values()].sort(
-    (a, b) => Math.abs(b.netCents) - Math.abs(a.netCents),
-  )
-
-  return { groups, groupCount: groups.length, totalCount: rows.length }
-}
+import type { Range } from './analytics'
+import { accountScope, pjWithdrawals } from './withdrawals'
 
 /* ------------------------------------------------------------------ *
  * DRE formal (PJ) — specs/dre, "DRE PJ formal"
  *
- * Waterfall contábil de verdade (Receita Bruta -> Lucro Líquido), em vez
- * da lista simples de categorias que `dreReport` já mostra. Cada
- * categoria-mãe é classificada uma vez em `dreGroup`
- * (Categories.tsx) — sem classificação explícita, cai no balde padrão
- * (Receita Bruta pro lado de receita, Despesa Operacional pro lado de
- * despesa), nunca "some" do resultado. Mesma FLOW_KIND de analytics.ts
- * reimplementada aqui (não exportada de lá) — categoria sem `kind`
- * (nunca categorizada) cai pelo sinal do valor, igual o resto do app.
+ * Waterfall contábil de verdade (Receita Bruta -> Lucro Líquido). Cada
+ * categoria-mãe é classificada uma vez em `dreGroup` (Categories.tsx) —
+ * sem classificação explícita, cai no balde padrão (Receita Bruta pro lado
+ * de receita, Despesa Operacional pro lado de despesa), nunca "some" do
+ * resultado. Mesma FLOW_KIND de analytics.ts reimplementada aqui (não
+ * exportada de lá) — categoria sem `kind` (nunca categorizada) cai pelo
+ * sinal do valor, igual o resto do app.
+ *
+ * Desde 11/11/2026 é a única DRE do app (a tela Minha empresa termina
+ * nela): as colunas por conta e a reconciliação PJ ↔ PF saíram, e a
+ * retirada para a pessoa física vem daqui, da mesma `pjWithdrawals` que
+ * Minha empresa e o Orçamento usam.
  * ------------------------------------------------------------------ */
 export type FormalDre = {
   range: Range
+  /** a conta lida: a pedida, ou a PJ do Motor financeiro quando nenhuma veio */
+  accountId: number | null
   receitaBrutaCents: number
   deducoesCents: number
   receitaLiquidaCents: number
@@ -93,9 +34,15 @@ export type FormalDre = {
   resultadoFinanceiroCents: number
   impostosCents: number
   lucroLiquidoCents: number
+  /** repasse líquido da PJ para as contas pessoais no período; null fora da conta PJ */
+  withdrawnToPfCents: number | null
+  /** lucro líquido menos o repasse: o que ficou na empresa */
+  keptCents: number | null
 }
 
 export async function formalDre(range: Range): Promise<FormalDre> {
+  const scope = await accountScope()
+  const accountId = range.accountId ?? scope.pjAccountId
   const rows = await db.execute<{
     receitaBrutaCents: number
     deducoesCents: number
@@ -128,7 +75,7 @@ export async function formalDre(range: Range): Promise<FormalDre> {
       left join categories c on c.id = t.category_id
       where t.posted_on between ${range.from} and ${range.to}
         and t.pending = false and t.ignored = false
-        ${range.accountId ? sql`and t.account_id = ${range.accountId}` : sql``}
+        ${accountId ? sql`and t.account_id = ${accountId}` : sql``}
     ) x
   `)
   const row = rows[0]
@@ -144,8 +91,16 @@ export async function formalDre(range: Range): Promise<FormalDre> {
   const impostosCents = row?.impostosCents ?? 0
   const lucroLiquidoCents = resultadoOperacionalCents + resultadoFinanceiroCents - impostosCents
 
+  let withdrawnToPfCents: number | null = null
+  if (accountId !== null && accountId === scope.pjAccountId) {
+    const transfers = await pjWithdrawals(range.from.slice(0, 7), range.to.slice(0, 7), scope, { from: range.from, to: range.to })
+    withdrawnToPfCents = 0
+    for (const month of transfers.values()) withdrawnToPfCents += month.toPersonalCents - month.fromPersonalCents
+  }
+
   return {
     range,
+    accountId,
     receitaBrutaCents,
     deducoesCents,
     receitaLiquidaCents,
@@ -156,30 +111,7 @@ export async function formalDre(range: Range): Promise<FormalDre> {
     resultadoFinanceiroCents,
     impostosCents,
     lucroLiquidoCents,
-  }
-}
-
-export async function dreReport(range: Range): Promise<DreReport> {
-  const [totals, income, expense, uncategorized, serviceAverages] = await Promise.all([
-    analytics.totals(range),
-    analytics.categoryBreakdown(range, { flow: 'income', level: 'leaf' }),
-    analytics.categoryBreakdown(range, { flow: 'expense', level: 'leaf' }),
-    uncategorizedGroups(range),
-    range.accountId ? analytics.historicalServiceAverages(range.accountId) : Promise.resolve(null),
-  ])
-  const { groups, groupCount, totalCount } = uncategorized
-
-  return {
-    range,
-    totals,
-    income,
-    expense,
-    uncategorized: {
-      groups: groups.slice(0, GROUP_LIMIT),
-      groupCount,
-      totalCount,
-      hasMore: groupCount > GROUP_LIMIT,
-    },
-    serviceAverages,
+    withdrawnToPfCents,
+    keptCents: withdrawnToPfCents === null ? null : lucroLiquidoCents - withdrawnToPfCents,
   }
 }

@@ -236,6 +236,7 @@ const EXAMPLES = [
   'Receita da Loja Azul de R$ 750,00, 50% finais, pagamento previsto para dia 25.',
   'Gastei R$ 42,90 na padaria hoje.',
   'Registra no Diário um almoço de R$ 38,00.',
+  'Vale a pena aportar R$ 500,00 na reserva este mês?',
 ]
 
 export function ChatThread({
@@ -284,11 +285,11 @@ export function ChatThread({
     >
       {items.length === 0 && !thinking && (
         <div className="assistant-empty">
-          <h3 className="assistant-empty__title">Escreva o que quer registrar</h3>
+          <h3 className="assistant-empty__title">Escreva o que quer registrar ou perguntar</h3>
           <p>
             Eu acho a pendência certa, ajusto datas, anoto comentários e lanço receitas, despesas, entradas do Diário,
-            aportes, compras e vendas de ativos. Mostro o que vai mudar e só grava quando você confirma. Registro e organizo,
-            não aconselho.
+            aportes, compras e vendas de ativos. Mostro o que vai mudar e só grava quando você confirma. Também recomendo:
+            pergunte se vale aportar, o que pagar primeiro ou se dá para gastar, e respondo com base nos seus números.
           </p>
           <div className="assistant-suggest">
             <span className="assistant-who">Exemplos</span>

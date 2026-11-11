@@ -172,7 +172,7 @@ export async function mockSendMessage(text: string, conversationId?: string): Pr
   if (phrase.includes('compr') && (phrase.includes('cota') || phrase.includes('acoes') || phrase.includes('ativo'))) {
     return reply(
       conversationId,
-      'Vou registrar a compra de 10 cotas do Fundo Horizonte. Não aconselho comprar nem vender: só registro o que você fez.',
+      'Vou registrar a compra de 10 cotas do Fundo Horizonte.',
       [
         {
           actionId: 'a1',

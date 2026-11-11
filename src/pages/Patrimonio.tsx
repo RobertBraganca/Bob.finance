@@ -6,7 +6,7 @@ import { historyNote, type NetWorth } from '../lib/health'
 import { todayIso } from '../lib/period'
 import { useMeta } from '../lib/store'
 import type { IconName } from '../components/ui/Icon'
-import { bps, centsToInput, date as fmtDate, money, parseMoneyInput } from '../lib/format'
+import { bps, centsToInput, date as fmtDate, money, parseMoneyInput, period as fmtPeriod } from '../lib/format'
 import {
   Bento,
   Button,
@@ -14,6 +14,7 @@ import {
   EmptyState,
   HeroFigure,
   Icon,
+
   Slab,
   SkeletonLines,
   useToast,
@@ -23,7 +24,7 @@ import {
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import { PageHeader } from '../components/shell/Shell'
-import { NetWorthHistoryChart, type NetWorthPoint } from '../components/charts/NetWorthHistoryChart'
+import { fmtGrowth, netWorthGrowth, NetWorthHistoryChart, type NetWorthPoint } from '../components/charts/NetWorthHistoryChart'
 
 /**
  * Patrimônio: a tela que separa "de quanto eu disponho" (Financeiro) de
@@ -239,7 +240,10 @@ export function PatrimonioPage() {
             ) : !history.data ? (
               <SkeletonLines lines={4} />
             ) : (
-              <NetWorthHistoryChart points={history.data.history} surface="paper" />
+              <div className="stack">
+                <GrowthRow points={history.data.history} />
+                <NetWorthHistoryChart points={history.data.history} surface="paper" />
+              </div>
             )}
           </Card>
         </Bento>
@@ -248,6 +252,36 @@ export function PatrimonioPage() {
       {adding && <AddAssetModal onClose={() => setAdding(false)} />}
       {revaluing && <RevalueModal item={revaluing} onClose={() => setRevaluing(null)} />}
     </>
+  )
+}
+
+/**
+ * Quanto o patrimônio cresce: o último mês contra o anterior, a média mensal
+ * da janela (composta) e o acumulado. Sem dois meses comparáveis, não aparece.
+ */
+function GrowthRow({ points }: { points: NetWorthPoint[] }) {
+  const g = netWorthGrowth(points)
+  if (g.comparable === 0) return null
+  const tone = (v: number | null) => (v === null || v === 0 ? '' : v > 0 ? 'pos' : 'neg')
+  const last = points.at(-1)
+  const items = [
+    { label: last ? `${fmtPeriod(last.period)} x mês anterior` : 'Último mês', value: g.lastMonth, digits: 1, foot: `${g.upMonths} de ${g.comparable} meses cresceram` },
+    { label: 'Média por mês', value: g.monthlyAverage, digits: 2, foot: 'composta' },
+    { label: `Em ${g.months} meses`, value: g.total, digits: 1, foot: 'do primeiro ao último' },
+  ]
+  return (
+    <dl
+      className="growth-strip"
+      title="Média composta = (patrimônio do último mês ÷ do primeiro)^(1 ÷ meses) − 1. +10% e depois −10% dá −0,5% por mês, não zero."
+    >
+      {items.map((item) => (
+        <div key={item.label} className="growth-strip__item">
+          <dt>{item.label}</dt>
+          <dd className={`tabular ${tone(item.value)}`}>{fmtGrowth(item.value, item.digits)}</dd>
+          <dd className="growth-strip__foot">{item.foot}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 

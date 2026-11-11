@@ -78,7 +78,7 @@ export function useSetStage() {
               }),
           },
         })
-      if (input.task.key.startsWith('closing:')) queryClient.invalidateQueries({ queryKey: ['dashboard-closing-checklist'] })
+      if (input.task.key.startsWith('closing:')) queryClient.invalidateQueries({ queryKey: ['financial-health-closing-checklist'] })
     },
     onError: (error, _, context) => {
       for (const [key, data] of context?.previous ?? []) queryClient.setQueryData(key, data)
@@ -119,7 +119,7 @@ export function useCompleteTask() {
     onSuccess: (_, input) => {
       toast(input.done ? 'Tarefa feita' : 'Tarefa reaberta')
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      if (input.key.startsWith('closing:')) queryClient.invalidateQueries({ queryKey: ['dashboard-closing-checklist'] })
+      if (input.key.startsWith('closing:')) queryClient.invalidateQueries({ queryKey: ['financial-health-closing-checklist'] })
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'falha ao atualizar a tarefa', 'error'),
   })

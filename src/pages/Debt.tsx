@@ -41,6 +41,7 @@ import { todayIso } from '../lib/period'
 import { installmentsCents, type AmortizationSystem } from '@shared/propertyPlan'
 import { CategorySelect } from '../components/ui/CategorySelect'
 import { CreditCostCard, ExitCalendarCard, FreedomCard, OweToday, RenegotiationCard, type AgreementPrefill, type DebtV2 } from './debt/DebtV2'
+import { PayoffRecommendationCard, type PayoffRecommendationData } from './debt/PayoffRecommendation'
 
 const KIND_LABEL: Record<string, string> = {
   credit_card: 'Cartão de crédito',
@@ -159,6 +160,8 @@ type Projection = {
   accelerated: { months: number | null; totalInterestCents: number; payoffPeriod: string | null; perDebt: ScenarioPerDebt }
   merged: Array<{ month: number; period: string; baselineCents: number | null; acceleratedCents: number | null }>
   savings: { monthsSaved: number | null; interestSavedCents: number }
+  /** estratégia recomendada com o aporte extra escolhido (decisions/0047); ausente na função anterior ao deploy */
+  recommendation?: PayoffRecommendationData | null
 }
 
 const EXTRA_STEPS = [0, 10_000, 25_000, 50_000, 100_000, 200_000, 500_000]
@@ -263,6 +266,10 @@ export function DebtPage() {
               <Card span={12}>
                 <SkeletonLines lines={3} />
               </Card>
+            )}
+
+            {projection.data?.recommendation && (
+              <PayoffRecommendationCard data={projection.data.recommendation} selected={strategy} onSelect={setStrategy} />
             )}
 
             {data.byKind.length > 1 && (
@@ -389,10 +396,12 @@ export function DebtPage() {
                   <Select
                     id={strategyFieldId}
                     value={strategy}
-                    options={[
-                      { value: 'avalanche', label: 'Avalanche (maior taxa)' },
-                      { value: 'snowball', label: 'Bola de neve (menor saldo)' },
-                    ]}
+                    options={(['avalanche', 'snowball'] as const).map((value) => ({
+                      value,
+                      label:
+                        (value === 'avalanche' ? 'Avalanche (maior taxa)' : 'Bola de neve (menor saldo)') +
+                        (projection.data?.recommendation?.strategy === value ? ' · recomendada' : ''),
+                    }))}
                     onChange={(value) => setStrategy((value as 'avalanche' | 'snowball') ?? 'avalanche')}
                   />
                 </div>

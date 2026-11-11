@@ -5,7 +5,6 @@ import {
   DEFAULT_MODELS,
   TOOL_DEFINITIONS,
   createAnthropicCaller,
-  isAdviceRequest,
   proposeFromText,
   type AssistantTools,
   type IntentDeps,
@@ -671,19 +670,43 @@ const CASES: Case[] = [
     },
   },
   {
-    name: 'resumo do modelo com cara de conselho é trocado pela recusa (filtro de saída)',
+    name: 'registro com recomendação no resumo passa inteiro (decisions/0047: sem filtro de saída)',
     text: 'Aportei R$ 400,00 hoje, e agora',
     script: [
       submit({
-        summary: 'Recomendo comprar mais PETR4 com esse dinheiro.',
+        summary: 'Registra o aporte de R$ 400,00 na reserva. Recomendo comprar mais PETR4 só depois de a reserva cobrir o aluguel.',
         actions: [{ type: 'reserve_contribution', amountCents: 40000, tradedOn: '2026-10-19' }],
         questions: [],
       }),
     ],
     expect: ({ result }) => {
-      assert.equal(result.source, 'advice_filter')
+      assert.equal(result.source, 'model')
+      assert.equal(result.proposal.actions.length, 1)
+      assert.match(result.proposal.summary, /Recomendo comprar mais PETR4/)
+    },
+  },
+  {
+    name: 'pedido de conselho: consulta as pendências e devolve a recomendação, sem ação',
+    text: 'Vale a pena aportar mais na reserva este mês?',
+    script: [
+      read('search_pending', { from: '2026-10-19', to: '2026-11-30' }),
+      submit({
+        summary:
+          'Vale, depois do aluguel: separe os R$ 2.500,00 que vencem em 05/11 e aporte o que sobrar. A Studio Lume de R$ 1.200,00 prevista para 15/11 cobre o mês seguinte.',
+        actions: [],
+        questions: ['Quanto você tem hoje na conta de onde sairia o aporte?'],
+      }),
+    ],
+    expect: ({ result, requests, tools }) => {
+      assert.equal(result.source, 'model')
+      assert.equal(result.modelCalls, 2)
+      assert.equal(requests.length, 2)
+      assert.deepEqual(tools.calls, ['search_pending'])
+      // as pendências reais voltam ao modelo para embasar a recomendação
+      assert.match(toolResultsOf(requests[1]!)[0]!.content, /Aluguel da sala/)
       assert.equal(result.proposal.actions.length, 0)
-      assert.match(result.proposal.summary, /não aconselho/)
+      assert.match(result.proposal.summary, /^Vale, depois do aluguel/)
+      assert.equal(result.proposal.questions.length, 1)
     },
   },
 ]
@@ -695,7 +718,8 @@ for (const c of CASES) {
 }
 
 /* ------------------------------------------------------------------ *
- * Filtro de conselho (antes da chamada) e o que NÃO pode ser bloqueado
+ * Pedidos de conselho: sem filtro (decisions/0047). Vão ao modelo e a
+ * recomendação volta como ele escreveu, no resumo.
  * ------------------------------------------------------------------ */
 const ADVICE_PHRASES = [
   'Devo comprar PETR4?',
@@ -715,43 +739,30 @@ const ADVICE_PHRASES = [
   'Você sugere comprar PETR4?',
 ]
 
+const RECOMMENDATION = {
+  summary: 'Recomendo esperar: o aluguel de R$ 2.500,00 vence em 05/11 e a Studio Lume de R$ 1.200,00 só entra em 15/11.',
+  actions: [],
+  questions: ['Quanto você tem hoje na conta?'],
+}
+
 for (const phrase of ADVICE_PHRASES) {
-  test(`filtro de conselho recusa sem chamar o modelo: "${phrase}"`, async () => {
-    const { result, requests } = await run(phrase, [])
-    assert.equal(requests.length, 0)
-    assert.equal(result.source, 'advice_filter')
-    assert.equal(result.modelCalls, 0)
+  test(`pedido de conselho chega ao modelo e a recomendação volta intacta: "${phrase}"`, async () => {
+    // frase com valor e verbo claros escala para o forte quando o barato só pergunta: roteiro com dois passos
+    const { result, requests } = await run(phrase, [submit(RECOMMENDATION), submit(RECOMMENDATION)])
+    assert.ok(requests.length >= 1, `o modelo deveria ser chamado para "${phrase}"`)
+    assert.equal(result.source, 'model')
+    assert.equal(result.proposal.summary, RECOMMENDATION.summary)
+    assert.deepEqual(result.proposal.questions, RECOMMENDATION.questions)
     assert.equal(result.proposal.actions.length, 0)
-    assert.match(result.proposal.summary, /não aconselho/)
-    assert.ok(result.proposal.questions.length >= 1)
     assert.ok(assistantProposalSchema.safeParse(result.proposal).success)
   })
 }
 
-const NOT_ADVICE = [
-  'Comprei 10 PETR4 a R$ 38,50 ontem',
-  'Vendi 5 ITSA4 a R$ 10,20 hoje',
-  'Aporte de R$ 500,00 na reserva hoje',
-  'Aportei R$ 500,00 na reserva',
-  'Devo R$ 200,00 pro João, paguei hoje',
-  'Paguei o que devia e investi R$ 300,00 ontem',
-  'Receita Coral Opus de R$ 750,00, 50% finais, pagamento previsto para segunda-feira dia 19',
-  'Resgatei R$ 1.000,00 da reserva hoje',
-  'Vou comprar 10 PETR4 amanhã',
-  'Gastei R$ 45,00 no almoço, o que foi bom',
-]
-
-test('"comprei", "vendi", "aporte de", "devo R$" e demais frases de registro NÃO são bloqueadas', () => {
-  for (const phrase of NOT_ADVICE) {
-    assert.equal(isAdviceRequest(phrase), false, `bloqueou por engano: "${phrase}"`)
-  }
-})
-
-test('"comprei" e "vendi" chegam ao modelo (não passam pelo filtro de conselho)', async () => {
+test('"comprei" e "vendi" continuam indo ao modelo como registro', async () => {
   for (const phrase of ['Comprei 10 PETR4 a R$ 38,50 ontem', 'Vendi 5 ITSA4 a R$ 10,20 hoje']) {
     const { requests, result } = await run(phrase, [onlyQuestions('Confirma?'), onlyQuestions('Confirma a operação?')])
     assert.ok(requests.length >= 1, `o modelo deveria ser chamado para "${phrase}"`)
-    assert.notEqual(result.source, 'advice_filter')
+    assert.equal(result.source, 'model')
   }
 })
 
@@ -791,9 +802,11 @@ test('chave ausente lança unavailable sem chamar o modelo', async () => {
   }
 })
 
-test('chave ausente: o filtro de conselho ainda responde (não precisa de modelo)', async () => {
-  const result = await proposeFromText('Devo comprar PETR4?', CTX, { apiKey: '', tools: fakeTools().tools })
-  assert.equal(result.source, 'advice_filter')
+test('chave ausente: pedido de conselho também lança unavailable (não há mais resposta pronta)', async () => {
+  await assert.rejects(
+    proposeFromText('Devo comprar PETR4?', CTX, { apiKey: '', tools: fakeTools().tools }),
+    unavailable('no_key'),
+  )
 })
 
 test('timeout do modelo (AbortError) vira unavailable', async () => {
@@ -1050,14 +1063,19 @@ test('o primeiro pedido leva sistema, ferramentas e contexto com a data e o dia 
   assert.ok(!req.system.includes('Comprei PETR4'))
 })
 
-test('o prompt do sistema traz as regras e os 3 exemplos, sem travessão', () => {
-  assert.match(SYSTEM_PROMPT, /nunca aconselha|Você nunca aconselha/)
+test('o prompt do sistema traz as regras e os 4 exemplos, sem travessão', () => {
+  // decisions/0047: recomenda, com os números do usuário, e não grava sem confirmação
+  assert.doesNotMatch(SYSTEM_PROMPT, /nunca aconselha|não aconselha/)
+  assert.match(SYSTEM_PROMPT, /Recomende de verdade/)
+  assert.match(SYSTEM_PROMPT, /nunca invente saldo/)
+  assert.match(SYSTEM_PROMPT, /diga qual falta/)
+  assert.match(SYSTEM_PROMPT, /Você nunca grava nada/)
   assert.match(SYSTEM_PROMPT, /Nunca invente ids/)
   assert.match(SYSTEM_PROMPT, /quantidade e preço/)
   assert.match(SYSTEM_PROMPT, /Coral Opus/)
   assert.match(SYSTEM_PROMPT, /"postedOn":"2026-10-19"/)
   assert.match(SYSTEM_PROMPT, /"notes":"50% finais"/)
-  assert.equal((SYSTEM_PROMPT.match(/^Exemplo \d$/gm) ?? []).length, 3)
+  assert.equal((SYSTEM_PROMPT.match(/^Exemplo \d$/gm) ?? []).length, 4)
   assert.ok(!SYSTEM_PROMPT.includes('—'), 'decisions/0007: sem travessão')
 })
 

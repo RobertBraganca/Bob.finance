@@ -86,6 +86,38 @@ export type CeilingProjection = {
   /** primeiro mês (YYYY-MM) do ano em que o acumulado projetado passa do teto; nulo se não passa */
   reachesInPeriod: string | null
   state: 'ok' | 'attention' | 'critical'
+  advice: CeilingAdvice
+}
+
+/**
+ * Faturar até 20% acima do teto desenquadra o MEI a partir de janeiro do ano
+ * seguinte (com DAS complementar sobre o excesso); passar de 20% desenquadra
+ * retroativamente a janeiro do próprio ano, com os tributos de ME desde lá
+ * (LC 123/2006, art. 18-A §7º III).
+ */
+export const MEI_TOLERANCE_BPS = 2_000
+
+/**
+ * Recomendação do teto (`decisions/0047`: o app recomenda, não só mostra).
+ * - `retroactive`: o faturado já passou de teto + 20%.
+ * - `exceeded`: o faturado passou do teto, ainda dentro dos 20%.
+ * - `projected_retroactive`: no ritmo, o ano fecha acima de teto + 20%.
+ * - `projected_over`: no ritmo, o ano fecha acima do teto.
+ * - `approaching`: no ritmo, o ano fecha acima de 80% do teto.
+ * - `none`: folga.
+ */
+export type CeilingAdvice = {
+  kind: 'none' | 'approaching' | 'projected_over' | 'projected_retroactive' | 'exceeded' | 'retroactive'
+  /** meses depois de `period` até dezembro */
+  monthsLeft: number
+  /** quanto ainda cabe no teto até dezembro; 0 se já passou */
+  roomCents: number
+  /** `roomCents` ÷ meses que faltam; nulo em dezembro (não há mês seguinte) */
+  monthlyRoomCents: number | null
+  /** teto + 20%: acima disso o desenquadramento é retroativo a janeiro */
+  toleranceLimitCents: number
+  /** quanto ainda dá para faturar no ano sem passar de teto + 20%; 0 se já passou */
+  toleranceRoomCents: number
 }
 
 /**
@@ -118,6 +150,20 @@ export function ceilingProjection({
     if (monthsNeeded <= remaining) reachesInPeriod = `${year}-${String(month + monthsNeeded).padStart(2, '0')}`
   }
   const projectedShareBps = Math.round((projectedYearCents / limit) * 10_000)
+  const toleranceLimitCents = Math.round((limit * (10_000 + MEI_TOLERANCE_BPS)) / 10_000)
+  const roomCents = Math.max(0, limit - yearRevenueCents)
+  const kind: CeilingAdvice['kind'] =
+    yearRevenueCents > toleranceLimitCents
+      ? 'retroactive'
+      : yearRevenueCents > limit
+        ? 'exceeded'
+        : projectedYearCents > toleranceLimitCents
+          ? 'projected_retroactive'
+          : projectedYearCents > limit
+            ? 'projected_over'
+            : projectedShareBps > 8_000
+              ? 'approaching'
+              : 'none'
   return {
     yearRevenueCents,
     limitCents: limit,
@@ -127,6 +173,14 @@ export function ceilingProjection({
     projectedShareBps,
     reachesInPeriod,
     state: projectedShareBps > 10_000 ? 'critical' : projectedShareBps > 8_000 ? 'attention' : 'ok',
+    advice: {
+      kind,
+      monthsLeft: remaining,
+      roomCents,
+      monthlyRoomCents: remaining > 0 ? Math.floor(roomCents / remaining) : null,
+      toleranceLimitCents,
+      toleranceRoomCents: Math.max(0, toleranceLimitCents - yearRevenueCents),
+    },
   }
 }
 

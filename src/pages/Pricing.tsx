@@ -41,16 +41,6 @@ import { todayIso } from '../lib/period'
 const QUOTE_STATUSES = ['draft', 'sent', 'in_review', 'needs_changes', 'paused', 'rejected', 'approved'] as const
 type QuoteStatus = (typeof QUOTE_STATUSES)[number]
 
-export const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
-  draft: 'Rascunho',
-  sent: 'Enviada',
-  in_review: 'Em revisão',
-  needs_changes: 'Em ajuste',
-  paused: 'Pausada',
-  rejected: 'Reprovada',
-  approved: 'Aprovada',
-}
-
 /**
  * Precificação de projetos.
  *

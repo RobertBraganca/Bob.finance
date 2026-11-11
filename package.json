@@ -8,15 +8,8 @@
     "dev:api": "tsx watch server/src/index.ts",
     "dev:web": "vite",
     "build": "tsc -b tsconfig.build.json && vite build",
-    "db:push": "tsx server/src/db/migrate.ts",
     "db:seed": "tsx server/src/db/seed.ts",
-    "db:reset": "tsx server/src/db/reset.ts",
-    "db:backup": "tsx scripts/backup.ts",
-    "db:restore": "tsx scripts/restore.ts",
-    "db:backup:prune": "tsx scripts/backup-prune.ts",
     "typecheck": "tsc -b tsconfig.build.json --pretty",
-    "verify": "tsx scripts/verify.ts && tsx scripts/verify-backup.ts",
-    "verify:backup": "tsx scripts/verify-backup.ts",
     "db:generate": "drizzle-kit generate",
     "demo": "tsx scripts/demo.ts",
     "import:real": "tsx scripts/import-real.ts",
@@ -28,7 +21,8 @@
     "test:assistant": "tsx --test scripts/assistant/*.test.ts",
     "test:clients": "tsx --test scripts/clients/*.test.ts",
     "test:tasks": "tsx --test --test-concurrency=1 scripts/tasks/*.test.ts",
-    "test:accountant": "tsx --test scripts/accountant/*.test.ts"
+    "test:accountant": "tsx --test scripts/accountant/*.test.ts",
+    "test:irpf": "tsx --test scripts/irpf/*.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -38,10 +32,8 @@
     "@tabler/icons-react": "^3.46.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.101.4",
-    "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "date-fns": "^4.4.0",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.1",
     "papaparse": "^5.6.0",
@@ -59,7 +51,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.2.0",
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19.2.18",

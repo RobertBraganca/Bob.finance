@@ -82,8 +82,13 @@ TAG/tipo). No mês corrente o DAS mostra "previsto R$ X" enquanto não pago.
 Por mês: faturamento, retiradas e gastos pessoais (Orçamento). Sem
 projeção, só observado.
 
-### Detalhe por TAG
-As colunas de hoje (PJ e PF), com o PF somando todas as contas pessoais.
+### DRE formal (PJ)
+O fim da tela (11/11/2026). Receita Bruta → Lucro Líquido da conta PJ no mês
+de referência, e "Ficou na empresa" depois das retiradas (`withdrawnToPfCents`,
+mesma `pjWithdrawals` da cascata). As colunas por TAG, a reconciliação PJ ↔ PF
+e o painel de sem categoria saíram a pedido do usuário: repetiam a cascata e
+não eram usados. Saíram junto `/analytics/dre`, `/analytics/flows` e
+`historicalServiceAverages`.
 
 ## Configuração (`financial_engine_settings`, colunas novas)
 | coluna | tipo | padrão |
@@ -109,7 +114,7 @@ As colunas de hoje (PJ e PF), com o PF somando todas as contas pessoais.
 - Cascata em degraus (barras horizontais ou lista com sinais), cada degrau
   clicável.
 - Gráfico de 12 meses (barras de faturamento, linhas de retiradas e gastos).
-- "Detalhe por TAG" e "DRE contábil" recolhidos ao fim.
+- "DRE formal (PJ)" sempre aberto, no fim da página.
 - "Ajustar" abre a configuração (DAS mensal, meses de colchão, teto, TAGs
   de DAS).
 

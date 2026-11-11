@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '../db/client.ts'
 import { categories, categoryMemory, categoryRules, transactions } from '../db/schema.ts'
+import { effectiveIrpfGroup, type IrpfGroup } from '../core/irpf.ts'
 
 export type CategoryNode = {
   id: number
@@ -10,6 +11,10 @@ export type CategoryNode = {
   color: string
   icon: string
   dreGroup: string | null
+  /** o gravado na categoria (`none` = não deduz); nulo = decide pelo nome */
+  irpfGroup: string | null
+  /** o que vale de fato no IR: gravado, herdado da mãe ou inferido do nome (core/irpf.ts) */
+  irpf: { group: IrpfGroup | null; source: 'manual' | 'auto' }
   sortOrder: number
   transactionCount: number
   children: CategoryNode[]
@@ -25,12 +30,14 @@ export async function categoryTree(): Promise<CategoryNode[]> {
     color: string
     icon: string
     dreGroup: string | null
+    irpfGroup: string | null
     sortOrder: number
     transactionCount: number
   }>(sql`
     select
       c.id, c.parent_id as "parentId", c.name, c.kind, c.color, c.icon,
       c.dre_group as "dreGroup",
+      c.irpf_group as "irpfGroup",
       c.sort_order as "sortOrder",
       (select count(*) from transactions t where t.category_id = c.id) as "transactionCount"
     from categories c
@@ -39,7 +46,11 @@ export async function categoryTree(): Promise<CategoryNode[]> {
   `)
 
   const nodes = new Map<number, CategoryNode>()
-  for (const row of rows) nodes.set(row.id, { ...row, children: [] })
+  for (const row of rows) nodes.set(row.id, { ...row, irpf: { group: null, source: 'auto' }, children: [] })
+  for (const node of nodes.values()) {
+    const parent = node.parentId === null ? null : (nodes.get(node.parentId) ?? null)
+    node.irpf = effectiveIrpfGroup(node, parent)
+  }
 
   const roots: CategoryNode[] = []
   for (const node of nodes.values()) {
@@ -99,6 +110,7 @@ export async function createCategory(input: {
   color?: string
   icon?: string
   dreGroup?: string | null
+  irpfGroup?: string | null
 }) {
   // A child always inherits its parent's kind, hue and classificação de
   // DRE: o ring chart agrupa por mãe, e o DRE formal soma a filha dentro
@@ -136,6 +148,7 @@ export async function createCategory(input: {
         color,
         icon,
         dreGroup: dreGroup as (typeof categories.$inferInsert)['dreGroup'],
+        irpfGroup: (input.irpfGroup ?? null) as (typeof categories.$inferInsert)['irpfGroup'],
         sortOrder: siblings?.n ?? 0,
       })
       .returning()
@@ -144,7 +157,7 @@ export async function createCategory(input: {
 
 export async function updateCategory(
   id: number,
-  patch: { name?: string; color?: string; icon?: string; kind?: string; dreGroup?: string | null; sortOrder?: number },
+  patch: { name?: string; color?: string; icon?: string; kind?: string; dreGroup?: string | null; irpfGroup?: string | null; sortOrder?: number },
 ) {
   if (patch.dreGroup !== undefined) assertValidDreGroup(patch.kind ?? (await currentKind(id)), patch.dreGroup)
 

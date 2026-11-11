@@ -62,7 +62,12 @@ const client = postgres({
   ssl: 'require',
   prepare: false,
   max: 5,
-  idle_timeout: 20,
+  // 11/11/2026: 20s fechava a conexão entre uma tela e outra e cada navegação
+  // pagava TCP + TLS + login no pooler de novo.
+  idle_timeout: 90,
+  // Sem colunas de array no schema: a consulta extra a pg_type em toda
+  // conexão nova não serve para nada aqui.
+  fetch_types: false,
   types: {
     // Same fix as server/src/db/client.ts: bigint (oid 20) and numeric
     // (oid 1700) come back as strings from postgres-js by default —
