@@ -18,9 +18,14 @@ if (names.length === 0) {
   process.exit(1)
 }
 
+// A `accountant` aceita o login do contador e confere a sessão em toda rota
+// (specs/tarefas-comercial-contador): publica sem a verificação de JWT do gateway.
+const extraFlags: Record<string, string[]> = { accountant: ['--no-verify-jwt'] }
+
 for (const name of names) {
-  console.log(`\n> supabase functions deploy ${name}`)
-  const result = spawnSync('npx', ['supabase', 'functions', 'deploy', name], { stdio: 'inherit', shell: true })
+  const args = ['supabase', 'functions', 'deploy', name, ...(extraFlags[name] ?? [])]
+  console.log(`\n> ${args.join(' ')}`)
+  const result = spawnSync('npx', args, { stdio: 'inherit', shell: true })
   if (result.status !== 0) {
     console.error(`deploy de ${name} falhou; o cache não foi invalidado`)
     process.exit(result.status ?? 1)

@@ -96,7 +96,7 @@ estado descrito aqui ainda reflete o momento atual.
 | `createSnapshot`/`restoreSnapshot` (Fase 4) são stubs que falham sempre, em qualquer caminho | Aberta, sem dono/prazo | `server/src/db/backup.ts:92-167` |
 | Fase 5 (corte oficial do SQLite) | Bloqueada pela Fase 4 | `decisions/0026` |
 | `README.md`/`docs/architecture.md`/`docs/PRD.md` continuam descrevendo SQLite/Fastify como arquitetura atual — confirmado via `git log`: nenhum dos três foi tocado desde o commit inicial, apesar de 6 commits grandes terem trocado essa camada inteira | Aberta, sabida (consequência já prevista em `decisions/0026`) | — |
-| Fan-out concorrente (`Promise.all`) trava sob pooler de transação sem erro/timeout — 5 rotas já corrigidas para sequencial; **6 services em `_shared/` ainda usam `Promise.all` e nunca foram exercitados ao vivo sob o pooler**: `analytics.ts`, `creditCards.ts`, `criteria.ts`, `debt.ts`, `dre.ts`, `investments.ts` | Risco sistêmico aberto, agora com a lista concreta de suspeitos | `supabase/functions/_shared/services/*` |
+| ~~Fan-out concorrente (`Promise.all`) trava sob pooler de transação sem erro/timeout~~ | **Causa achada (11/11/2026)**: pipelining do `postgres-js` (até 100 consultas por conexão ocupada) perde consultas no pooler de transação. `max_pipeline: 0` no client do Edge; 15 de 15 rodadas concorrentes responderam. Ver a seção de 11/11 (performance) | `supabase/functions/_shared/db/client.ts` |
 | `ledger.ts` monta SQL direto na rota (accounts, perfis de importador) em vez de delegar a um `services/`, duplicado nas duas árvores | Nova, média severidade | `server/src/routes/ledger.ts:18-130`, `supabase/functions/ledger/index.ts:37-134` |
 | Regex de data/período (`\d{4}-\d{2}(-\d{2})?`) duplicado inline em 30+ pontos em vez de um schema Zod compartilhado em `core/` | Nova, média severidade | `insights.ts`, `ledger.ts`, `pricing.ts`, `simulate.ts` |
 | ~~`skipped_occurrences_uq` e `target_alloc_uq` tinham o mesmo defeito que `txn_forecast_occurrence_uq`~~ | **Resolvida (28/08/2026)** — migração `20260828233823`: cada uma virou dois índices únicos parciais (`skipped_occurrences_forecast_uq`/`skipped_occurrences_debt_uq`; `target_alloc_goal_uq`/`target_alloc_global_uq`). Testado ao vivo contra o banco real dentro de uma transação com `ROLLBACK` (`insert` duplicado de propósito) — a constraint disparou (`23505 duplicate key`), confirmado sem resíduo depois. `setTargetAllocation`'s concorrência sob `READ COMMITTED` (delete-then-insert, não upsert) segue como risco teórico separado, não coberto por este fix — index agora impede o dado duplicado de existir, mas não torna a operação atômica sob duas chamadas simultâneas. | `server/src/db/schema.ts`, `supabase/functions/_shared/db/schema.ts`, `supabase/migrations/20260828233823_fix_null_defeated_unique_indexes.sql` |
@@ -1561,6 +1561,8 @@ enxugar telas repetidas, textos técnicos e menu.
   Supabase deixa a rota sem resposta com esse fan-out. Os `Promise.all` que a revisão
   de 12/10 tinha aceitado como dívida antiga eram esses.
 - Conserto: tudo em sequência. Lição: **no Edge, nunca `Promise.all` de consultas**.
+  (11/11/2026: a causa real era o pipelining do `postgres-js`; com
+  `max_pipeline: 0` o paralelo responde. Ver a seção de performance de 11/11.)
 - Como reproduzir sem publicar: rodar o serviço sob Deno com a configuração de
   conexão do Edge (host/usuário/senha do `.env` como `APPDB_*`, porta 6543, `max: 5`),
   `deno run -A --config supabase/functions/insights/deno.json <script>`, uma leitura
@@ -1654,7 +1656,7 @@ enxugar telas repetidas, textos técnicos e menu.
   Painel; query keys unificadas; `performanceSeries` numa query só (2,4 s →
   ~0,1 s). Pendente: cache entre requisições das funções pesadas, tirar a
   materialização do GET, `/dashboard` com ~16 queries em série,
-  `netWorthHistory` mês a mês.
+  `netWorthHistory` mês a mês. Feito na rodada seguinte (PR #37, abaixo).
 - **Lixo removido**: scripts de backup/restore/verify do SQLite, `better-sqlite3`,
   `date-fns`, rotas de backup/reset do servidor local, exports sem uso.
   `/card-connections` agora vai para a `ledger` (dava 404 em prod).
@@ -1667,3 +1669,68 @@ enxugar telas repetidas, textos técnicos e menu.
   (WORKER_LIMIT) no painel e em `/investments`; 401 ×310.
 - Patrimônio ganhou o crescimento por mês (faixa + tooltip + tabela,
   média composta); as calculadoras viraram cards que abrem uma de cada vez.
+
+## 11/11/2026 — Performance: cache das leituras da insights (PR #37)
+
+- **Medição antes** (local, ~25 ms por consulta): radar de risco 51 consultas e
+  abre em toda tela (sino); saúde/patrimônio/runway 41 a 57 cada; Painel 14
+  consultas em ~1 s; `ensureMaterialized` 73 consultas (3,3 s) em toda instância
+  nova da função, ou seja, quase sempre num app de uso esporádico.
+- **Cache entre requisições** (`_shared/core/responseCache.ts`, middleware da
+  `insights` depois do `requireAdmin`): a resposta de cada GET fica em
+  `api_cache` com a `data_version` e o dia (`todayIso`). Vale enquanto os dois
+  não mudam; hit custa uma consulta (header `x-cache: hit|miss`). A versão lida
+  ANTES de calcular é a gravada, então uma escrita no meio invalida. Gravação
+  via `EdgeRuntime.waitUntil`. Se o cache falhar, a rota calcula. `/google/`
+  fica de fora (lê API externa). Testes: `insights/responseCache.test.ts`.
+- **Invalidação**: trigger por comando `bump_data_version` em todas as tabelas
+  public (62), menos `usage_events`, `api_cache` e `data_version`. Migração
+  `20261111180000_response_cache`. **Tabela nova chama
+  `select attach_data_version('nome')` na própria migração.** Conferido no banco:
+  nove leituras não sobem a versão; um `delete ... where false` sobe (trigger por
+  comando dispara com zero linhas).
+- **Deploy**: `npm run deploy:fn -- insights ledger` publica (a `accountant` sai com `--no-verify-jwt` sozinha) e sobe a
+  `data_version`; o `supabase functions deploy` direto deixa respostas no formato
+  antigo até a próxima escrita ou o dia seguinte.
+- **Materialização**: a assinatura vai para `api_cache` (`__materialization`,
+  prefixada com `LOGIC_VERSION`; mudar a lógica de geração = subir esse número).
+  Instância nova: 3,5 s → 0,3 s quando nada mudou.
+- **`/dashboard`**: as quebras por TAG viraram uma consulta (`categorySpending`,
+  helper `toSlices`) e o resto roda em duas frentes, cada uma em sequência.
+  Saída idêntica em 5 recortes, metade do tempo.
+- **Paralelo no Edge, testado sob o pooler** (código do Edge no Deno, porta 6543,
+  `max: 5`): `/dashboard` (duas frentes) e o `Promise.all` de 2 da materialização
+  respondem (0,9 s e 0,3 s), inclusive dois `/dashboard` ao mesmo tempo. A
+  regra de 18/10 fica mais precisa: o que trava é fan-out largo, não 2 frentes.
+- **Causa das travas do Edge (resolvida na sequência, branch
+  `fix/trava-edge-concorrente`)**: no mesmo processo, radar + orçamento +
+  banners ao mesmo tempo travavam de forma intermitente (4 de 7 rodadas), já
+  antes do PR #37 (testado no commit `e063039`). Rastreando as consultas em
+  voo: na trava sobravam 1 ou 2 consultas triviais abertas para sempre (ex.:
+  `select pj_account_id from financial_engine_settings`) com o pool longe de
+  cheio. Causa: o `postgres-js` encaixa até 100 consultas numa conexão já
+  ocupada (pipelining, `max_pipeline` padrão 100) e o pooler de transação do
+  Supabase às vezes perde uma consulta encaixada. Isso também explica o
+  `max: 1` que travava e a regra "nunca `Promise.all`" de 18/10. Conserto:
+  `max_pipeline: 0` em `_shared/db/client.ts` (a opção falta nas tipagens, vai
+  num objeto à parte). Depois: 15 de 15 rodadas responderam em ~2 s, até seis
+  leituras juntas com 170 consultas. Vale para as seis funções (todas usam o
+  mesmo client). O servidor Node usa o pooler de sessão e não precisa. Pode
+  ser a origem dos 546 (WORKER_LIMIT) da telemetria; conferir a contagem depois
+  do deploy. Os trechos que viraram sequenciais por causa da regra de 18/10
+  podem voltar a ser paralelos, mas não há pressa: o cache já cobre as
+  leituras repetidas.
+- **Como reproduzir o Edge localmente** (o que achou a causa): Node lê o
+  `.env` com `process.loadEnvFile()`, mapeia para `APPDB_*`, faz UMA conexão de
+  checagem na 6543 e roda um script Deno (`deno run -A --no-check --config
+  supabase/functions/insights/deno.json`) com `spawnSync` e esse `env`. No
+  script, envolver `(db as any).$client.unsafe` para listar as consultas em voo
+  quando estourar o tempo.
+- **netWorthHistory** ficou mês a mês: `performanceSeries` exclui imobilizado e
+  mudaria o gráfico. O cache cobre.
+- **Incidente (do Claude)**: para testar sob o Deno, o `.env` foi carregado com
+  `source` no shell; a senha tem caractere especial, chegou corrompida, e o
+  pooler bloqueou TODAS as conexões novas (`ECIRCUITBREAKER`, inclusive a 5432
+  local) por ~1 minuto. Para reproduzir o Edge, passar o `.env` pelo Node
+  (`process.loadEnvFile()` → `env` do `spawnSync`) e fazer UMA conexão de
+  checagem antes de abrir várias.

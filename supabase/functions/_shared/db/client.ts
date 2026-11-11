@@ -53,7 +53,20 @@ function requireEnv(name: string): string {
 // platform also sets for its own database connection — both took a
 // live deploy to discover (password authentication failed against a
 // password already confirmed correct via the session pooler).
+//
+// 11/11/2026, a causa das travas de 18/10 (e do max: 1 que travava): por
+// padrão o postgres-js encaixa até 100 consultas numa conexão já ocupada, sem
+// esperar a resposta da anterior (pipelining). O pooler de transação do
+// Supabase às vezes perde uma consulta encaixada, e ela fica sem resposta para
+// sempre. Com 0, uma conexão ocupada não recebe outra: a consulta espera uma
+// conexão livre. Teste sob o pooler: radar + orçamento + banners ao mesmo
+// tempo travavam de forma intermitente (4 de 7) e passaram a responder em ~2 s
+// (15 de 15, até 6 leituras juntas). A opção existe no postgres-js 3.4 mas
+// falta nas tipagens dele, daí o objeto à parte.
+const noPipelining = { max_pipeline: 0 }
+
 const client = postgres({
+  ...noPipelining,
   host: requireEnv('APPDB_HOST'),
   port: Number(Deno.env.get('APPDB_TRANSACTION_PORT') ?? 6543),
   username: requireEnv('APPDB_USER'),
