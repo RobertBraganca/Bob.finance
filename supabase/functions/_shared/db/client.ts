@@ -92,6 +92,52 @@ const client = postgres({
   },
 })
 
+// 11/11/2026: o max_pipeline: 0 quebrou o sql.begin do postgres-js, e com ele
+// todo db.transaction do drizzle ("UNSAFE_TRANSACTION: Only use sql.begin,
+// sql.reserved or max: 1", ao apagar uma dívida, por exemplo). O begin só
+// reserva a conexão num gancho que roda depois do teste `sent.length <
+// max_pipeline`, e com 0 esse teste nunca passa: o BEGIN sai numa conexão não
+// reservada e a biblioteca recusa. Aqui a transação reserva a conexão antes
+// (sql.reserve) e manda begin/commit/rollback por ela. O savepoint cobre o
+// tx.transaction aninhado do drizzle (o apply do assistente usa).
+type Sql = ReturnType<typeof postgres>
+type Reserved = Awaited<ReturnType<Sql['reserve']>>
+
+async function beginOnReserved(...args: unknown[]): Promise<unknown> {
+  const fn = (args.length > 1 ? args[1] : args[0]) as (sql: Reserved) => unknown
+  const mode = args.length > 1 ? String(args[0]).replace(/[^a-z ]/gi, '') : ''
+  const conn = await client.reserve()
+  let savepoints = 0
+  const savepoint = async (inner: (sql: Reserved) => unknown) => {
+    const name = `s${savepoints++}`
+    await conn.unsafe(`savepoint ${name}`)
+    try {
+      const result = await inner(conn)
+      await conn.unsafe(`release savepoint ${name}`)
+      return result
+    } catch (error) {
+      await conn.unsafe(`rollback to savepoint ${name}`)
+      throw error
+    }
+  }
+  Object.assign(conn, { savepoint })
+  try {
+    await conn.unsafe(`begin ${mode}`)
+    let result: unknown
+    try {
+      result = await fn(conn)
+    } catch (error) {
+      await conn.unsafe('rollback').catch(() => {})
+      throw error
+    }
+    await conn.unsafe('commit')
+    return result
+  } finally {
+    conn.release()
+  }
+}
+Object.assign(client, { begin: beginOnReserved })
+
 export const db = drizzle(client, { schema })
 export type DB = typeof db
 
