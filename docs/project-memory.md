@@ -1734,3 +1734,16 @@ enxugar telas repetidas, textos técnicos e menu.
   local) por ~1 minuto. Para reproduzir o Edge, passar o `.env` pelo Node
   (`process.loadEnvFile()` → `env` do `spawnSync`) e fazer UMA conexão de
   checagem antes de abrir várias.
+- **Regressão do `max_pipeline: 0` (mesmo dia, depois do deploy do #38)**: todo
+  `db.transaction` do Edge passou a falhar com `UNSAFE_TRANSACTION: Only use
+  sql.begin, sql.reserved or max: 1` (achado ao apagar uma transação de
+  dívida; afetava também importação, orçamento, investimentos, clientes e o
+  apply do assistente). O `sql.begin` do `postgres-js` só reserva a conexão num
+  gancho (`onexecute`) avaliado depois de `sent.length < max_pipeline`, que com
+  0 nunca passa. Conserto em `_shared/db/client.ts`: o `begin` do client foi
+  trocado por um que reserva a conexão (`sql.reserve`) e manda
+  begin/commit/rollback por ela, com `savepoint` para o `tx.transaction`
+  aninhado. Testado sob a 6543: sem o conserto, o erro reproduz; com ele, 3
+  rodadas de 4 transações (rollback, savepoint, txid estável) + 4 leituras
+  juntas passaram. Lição: **mudança no client do banco precisa de teste de
+  escrita/transação, não só de leitura.**
