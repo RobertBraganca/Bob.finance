@@ -259,9 +259,9 @@ export function CreditCostCard({ v2 }: { v2: DebtV2 }) {
           </div>
         </div>
 
-        {v2.debts.length > 0 && (
+        {(v2.debts.length > 0 || cardCharges.length > 0) && (
           <div className="stack stack--tight">
-            <span className="label">Da parcela deste mês</span>
+            <span className="label">{v2.debts.length > 0 ? 'Da parcela deste mês' : 'Deste mês'}</span>
             {v2.debts.map((d) => {
               const total = d.interestThisMonthCents + d.principalThisMonthCents
               const interestBps = total > 0 ? Math.round((d.interestThisMonthCents / total) * 10_000) : 0

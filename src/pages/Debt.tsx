@@ -202,6 +202,20 @@ export function DebtPage() {
   })
 
   const data = overview.data
+  // Sem dívida ativa a tela continua útil: cartões, renda comprometida, juros
+  // pagos, histórico e encerradas não dependem de uma dívida cadastrada. Só a
+  // projeção, a composição e a tabela somem. O convite de tela cheia fica para
+  // quando não há nada mesmo para mostrar.
+  const hasActive = (data?.debts.length ?? 0) > 0
+  const nothingToShow =
+    !!data &&
+    !hasActive &&
+    data.closedDebts.length === 0 &&
+    !data.trend.some((p) => p.balanceCents > 0) &&
+    !!v2.data &&
+    v2.data.cards.length === 0 &&
+    v2.data.agreements.length === 0 &&
+    v2.data.cost.last12mCents === 0
 
   return (
     <>
@@ -228,7 +242,7 @@ export function DebtPage() {
           <Card>
             <SkeletonLines lines={3} />
           </Card>
-        ) : data.debts.length === 0 ? (
+        ) : nothingToShow ? (
           <Bento>
             <Slab span={12} accent>
               <div className="stack" style={{ maxWidth: '62ch' }}>
@@ -254,9 +268,13 @@ export function DebtPage() {
             {v2.data ? (
               <>
                 <OweToday v2={v2.data} />
-                <ExitCalendarCard v2={v2.data} />
+                {(hasActive || v2.data.cards.length > 0) && <ExitCalendarCard v2={v2.data} />}
                 <CreditCostCard v2={v2.data} />
-                <FreedomCard v2={v2.data} debts={data.debts} onEdit={(id) => setEditing(data.debts.find((d) => d.id === id) ?? null)} />
+                {hasActive ? (
+                  <FreedomCard v2={v2.data} debts={data.debts} onEdit={(id) => setEditing(data.debts.find((d) => d.id === id) ?? null)} />
+                ) : (
+                  <NoActiveDebtCard onNew={() => setEditing('new')} />
+                )}
               </>
             ) : v2.isError ? (
               <Card span={12}>
@@ -268,10 +286,12 @@ export function DebtPage() {
               </Card>
             )}
 
-            {projection.data?.recommendation && (
+            {hasActive && projection.data?.recommendation && (
               <PayoffRecommendationCard data={projection.data.recommendation} selected={strategy} onSelect={setStrategy} />
             )}
 
+            {hasActive && (
+            <>
             {data.byKind.length > 1 && (
             <Slab span={6} title="Composição" subtitle="Saldo por tipo de dívida">
               <CategoryRing
@@ -415,8 +435,10 @@ export function DebtPage() {
                 strategy={strategy}
               />
             </Card>
+            </>
+            )}
 
-            {v2.data && (
+            {v2.data && (hasActive || v2.data.agreements.length > 0) && (
               <RenegotiationCard
                 v2={v2.data}
                 debts={data.debts}
@@ -427,6 +449,8 @@ export function DebtPage() {
               />
             )}
 
+            {/* Só com algum saldo medido: uma linha zerada do início ao fim não diz nada. */}
+            {data.trend.some((p) => p.balanceCents > 0) && (
             <Card
               span={12}
               title="Evolução da dívida"
@@ -434,6 +458,7 @@ export function DebtPage() {
             >
               <DebtHistoryChart points={data.trend} surface="paper" />
             </Card>
+            )}
 
             <ReconciliationQueueCard
               queue={reconciliation.data}
@@ -441,6 +466,7 @@ export function DebtPage() {
               onDetail={setMismatchDetail}
             />
 
+            {hasActive && (
             <Card span={12} flush title="Dívidas cadastradas">
               <div className="table-wrap">
                 <table className="table table--stack-mobile">
@@ -525,6 +551,7 @@ export function DebtPage() {
                 </table>
               </div>
             </Card>
+            )}
 
             {data.closedDebts.length > 0 && (
               <Card
@@ -613,6 +640,25 @@ export function DebtPage() {
         <ValueMismatchDetailModal mismatch={mismatchDetail} onClose={() => setMismatchDetail(null)} />
       )}
     </>
+  )
+}
+
+/** Ocupa o lugar de "Quando fico livre" quando não há dívida ativa. */
+function NoActiveDebtCard({ onNew }: { onNew: () => void }) {
+  return (
+    <Card span={6} title="Nenhuma dívida ativa">
+      <div className="stack">
+        <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>
+          Cadastre uma dívida com saldo, taxa e pagamento mensal para ver quando você fica livre, quanto de juros
+          ainda vai pagar e o que muda com um aporte extra.
+        </p>
+        <div className="row">
+          <Button variant="primary" icon="plus" onClick={onNew}>
+            Cadastrar dívida
+          </Button>
+        </div>
+      </div>
+    </Card>
   )
 }
 
