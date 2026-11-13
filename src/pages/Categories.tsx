@@ -58,10 +58,10 @@ const KIND_LABEL: Record<string, string> = {
  * Operacional), nunca gravado à parte.
  */
 const DRE_GROUP_LABEL: Record<string, string> = {
-  deduction: 'Dedução da receita',
+  deduction: 'Dedução da receita (DAS, ISS, devoluções)',
   cost: 'Custo do serviço prestado (CSP)',
-  financial: 'Resultado financeiro',
-  tax: 'Imposto sobre o lucro',
+  financial: 'Resultado financeiro (juros, rendimentos, tarifas)',
+  tax: 'Imposto sobre o lucro (IRPJ e CSLL; o MEI não tem)',
 }
 const DRE_GROUPS_BY_KIND: Record<string, string[]> = {
   income: ['deduction', 'financial'],

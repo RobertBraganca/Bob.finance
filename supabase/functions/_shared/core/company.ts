@@ -190,9 +190,11 @@ const normalize = (s: string) =>
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
 
-/** Detecção padrão de TAG de DAS: nome com "imposto" ou "das", ou grupo de imposto no DRE. */
+/** Detecção padrão de TAG de DAS: nome com "imposto" ou "das", ou grupo de dedução/imposto no DRE. */
 export function isDasCategory(name: string, dreGroup: string | null): boolean {
-  if (dreGroup === 'tax') return true
+  // O DAS incide sobre a receita: no DRE ele é dedução (12/11/2026). 'tax'
+  // continua valendo para quem já tinha classificado assim.
+  if (dreGroup === 'deduction' || dreGroup === 'tax') return true
   const n = normalize(name)
   return n.includes('imposto') || /\bdas\b/.test(n)
 }
