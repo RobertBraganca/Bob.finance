@@ -269,9 +269,17 @@ export async function simulate(input: SimulateInput): Promise<Simulation> {
   const priceWithTaxCents =
     taxRateBps > 0 ? Math.round(adjustedPriceCents / (1 - taxRateBps / 10_000)) : adjustedPriceCents
 
+  // 12/11/2026: a margem extra era um markup (preço × 1,2 para "20%", que
+  // dá 16,7% de margem) somado depois do imposto, então o imposto não
+  // incidia sobre ela. Agora é margem de verdade sobre o preço final, no
+  // mesmo divisor do imposto: preço × (1 − imposto − margem) = preço ajustado.
   const extraMarginBps = input.extraMarginBps ?? 0
-  const extraMarginCents = Math.round((priceWithTaxCents * extraMarginBps) / 10_000)
-  const recommendedPriceCents = priceWithTaxCents + extraMarginCents
+  const divisor = 1 - taxRateBps / 10_000 - extraMarginBps / 10_000
+  if (divisor <= 0) {
+    throw new PricingError('imposto embutido e margem extra precisam somar menos de 100% do preço')
+  }
+  const recommendedPriceCents = extraMarginBps > 0 ? Math.round(adjustedPriceCents / divisor) : priceWithTaxCents
+  const extraMarginCents = Math.round((recommendedPriceCents * extraMarginBps) / 10_000)
   // Terceiro ponto de ancoragem, não um quarto preço aprovável — ver a
   // constante acima.
   const premiumPriceCents = Math.round((recommendedPriceCents * PREMIUM_MULTIPLIER_BPS) / 10_000)

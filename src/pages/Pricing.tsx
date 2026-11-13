@@ -79,6 +79,7 @@ type Simulation = {
     combinedMultiplierBps: number
     taxRateBps: number
     extraMarginBps: number
+    extraMarginCents: number
   }
   multipliers: Array<{ dimension: string; dimensionLabel: string; label: string; multiplierBps: number }>
   assumptions: AssumptionBag
@@ -276,7 +277,7 @@ function QuoteFormFields({
         <div className="field" style={{ width: 150 }}>
           <label className="field__label" htmlFor={marginFieldId}>Margem extra (%)</label>
           <TextInput id={marginFieldId} value={margin} onChange={setMargin} numeral placeholder="0" />
-          <span className="field__hint">Deste projeto, além da margem mensal</span>
+          <span className="field__hint">Do preço final, além da margem mensal</span>
         </div>
       </div>
 
@@ -467,8 +468,11 @@ function SimulateTab() {
               </span>
               <span className="kv__k">Alíquota embutida no preço</span>
               <span className="kv__v">{bps(result.breakdown.taxRateBps)}</span>
-              <span className="kv__k">Margem extra do projeto</span>
-              <span className="kv__v">{bps(result.breakdown.extraMarginBps)}</span>
+              <span className="kv__k">Margem extra do projeto (sobre o preço final)</span>
+              <span className="kv__v">
+                {bps(result.breakdown.extraMarginBps)}
+                {result.breakdown.extraMarginCents > 0 && ` · ${money(result.breakdown.extraMarginCents)}`}
+              </span>
               <span className="kv__k">Preço premium (recomendado × 1,3)</span>
               <span className="kv__v">{money(result.premiumPriceCents)}</span>
             </div>
