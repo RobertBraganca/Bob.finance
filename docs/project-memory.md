@@ -1805,9 +1805,19 @@ receita líquida; markup = preço ÷ custo).
   receita líquida; "Ficou na empresa" de out/2026 igual ao de antes;
   simulação com 20% de margem extra dá margem de 20% do preço final). O card
   na tela não foi visto: o app local pediu login.
-- **Pendências do usuário**: recategorizar os três recebimentos de clientes
-  restaurantes (dez/2025, jan e fev/2026) de "Alimentação › Restaurante" para
-  uma categoria de receita; conferir onde está o DAS desde fev/2026.
+- **Pendência do usuário**: conferir onde está o DAS desde fev/2026.
+- **Recebimentos de restaurantes (feito no banco, a pedido do usuário)**: os
+  três Pix de clientes restaurantes na PJ (ids 2106, 2138 e 2236; dez/2025,
+  jan e fev/2026) saíram de "Alimentação › Restaurante" para "Receitas de
+  Trabalho › Receita de Projetos Pontuais / Clientes" (#107), via
+  `setCategory` com aprendizado (assinaturas "pizzaria tomatto" e "ataliba
+  restaurante", 1 acerto cada, ainda sem regra). Margem líquida de jan/2026
+  foi de 64,9% para 84,7%.
+- **Estornos em categoria de despesa ficam como estão (decisão do usuário)**:
+  reembolso do iFood (fev/2026), Facebook (2023) e um Pix em Manutenção casa
+  (2025) estão certos na categoria de despesa, e o aviso de "entrada fora do
+  DRE" continua aparecendo para eles. Não trocar por abater o estorno na
+  própria categoria.
 - **Ideias que ficaram de fora**: juros da parcela de empréstimo como
   despesa financeira (hoje a parcela inteira vai para despesa ou retirada);
   rendimentos da PJ como receita financeira.
