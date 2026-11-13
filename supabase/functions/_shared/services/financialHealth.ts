@@ -954,25 +954,52 @@ export async function netWorth(): Promise<NetWorth> {
  * (`debt_snapshots`); "como estava a dívida no fim deste mês" é o ponto de
  * `debtTrend()` mais recente com `asOf` até o fim do mês, forward-fill
  * igual o próprio `debtTrend()` já faz internamente entre contas.
- * Sequencial de propósito (mesmo risco de pooler já documentado em
- * `goalHistory`/`healthScoreHistory`).
+ *
+ * 12/11/2026: a janela deixou de ser só "últimos N meses". Aceita
+ * `from`/`to` (YYYY-MM) e `from: 'start'` (desde o primeiro mês com dado),
+ * para o seletor de período de Patrimônio. O começo é sempre recortado no
+ * primeiro mês com lançamento, negociação ou foto, para "10 anos" não
+ * desenhar anos de zero antes do app existir; no máximo 120 meses. Os meses
+ * reconstruídos rodam 3 de cada vez: o "nunca em paralelo" de 18/10 vinha
+ * do pipelining do postgres-js, desligado em `db/client.ts` (11/11/2026).
  */
-export async function netWorthHistory(months = 12): Promise<Array<{ period: string; netWorthCents: number; source: 'foto' | 'reconstruído' }>> {
+export const NET_WORTH_MAX_MONTHS = 120
+
+export type NetWorthWindow = { months?: number; from?: string | 'start'; to?: string }
+
+type NetWorthPoint = { period: string; netWorthCents: number; source: 'foto' | 'reconstruído' }
+
+/** Primeiro mês com lançamento, negociação de ativo ou foto mensal; nulo sem nenhum. */
+async function firstDataPeriod(): Promise<string | null> {
+  const rows = await db.execute<{ first: string | null }>(sql`
+    select left(least(
+      (select min(posted_on)::text from transactions),
+      (select min(traded_on)::text from asset_trades),
+      (select min(period)::text || '-01' from monthly_snapshots)
+    ), 7) as first
+  `)
+  return rows[0]?.first ?? null
+}
+
+export async function netWorthHistory(window: number | NetWorthWindow = 12): Promise<NetWorthPoint[]> {
+  const w: NetWorthWindow = typeof window === 'number' ? { months: window } : window
   const currentPeriod = todayIso().slice(0, 7)
-  const periods = periodRange(addMonths(currentPeriod, -(months - 1)), currentPeriod)
+  const toPeriod = w.to && w.to < currentPeriod ? w.to : currentPeriod
+  const first = await firstDataPeriod()
+  let fromPeriod =
+    w.from === 'start' ? (first ?? toPeriod) : w.from ?? addMonths(toPeriod, -((w.months ?? 12) - 1))
+  if (first && fromPeriod < first) fromPeriod = first
+  if (fromPeriod > toPeriod) fromPeriod = toPeriod
+  const oldest = addMonths(toPeriod, -(NET_WORTH_MAX_MONTHS - 1))
+  if (fromPeriod < oldest) fromPeriod = oldest
+  const periods = periodRange(fromPeriod, toPeriod)
   const snaps = new Map((await db.select().from(monthlySnapshots)).map((r) => [r.period, r]))
   const debtSeries = await debtTrend()
   const scope = await accountScope()
 
-  const out: Array<{ period: string; netWorthCents: number; source: 'foto' | 'reconstruído' }> = []
-  for (const period of periods) {
-    const snap = snaps.get(period)
-    if (snap) {
-      out.push({ period, netWorthCents: Number(snap.netWorthCents), source: 'foto' })
-      continue
-    }
-    // Reconstrução: contas pessoais e dívidas medidas até o fim do mês (os
-    // cartões não têm série; as fotos mensais resolvem isso daqui em diante).
+  // Reconstrução: contas pessoais e dívidas medidas até o fim do mês (os
+  // cartões não têm série; as fotos mensais resolvem isso daqui em diante).
+  const rebuild = async (period: string): Promise<NetWorthPoint> => {
     const asOfDate = periodBounds(period).end
     const balances = await accountBalances(asOfDate)
     const holdings = await positions(asOfDate, { withNotes: false })
@@ -982,9 +1009,21 @@ export async function netWorthHistory(months = 12): Promise<Array<{ period: stri
     const investmentsCents = holdings.reduce((sum, p) => sum + p.marketValueCents, 0)
     const debtPoint = [...debtSeries].reverse().find((p) => p.asOf <= asOfDate)
     const debtCents = Number(debtPoint?.balanceCents ?? 0)
-    out.push({ period, netWorthCents: balanceCents + investmentsCents - debtCents, source: 'reconstruído' })
+    return { period, netWorthCents: balanceCents + investmentsCents - debtCents, source: 'reconstruído' }
   }
-  return out
+
+  const out = new Map<string, NetWorthPoint>()
+  const missing: string[] = []
+  for (const period of periods) {
+    const snap = snaps.get(period)
+    if (snap) out.set(period, { period, netWorthCents: Number(snap.netWorthCents), source: 'foto' })
+    else missing.push(period)
+  }
+  for (let i = 0; i < missing.length; i += 3) {
+    const batch = await Promise.all(missing.slice(i, i + 3).map(rebuild))
+    for (const point of batch) out.set(point.period, point)
+  }
+  return periods.map((period) => out.get(period)!)
 }
 
 /**

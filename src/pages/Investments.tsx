@@ -58,6 +58,7 @@ import {
 } from '../components/charts/InvestmentCharts'
 import { ProfitabilityChart } from '../components/charts/ProfitabilityChart'
 import { DateRangePopover } from '../components/ui/DateRangePopover'
+import { RANGE_PRESET_MONTHS, RANGE_PRESET_OPTIONS, type RangePreset } from '../lib/rangePresets'
 import { GoalModal, type Goal, type Projection } from '../components/ui/GoalModal'
 // Abas carregadas sob demanda (revisão de 07/10/2026): quem abre só a
 // Carteira não baixa Aposentadoria, Proventos, Calculadoras e o plano de imóvel.
@@ -402,18 +403,9 @@ function NoteBadge({
  * and composition charts) above "Meus ativos", grouped by class with
  * the detailed per-asset table folded inside each group.
  * ------------------------------------------------------------------ */
-type SummaryRangePreset = 'since_start' | '12m' | '2y' | '5y' | '10y' | 'custom'
-
-const SUMMARY_RANGE_OPTIONS: Array<{ value: SummaryRangePreset; label: string }> = [
-  { value: 'since_start', label: 'Desde o início' },
-  { value: '12m', label: '12 meses' },
-  { value: '2y', label: '2 anos' },
-  { value: '5y', label: '5 anos' },
-  { value: '10y', label: '10 anos' },
-  { value: 'custom', label: 'Data personalizada' },
-]
-
-const RANGE_MONTHS: Partial<Record<SummaryRangePreset, number>> = { '12m': 12, '2y': 24, '5y': 60, '10y': 120 }
+type SummaryRangePreset = RangePreset
+const SUMMARY_RANGE_OPTIONS = RANGE_PRESET_OPTIONS
+const RANGE_MONTHS = RANGE_PRESET_MONTHS
 
 /** `iso` shifted back `monthsBack` months, clamped to the target month's real last day. */
 function shiftIso(iso: string, monthsBack: number): string {

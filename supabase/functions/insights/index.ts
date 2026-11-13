@@ -546,9 +546,16 @@ app.get('/financial-health/score-history', async (c) => {
   return c.json({ history: await healthService.healthScoreHistory(query.months) })
 })
 
+/** Janela: `months` (os últimos N), ou `from`/`to` em YYYY-MM, ou `from=start` (desde o primeiro dado). */
 app.get('/financial-health/net-worth-history', async (c) => {
-  const query = z.object({ months: z.coerce.number().int().min(1).max(36).default(12) }).parse(c.req.query())
-  return c.json({ history: await healthService.netWorthHistory(query.months) })
+  const query = z
+    .object({
+      months: z.coerce.number().int().min(1).max(healthService.NET_WORTH_MAX_MONTHS).optional(),
+      from: z.union([z.literal('start'), z.string().regex(/^\d{4}-\d{2}$/)]).optional(),
+      to: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+    })
+    .parse(c.req.query())
+  return c.json({ history: await healthService.netWorthHistory(query) })
 })
 
 app.get('/financial-health/closing-checklist', async (c) => {

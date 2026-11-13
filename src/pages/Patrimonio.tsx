@@ -7,11 +7,14 @@ import { todayIso } from '../lib/period'
 import { useMeta } from '../lib/store'
 import type { IconName } from '../components/ui/Icon'
 import { bps, centsToInput, date as fmtDate, money, parseMoneyInput, period as fmtPeriod } from '../lib/format'
+import { DateRangePopover } from '../components/ui/DateRangePopover'
+import { RANGE_PRESET_MONTHS, RANGE_PRESET_OPTIONS, type RangePreset } from '../lib/rangePresets'
 import {
   Bento,
   Button,
   Card,
   EmptyState,
+  FilterSelect,
   HeroFigure,
   Icon,
 
@@ -59,11 +62,28 @@ export function PatrimonioPage() {
     enabled: meta.isSuccess,
   })
 
+  // Seletor de período da Evolução (12/11/2026), o mesmo de Investimentos.
+  const [rangePreset, setRangePreset] = useState<RangePreset>('12m')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState(todayIso)
+  const historyParams =
+    rangePreset === 'since_start'
+      ? { from: 'start' }
+      : rangePreset === 'custom'
+        ? { from: (customFrom || customTo).slice(0, 7), to: customTo.slice(0, 7) }
+        : { months: RANGE_PRESET_MONTHS[rangePreset] ?? 12 }
   const history = useQuery({
-    queryKey: ['patrimonio-net-worth-history'],
-    queryFn: () => api.get<{ history: NetWorthPoint[] }>('/financial-health/net-worth-history', { months: 12 }),
+    queryKey: ['patrimonio-net-worth-history', historyParams],
+    queryFn: () => api.get<{ history: NetWorthPoint[] }>('/financial-health/net-worth-history', historyParams),
     enabled: meta.isSuccess,
+    // Troca de período: o gráfico anterior fica, esmaecido, até o novo chegar.
+    placeholderData: (previous) => previous,
   })
+  const historyPoints = history.data?.history ?? []
+  const historyWindow =
+    historyPoints.length > 0
+      ? `${fmtPeriod(historyPoints[0]!.period)} a ${fmtPeriod(historyPoints.at(-1)!.period)}`
+      : ''
 
   const illiquid = useQuery({
     queryKey: ['patrimonio-illiquid'],
@@ -233,14 +253,40 @@ export function PatrimonioPage() {
           <Card
             span={12}
             title="Evolução do patrimônio"
-            subtitle={`Patrimônio pessoal, últimos 12 meses. ${historyNote(history.data?.history) || 'Reconstruído com os lançamentos e saldos registrados.'} Um bem entra na data de aquisição.`}
+            subtitle={`Patrimônio pessoal${historyWindow ? `, ${historyWindow}` : ''}. ${historyNote(history.data?.history) || 'Reconstruído com os lançamentos e saldos registrados.'} Um bem entra na data de aquisição.`}
+            actions={
+              <div className="row row--wrap" style={{ gap: 'var(--sp-2)' }}>
+                <FilterSelect
+                  icon="calendar"
+                  value={rangePreset}
+                  options={RANGE_PRESET_OPTIONS}
+                  onChange={(value) => setRangePreset(value ?? '12m')}
+                />
+                {rangePreset === 'custom' && (
+                  <DateRangePopover
+                    icon="calendar"
+                    label={customFrom && customTo ? `${fmtPeriod(customFrom.slice(0, 7))} a ${fmtPeriod(customTo.slice(0, 7))}` : 'Escolher datas'}
+                    from={customFrom || customTo}
+                    to={customTo}
+                    onApply={(from, to) => {
+                      setCustomFrom(from)
+                      setCustomTo(to)
+                    }}
+                  />
+                )}
+              </div>
+            }
           >
             {history.isError ? (
               <LoadError onRetry={() => history.refetch()} retrying={history.isFetching} />
             ) : !history.data ? (
               <SkeletonLines lines={4} />
             ) : (
-              <div className="stack">
+              <div
+                className="stack"
+                aria-busy={history.isFetching || undefined}
+                style={{ opacity: history.isFetching ? 0.72 : 1, transition: 'opacity 120ms' }}
+              >
                 <GrowthRow points={history.data.history} />
                 <NetWorthHistoryChart points={history.data.history} surface="paper" />
               </div>

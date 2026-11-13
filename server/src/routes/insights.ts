@@ -515,9 +515,16 @@ export async function insightsRoutes(app: FastifyInstance) {
     return { history: await healthService.healthScoreHistory(query.months) }
   })
 
+  /** Janela: `months` (os últimos N), ou `from`/`to` em YYYY-MM, ou `from=start` (desde o primeiro dado). */
   app.get('/financial-health/net-worth-history', async (req) => {
-    const query = z.object({ months: z.coerce.number().int().min(1).max(36).default(12) }).parse(req.query)
-    return { history: await healthService.netWorthHistory(query.months) }
+    const query = z
+      .object({
+        months: z.coerce.number().int().min(1).max(healthService.NET_WORTH_MAX_MONTHS).optional(),
+        from: z.union([z.literal('start'), z.string().regex(/^\d{4}-\d{2}$/)]).optional(),
+        to: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+      })
+      .parse(req.query)
+    return { history: await healthService.netWorthHistory(query) }
   })
 
   app.get('/financial-health/closing-checklist', async (req) => {
