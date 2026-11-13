@@ -1800,4 +1800,14 @@ receita líquida; markup = preço ÷ custo).
   não há DAS na conta PJ (pago por outra conta, com outra categoria, ou não
   pago). Rendimentos da PJ (kind `investment`) e os juros dentro da parcela
   de empréstimo não entram no resultado financeiro.
-- **Deploy**: `insights` (DRE e DAS) e `pricing`.
+- **Entregue**: PR #42, merge `13b9084`; `insights` (DRE e DAS) e `pricing`
+  publicadas pelo usuário. Verificado pela API local (margens = lucro ÷
+  receita líquida; "Ficou na empresa" de out/2026 igual ao de antes;
+  simulação com 20% de margem extra dá margem de 20% do preço final). O card
+  na tela não foi visto: o app local pediu login.
+- **Pendências do usuário**: recategorizar os três recebimentos de clientes
+  restaurantes (dez/2025, jan e fev/2026) de "Alimentação › Restaurante" para
+  uma categoria de receita; conferir onde está o DAS desde fev/2026.
+- **Ideias que ficaram de fora**: juros da parcela de empréstimo como
+  despesa financeira (hoje a parcela inteira vai para despesa ou retirada);
+  rendimentos da PJ como receita financeira.
