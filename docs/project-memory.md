@@ -1746,4 +1746,58 @@ enxugar telas repetidas, textos técnicos e menu.
   aninhado. Testado sob a 6543: sem o conserto, o erro reproduz; com ele, 3
   rodadas de 4 transações (rollback, savepoint, txid estável) + 4 leituras
   juntas passaram. Lição: **mudança no client do banco precisa de teste de
-  escrita/transação, não só de leitura.**
+  escrita/transação, não só de leitura.** (PR #40; as seis funções publicadas.)
+- **Endividamento sem dívida ativa (PR #41)**: ao apagar a última dívida, a
+  tela trocava tudo pelo convite "Cadastre saldo e taxa" e escondia o que não
+  depende de dívida cadastrada (cartões e limite usado, renda comprometida,
+  calendário de 6 meses, juros pagos, conciliação, encerradas). Agora
+  `hasActive` esconde só projeção, recomendação, composição e a tabela; no
+  lugar de "Quando fico livre" entra `NoActiveDebtCard`. Renegociação aparece
+  com dívida ativa ou acordo; o calendário, com dívida ativa ou cartão. O
+  convite de tela cheia (`nothingToShow`) só sem cartão, encerrada, acordo,
+  juro pago nem saldo medido. "Evolução da dívida" só aparece com algum saldo
+  acima de zero.
+  - **Aberto**: com todas as dívidas encerradas, o `trend` (`debt.ts#debtTrend`)
+    volta zerado em todas as datas, embora as encerradas tenham tido saldo.
+    Provável que só some as ativas; não investigado. Se for, o histórico
+    devia incluir as encerradas.
+
+## 12/11/2026 — DRE: margens, gasto pessoal na PJ e margem da precificação
+
+Ponto de partida: aula de margem, markup e DRE (funil receita bruta →
+deduções → receita líquida → custos → lucro bruto → despesas → EBIT →
+financeiro e imposto sobre o lucro → lucro líquido; margem = lucro ÷
+receita líquida; markup = preço ÷ custo).
+
+- **Achado**: nenhuma categoria tinha `dre_group`. Deduções, CSP, financeiro
+  e impostos davam zero em todos os meses e a DRE virava receita − despesa.
+- **Dados (feito no banco, com o OK do usuário)**: `Negócio › Impostos` (#44)
+  → `deduction` (o DAS incide sobre a receita) e `Negócio › Serviços
+  terceirizados` (#43) → `cost`. Escritório, SaaS e Marketing seguem como
+  despesa operacional.
+- **Código** (`_shared/services/dre.ts`, espelhado em `server/src`):
+  - margens bruta, operacional e líquida sobre a receita líquida, e as mesmas
+    somando os 6 meses anteriores (só meses com receita);
+  - gasto de categoria pessoal pago pela conta PJ (sem `dre_group`, nem ela
+    nem a mãe `budget_excluded`, que é o marcador do Negócio) sai da despesa
+    operacional e vira retirada em "Depois das retiradas". "Ficou na empresa"
+    não muda (o cascade de Minha empresa dá o mesmo número);
+  - custo, imposto e dedução somam pelo valor líquido (estorno reduz);
+  - entrada em categoria de despesa sem grupo vem em `uncountedInflow` e a
+    tela avisa (eram recebimentos de clientes restaurantes categorizados como
+    "Alimentação › Restaurante", dez/2025 a fev/2026).
+- **DAS**: `isDasCategory` aceita `deduction` além de `tax` (core/company.ts
+  e shared/company.ts). Rótulos dos grupos em Categorias explicam o que vai
+  em cada um ("o MEI não tem" imposto sobre o lucro).
+- **Precificação**: a "margem extra" era markup (preço × 1,2 para 20% = 16,7%
+  de margem) somado depois do imposto. Agora preço × (1 − imposto − margem) =
+  preço ajustado. Cotações salvas guardam o preço; só mudam se editadas.
+- **Leitura com os dados de jan–nov/2026**: despesa operacional da empresa é
+  zero de fato (o que havia era mercado, delivery, lazer, internet de casa
+  etc., agora retirada). Margem líquida ~100% na maioria dos meses; jan
+  64,9% (DAS + terceirizado), mai 89%, out 96,1% (terceirizado).
+- **Aberto**: o DAS só aparece pago pela PJ em jan/2026; de fev em diante
+  não há DAS na conta PJ (pago por outra conta, com outra categoria, ou não
+  pago). Rendimentos da PJ (kind `investment`) e os juros dentro da parcela
+  de empréstimo não entram no resultado financeiro.
+- **Deploy**: `insights` (DRE e DAS) e `pricing`.
