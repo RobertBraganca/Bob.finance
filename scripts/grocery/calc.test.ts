@@ -34,8 +34,10 @@ describe('normalizeName', () => {
 })
 
 describe('subtotalCents', () => {
-  test('quantidade com 3 casas, arredondado para o centavo mais próximo', () => {
-    assert.equal(subtotalCents(1.25, 3990), 4988) // 4987,5 → 4988
+  test('quantidade com 3 casas, truncado no centavo como a balança e o cupom', () => {
+    assert.equal(subtotalCents(1.25, 3990), 4987) // 4987,5 → 4987
+    assert.equal(subtotalCents(0.406, 3980), 1615) // cupom do Assaí de 10/10/2026: 16,1588 → 16,15
+    assert.equal(subtotalCents(1.022, 5690), 5815) // idem: 58,1518 → 58,15
     assert.equal(subtotalCents(1.08, 4290), 4633) // 4633,2
     assert.equal(subtotalCents(12, 529), 6348)
     assert.equal(subtotalCents(0.333, 100), 33)
@@ -43,7 +45,8 @@ describe('subtotalCents', () => {
   test('sem erro de ponto flutuante', () => {
     assert.equal(subtotalCents(1.005, 1000), 1005)
     assert.equal(subtotalCents(0.1, 3), 0) // 0,3 centavo
-    assert.equal(subtotalCents(0.5, 1), 1) // meio centavo arredonda para cima
+    assert.equal(subtotalCents(0.5, 1), 0) // meio centavo: fração de centavo nunca é cobrada
+    assert.equal(subtotalCents(0.999, 100), 99)
   })
 })
 
@@ -54,7 +57,7 @@ describe('tripTotals', () => {
       item({ productId: 2, plannedQty: 1.5, lastUnitPriceCents: 649 }),
       item({ productId: 3, plannedQty: 1, lastUnitPriceCents: null }),
     ])
-    assert.equal(t.plannedCents, 1000 + 974)
+    assert.equal(t.plannedCents, 1000 + 973) // 1,5 × 6,49 = 9,735 → 9,73
     assert.equal(t.missingPriceCount, 1)
     assert.equal(t.totalCount, 3)
   })

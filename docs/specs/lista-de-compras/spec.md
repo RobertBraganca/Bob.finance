@@ -123,9 +123,10 @@ vão para `insights` com o prefixo `/grocery-insights`.
 Tudo abaixo é função pura em `grocery-calc.ts` e roda igual no cliente (para
 o total em tempo real) e no servidor.
 
-- **Subtotal do item** = `round(qty × unit_price_cents)` em centavos
-  (arredondamento meio-para-cima por item; o total é a soma dos subtotais já
-  arredondados).
+- **Subtotal do item** = `floor(qty × unit_price_cents)` em centavos
+  (truncado por item, como a balança e o cupom fiscal; o total é a soma dos
+  subtotais já truncados). Até 25/11/2026 era arredondado; a primeira nota
+  carregada mostrou a diferença de 1 centavo no item pesado.
 - **Último preço de um produto** = `unit_price_cents` do item desse produto na
   compra `done` mais recente (`purchased_on`, desempate por id) com preço não
   nulo.

@@ -267,6 +267,41 @@ export async function createTrip(input: { from: 'empty' | 'last' }, executor: Db
   return getTrip(trip.id, executor)
 }
 
+/**
+ * Grava uma compra antiga já concluída (carga de cupons, plano etapa 8), sem
+ * passar pela lista ativa: a lista que estiver em andamento no app não é
+ * tocada. Produtos criados ou reaproveitados pelo nome normalizado; todos os
+ * itens entram marcados, com o preço do cupom.
+ */
+export async function importDoneTrip(
+  input: { purchasedOn: string; items: Array<{ name: string; unit: GroceryUnit; qty: number; unitPriceCents: number }> },
+  executor: DbExecutor = db,
+): Promise<GroceryTrip> {
+  if (input.items.length === 0) throw new GroceryError(422, 'A compra precisa de pelo menos um item.')
+  const [trip] = await executor
+    .insert(groceryTrips)
+    .values({ status: 'done', purchasedOn: input.purchasedOn, startedAt: `${input.purchasedOn}T00:00:00Z` })
+    .returning({ id: groceryTrips.id })
+  if (!trip) throw new Error('insert de grocery_trips não devolveu linha')
+  const seen = new Set<number>()
+  for (const item of input.items) {
+    const { product } = await createProduct({ name: item.name, unit: item.unit }, executor)
+    if (product.unit !== item.unit) throw new GroceryError(409, `${item.name}: já existe em ${product.unit}, a compra pede ${item.unit}.`)
+    if (seen.has(product.id)) throw new GroceryError(422, `${item.name} aparece duas vezes: some as quantidades numa linha só.`)
+    seen.add(product.id)
+    await executor.insert(groceryTripItems).values({
+      tripId: trip.id,
+      productId: product.id,
+      plannedQty: item.qty,
+      qty: item.qty,
+      unitPriceCents: item.unitPriceCents,
+      checked: true,
+      clientRev: 1,
+    })
+  }
+  return getTrip(trip.id, executor)
+}
+
 export async function deleteTrip(id: number, executor: DbExecutor = db) {
   const trip = await requireTrip(id, executor)
   if (trip.status !== 'planning') throw new GroceryError(409, 'Só dá para descartar uma lista que ainda não foi ao mercado.')

@@ -192,6 +192,44 @@ describe('lista de compras no banco (rollback)', { skip }, () => {
     })
   })
 
+  test('compra antiga importada já concluída, sem tocar na lista em andamento', async () => {
+    await inRollback(async (tx) => {
+      const g = loaded!.grocery
+      const active = await g.createTrip({ from: 'empty' }, tx)
+      const imported = await g.importDoneTrip(
+        {
+          purchasedOn: '2026-10-10',
+          items: [
+            { name: 'Leite integral 1L', unit: 'un', qty: 12, unitPriceCents: 449 },
+            { name: 'Patinho bovino', unit: 'kg', qty: 1.022, unitPriceCents: 5690 },
+          ],
+        },
+        tx,
+      )
+      assert.equal(imported.status, 'done')
+      assert.equal(imported.totals.realCents, 12 * 449 + 5815)
+      assert.equal((await g.getActiveTrip(tx))?.id, active.id)
+      await rejectsWith(
+        () => g.importDoneTrip({ purchasedOn: '2026-10-11', items: [{ name: 'leite INTEGRAL 1l', unit: 'kg', qty: 1, unitPriceCents: 1 }] }, tx),
+        409,
+      )
+      await rejectsWith(
+        () =>
+          g.importDoneTrip(
+            {
+              purchasedOn: '2026-10-11',
+              items: [
+                { name: 'Sal', unit: 'un', qty: 1, unitPriceCents: 199 },
+                { name: 'sal', unit: 'un', qty: 1, unitPriceCents: 199 },
+              ],
+            },
+            tx,
+          ),
+        422,
+      )
+    })
+  })
+
   test('duas compras no mesmo dia: a segunda usa o preço da primeira como último', async () => {
     await inRollback(async (tx) => {
       const g = loaded!.grocery
