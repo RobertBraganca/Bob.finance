@@ -41,6 +41,7 @@ const FinancialHealthPage = lazy(() =>
 )
 const AccountantPage = lazy(() => import('./pages/accountant/AccountantPage').then((m) => ({ default: m.AccountantPage })))
 const TasksPage = lazy(() => import('./pages/tasks/TasksPage').then((m) => ({ default: m.TasksPage })))
+const GroceryPage = lazy(() => import('./pages/grocery/GroceryPage').then((m) => ({ default: m.GroceryPage })))
 const GoogleCallbackPage = lazy(() => import('./pages/tasks/GoogleCalendarCard').then((m) => ({ default: m.GoogleCallbackPage })))
 const PricingPage = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.PricingPage })))
 const ProposalFormPage = lazy(() => import('./pages/proposals/ProposalFormPage').then((m) => ({ default: m.ProposalFormPage })))
@@ -221,6 +222,7 @@ function AuthedApp() {
               <Route path="/patrimonio" element={<PatrimonioPage />} />
               <Route path="/saude" element={<FinancialHealthPage />} />
               <Route path="/tarefas" element={<TasksPage />} />
+              <Route path="/mercado" element={<GroceryPage />} />
               <Route path="/tarefas/google" element={<GoogleCallbackPage />} />
               <Route path="/contador" element={isPersonalAccount ? <Navigate to="/" replace /> : <AccountantPage />} />
               <Route

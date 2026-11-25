@@ -6,6 +6,7 @@ import {
   doublePrecision,
   index,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -1770,4 +1771,79 @@ export const appUsers = pgTable('app_users', {
   role: text('role').notNull().default('accountant'),
   invitedAt: text('invited_at').notNull().default(now),
   revokedAt: text('revoked_at'),
+})
+
+/* ------------------------------------------------------------------ *
+ * Lista de compras / Mercado (docs/specs/lista-de-compras). O preço não é
+ * guardado no produto: último preço, histórico e índice da cesta são
+ * derivados dos itens das compras concluídas.
+ * ------------------------------------------------------------------ */
+export const groceryUnitEnum = pgEnum('grocery_unit', ['un', 'kg', 'L'])
+export const groceryTripStatusEnum = pgEnum('grocery_trip_status', ['planning', 'shopping', 'done'])
+
+/** quantidade com 3 casas (1,250 kg); lida como number */
+const qty = (name: string) => numeric(name, { precision: 10, scale: 3, mode: 'number' })
+
+export const groceryProducts = pgTable(
+  'grocery_products',
+  {
+    id: id(),
+    name: text('name').notNull(),
+    /** nome normalizado (core/grocery#normalizeName): evita duplicata */
+    nameKey: text('name_key').notNull(),
+    unit: groceryUnitEnum('unit').notNull(),
+    defaultQty: qty('default_qty').notNull().default(1),
+    archived: boolean('archived').notNull().default(false),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('grocery_products_name_key_key').on(t.nameKey)],
+)
+
+export const groceryTrips = pgTable(
+  'grocery_trips',
+  {
+    id: id(),
+    status: groceryTripStatusEnum('status').notNull().default('planning'),
+    startedAt: text('started_at'),
+    /** data da compra (YYYY-MM-DD), gravada ao concluir */
+    purchasedOn: text('purchased_on'),
+    /** o lançamento real (Open Finance) desta compra; a compra nunca cria lançamento */
+    transactionId: int('transaction_id').references(() => transactions.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [uniqueIndex('grocery_trips_transaction_id_key').on(t.transactionId)],
+)
+
+export const groceryTripItems = pgTable(
+  'grocery_trip_items',
+  {
+    id: id(),
+    tripId: int('trip_id')
+      .notNull()
+      .references(() => groceryTrips.id, { onDelete: 'cascade' }),
+    productId: int('product_id')
+      .notNull()
+      .references(() => groceryProducts.id),
+    plannedQty: qty('planned_qty').notNull(),
+    qty: qty('qty'),
+    unitPriceCents: int('unit_price_cents'),
+    checked: boolean('checked').notNull().default(false),
+    /** escrita com client_rev menor ou igual ao gravado é ignorada (fila offline) */
+    clientRev: int('client_rev').notNull().default(0),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex('grocery_trip_items_trip_id_product_id_key').on(t.tripId, t.productId),
+    index('grocery_trip_items_product_idx').on(t.productId),
+  ],
+)
+
+export const grocerySettings = pgTable('grocery_settings', {
+  id: singletonId(),
+  /** categoria cujo teto (category_caps) e gasto valem como orçamento de mercado */
+  categoryId: int('category_id').references(() => categories.id, { onDelete: 'set null' }),
+  updatedAt: text('updated_at').notNull().default(now),
 })

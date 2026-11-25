@@ -96,6 +96,10 @@ React ou de banco, ela não pertence aqui.
   para uma cotação já enviada a um cliente não mudar de valor depois. Health
   Score, runway, radar, disponível e ponto de equilíbrio continuam
   derivados a cada leitura.
+- **Mercado** (`specs/lista-de-compras`): `groceryProducts` (catálogo, sem
+  preço), `groceryTrips` (compra; `transactionId` só aponta para o lançamento
+  real, nunca cria um), `groceryTripItems`, `grocerySettings` (categoria cujo
+  teto vale como orçamento). Último preço e índice da cesta são derivados.
 - **Fluxo de caixa:** `cashFlowForecasts` (template recorrente/parcelado que
   materializa linhas pendentes reais em `transactions`),
   `reconciliationDismissals` (pares sugeridos que o usuário descartou),

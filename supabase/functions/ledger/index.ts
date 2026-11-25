@@ -16,6 +16,7 @@ import { writeMonthlySnapshot } from '../_shared/services/financialHealth.ts'
 import * as cardSync from '../_shared/services/cardSync.ts'
 import * as txnService from '../_shared/services/transactions.ts'
 import * as budgetService from '../_shared/services/budget.ts'
+import * as grocery from '../_shared/services/grocery.ts'
 import { friendlyErrorMessage } from '../_shared/core/errors.ts'
 
 /**
@@ -55,6 +56,7 @@ app.use('*', async (c, next) => {
 
 app.onError((error, c) => {
   if (error instanceof ZodError) return c.json({ error: 'dados inválidos', issues: error.issues }, 400)
+  if (error instanceof grocery.GroceryError) return c.json({ error: error.message }, error.status)
   console.error(error)
   return c.json({ error: friendlyErrorMessage(error) }, 500)
 })
@@ -564,6 +566,91 @@ app.post('/transactions/delete', async (c) => {
     })
     .parse(await c.req.json())
   return c.json(await txnService.deleteTransactions(body.ids, body.scope))
+})
+
+/* ---------------------------------------------------------------- *
+ * Lista de compras / Mercado (docs/specs/lista-de-compras). Mesmas
+ * rotas de server/src/routes/grocery.ts; orçamento e análise ficam na
+ * `insights` (/grocery-insights), que passa pelo cache de resposta.
+ * ---------------------------------------------------------------- */
+const groceryUnit = z.enum(['un', 'kg', 'L'])
+const groceryQty = z.number().positive().max(100_000)
+const groceryIsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+const groceryItemParams = z.object({ id: z.coerce.number().int().positive(), productId: z.coerce.number().int().positive() })
+
+app.get('/grocery/products', async (c) => {
+  const { archived } = z.object({ archived: z.enum(['true', 'false']).optional() }).parse(c.req.query())
+  return c.json({ products: await grocery.listProducts(archived === undefined ? {} : { archived: archived === 'true' }) })
+})
+app.post('/grocery/products', async (c) => {
+  const body = z.object({ name: z.string().trim().min(1).max(120), unit: groceryUnit, defaultQty: groceryQty.optional() }).parse(await c.req.json())
+  return c.json(await grocery.createProduct(body))
+})
+app.patch('/grocery/products/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const body = z
+    .object({
+      name: z.string().trim().min(1).max(120).optional(),
+      unit: groceryUnit.optional(),
+      defaultQty: groceryQty.optional(),
+      archived: z.boolean().optional(),
+    })
+    .parse(await c.req.json())
+  return c.json(await grocery.updateProduct(id, body))
+})
+
+app.get('/grocery/trips/active', async (c) => c.json({ trip: await grocery.getActiveTrip() }))
+app.get('/grocery/trips', async (c) => {
+  const { year } = z.object({ year: z.string().regex(/^\d{4}$/).optional() }).parse(c.req.query())
+  return c.json({ trips: await grocery.listTrips(year ? { year } : {}) })
+})
+app.post('/grocery/trips', async (c) => {
+  const raw = await c.req.json().catch(() => ({}))
+  const body = z.object({ from: z.enum(['empty', 'last']).default('empty') }).parse(raw ?? {})
+  return c.json(await grocery.createTrip(body))
+})
+app.get('/grocery/trips/:id', async (c) => c.json(await grocery.getTrip(idParam.parse(c.req.param()).id)))
+app.patch('/grocery/trips/:id', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  return c.json(await grocery.updateTrip(id, z.object({ purchasedOn: groceryIsoDate }).parse(await c.req.json())))
+})
+app.delete('/grocery/trips/:id', async (c) => c.json(await grocery.deleteTrip(idParam.parse(c.req.param()).id)))
+app.put('/grocery/trips/:id/items/:productId', async (c) => {
+  const { id, productId } = groceryItemParams.parse(c.req.param())
+  const body = z
+    .object({
+      plannedQty: groceryQty,
+      qty: groceryQty.nullable(),
+      unitPriceCents: z.number().int().min(0).max(100_000_000).nullable(),
+      checked: z.boolean(),
+      clientRev: z.number().int().min(0),
+    })
+    .parse(await c.req.json())
+  return c.json(await grocery.putItem(id, productId, body))
+})
+app.delete('/grocery/trips/:id/items/:productId', async (c) => {
+  const { id, productId } = groceryItemParams.parse(c.req.param())
+  return c.json(await grocery.deleteItem(id, productId))
+})
+app.post('/grocery/trips/:id/status', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const body = z.object({ status: z.enum(['shopping', 'done']), purchasedOn: groceryIsoDate.optional() }).parse(await c.req.json())
+  return c.json(await grocery.setTripStatus(id, body))
+})
+app.get('/grocery/trips/:id/link-candidates', async (c) =>
+  c.json({ candidates: await grocery.linkCandidates(idParam.parse(c.req.param()).id) }),
+)
+app.post('/grocery/trips/:id/link', async (c) => {
+  const { id } = idParam.parse(c.req.param())
+  const { transactionId } = z.object({ transactionId: z.number().int().positive() }).parse(await c.req.json())
+  return c.json(await grocery.linkTrip(id, transactionId))
+})
+app.delete('/grocery/trips/:id/link', async (c) => c.json(await grocery.unlinkTrip(idParam.parse(c.req.param()).id)))
+
+app.get('/grocery/settings', async (c) => c.json(await grocery.getSettings()))
+app.put('/grocery/settings', async (c) => {
+  const body = z.object({ categoryId: z.number().int().positive().nullable() }).parse(await c.req.json())
+  return c.json(await grocery.setSettings(body))
 })
 
 Deno.serve(app.fetch)

@@ -8,6 +8,7 @@ import { pricingRoutes } from './routes/pricing'
 import { assistantRoutes } from './routes/assistant'
 import { clientsRoutes } from './routes/clients'
 import { tasksRoutes } from './routes/tasks'
+import { groceryRoutes } from './routes/grocery'
 import { accountantRoutes } from './routes/accountant'
 import { simulateRoutes } from './routes/simulate'
 import { friendlyErrorMessage } from './core/errors'
@@ -60,6 +61,7 @@ await app.register(simulateRoutes, { prefix: '/api' })
 await app.register(assistantRoutes, { prefix: '/api' })
 await app.register(clientsRoutes, { prefix: '/api' })
 await app.register(tasksRoutes, { prefix: '/api' })
+await app.register(groceryRoutes, { prefix: '/api' })
 await app.register(accountantRoutes, { prefix: '/api' })
 
 app.get('/api/health', async () => ({ ok: true, db: 'supabase' }))

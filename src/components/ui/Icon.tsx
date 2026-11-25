@@ -36,6 +36,7 @@ import {
   IconSunFilled,
   IconMoonFilled,
   IconCalculatorFilled,
+  IconShoppingCartFilled,
   IconGaugeFilled,
   IconCashBanknoteFilled,
   IconStack2Filled,
@@ -121,6 +122,7 @@ const ICONS: Record<string, TablerIcon> = {
   // Precificação tinha o mesmo "target" de Metas do mês — nada a ver com
   // preço. Calculadora encaixa melhor em "precificação".
   calculator: IconCalculatorFilled,
+  cart: IconShoppingCartFilled,
   // Motor financeiro tinha o mesmo "scale" de DRE — um medidor encaixa
   // melhor em "motor/simulador" do que uma balança.
   gauge: IconGaugeFilled,

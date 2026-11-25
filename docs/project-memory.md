@@ -1821,3 +1821,31 @@ receita líquida; markup = preço ÷ custo).
 - **Ideias que ficaram de fora**: juros da parcela de empréstimo como
   despesa financeira (hoje a parcela inteira vai para despesa ou retirada);
   rendimentos da PJ como receita financeira.
+
+## 12/11/2026 — Patrimônio: seletor de período na Evolução (PR #45)
+
+- **Pedido**: filtrar o crescimento do patrimônio com o mesmo seletor de
+  Investimentos (desde o início, 12 meses, 2/5/10 anos, data personalizada).
+- **Tela** (`src/pages/Patrimonio.tsx`): seletor no cabeçalho do card,
+  padrão 12 meses. A faixa de crescimento (`GrowthRow`, último mês, média
+  mensal composta e acumulado) segue a janela escolhida, e o subtítulo mostra
+  o intervalo. Na troca, o gráfico anterior fica esmaecido
+  (`placeholderData`). As opções do seletor saíram de `Investments.tsx` para
+  `src/lib/rangePresets.ts`, usadas pelas duas telas.
+- **Servidor** (`financialHealth.ts#netWorthHistory`, espelhado em
+  `server/src`; rota `/financial-health/net-worth-history` na Edge e no Node):
+  - aceita `months` (até `NET_WORTH_MAX_MONTHS` = 120), `from`/`to` (YYYY-MM)
+    e `from=start`; sem parâmetro, os últimos 12 meses (Saúde financeira
+    continua pedindo 12);
+  - o começo é recortado no primeiro mês com lançamento, negociação ou foto
+    mensal (`firstDataPeriod`): hoje jan/2019, então "Desde o início" e "10
+    anos" dão a mesma série de 95 meses;
+  - os meses sem foto são reconstruídos 3 de cada vez (antes, um por um por
+    causa da regra de 18/10, que vinha do pipelining desligado no #38).
+- **Medido na API local**: 12 meses ~1,1 s; desde o início (95) ~3,2 s;
+  60 meses ~2,2 s; intervalo de 6 meses ~0,4 s. Typecheck e build passaram.
+  A tela não foi vista (o app local pediu login).
+- **Deploy**: `insights` publicada pelo usuário depois do merge (`025b550`).
+- **Observação**: na série desde o início há um salto entre o último mês
+  reconstruído e o primeiro com foto (out/2026). A reconstrução não tem os
+  cartões; é a diferença que o `historyNote` já explica no subtítulo.
