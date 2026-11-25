@@ -1,0 +1,204 @@
+/* Mercado (docs/specs/lista-de-compras): pensado primeiro para o celular, com uma mão. */
+
+.grocery-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.grocery-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 56px;
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.grocery-row:last-child {
+  border-bottom: 0;
+}
+
+.grocery-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: none;
+  border: 0;
+  padding: var(--sp-1) 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.grocery-row__main:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+.grocery-row__name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grocery-row__sub {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+.grocery-row--done .grocery-row__name {
+  text-decoration: line-through;
+  color: var(--ink-3);
+}
+
+.grocery-row__end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Alvo de toque de 44px (design system, seção 5). */
+.grocery-check {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-lg);
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-1);
+}
+.grocery-check__box {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-md);
+  border: 2px solid var(--line-strong);
+  display: grid;
+  place-items: center;
+}
+.grocery-check[aria-checked='true'] .grocery-check__box {
+  background: var(--status-good);
+  border-color: var(--status-good);
+  color: #fff;
+}
+.grocery-check:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.grocery-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.grocery-stepper__value {
+  min-width: 56px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+}
+
+/* Variação contra o último preço: em preço, subir é o lado ruim. */
+.grocery-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.grocery-change--up {
+  color: var(--delta-down);
+}
+.grocery-change--down {
+  color: var(--delta-up);
+}
+.grocery-change--flat,
+.grocery-change--new {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+/* Rodapé fixo com os totais: sempre à vista enquanto a lista rola. */
+.grocery-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  padding: var(--sp-3) 0 calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.grocery-footer__figures {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.grocery-footer__main {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-2xl);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+}
+.grocery-footer__line {
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.grocery-footer__over {
+  color: var(--delta-down);
+  font-weight: 600;
+}
+
+.grocery-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+
+.grocery-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--sp-2);
+  align-items: end;
+}
+
+.grocery-candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.grocery-candidate {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  cursor: pointer;
+}
+.grocery-candidate:has(input:checked) {
+  border-color: var(--ink-1);
+  background: var(--surface-muted);
+}
+
+/* O botão fixo do assistente (52px no canto) cobria "Concluir compra": o rodapé abre espaço para ele. */
+body:has(.assistant-fab) .grocery-footer {
+  padding-bottom: calc(var(--sp-3) + 64px + env(safe-area-inset-bottom, 0px));
+}

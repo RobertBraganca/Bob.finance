@@ -63,6 +63,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Planejar',
     items: [
       { to: '/metas', label: 'Orçamento', icon: 'target' },
+      { to: '/mercado', label: 'Mercado', icon: 'cart' },
       { to: '/investimentos', label: 'Investimentos', icon: 'trending' },
       { to: '/dividas', label: 'Endividamento', icon: 'landmark' },
       // Comercial: Precificação e Receita de parceiros juntas (`/parceiros` abre a aba Parceiros).

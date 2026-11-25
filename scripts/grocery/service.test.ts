@@ -192,6 +192,19 @@ describe('lista de compras no banco (rollback)', { skip }, () => {
     })
   })
 
+  test('duas compras no mesmo dia: a segunda usa o preço da primeira como último', async () => {
+    await inRollback(async (tx) => {
+      const g = loaded!.grocery
+      const { product } = await g.createProduct({ name: 'Ovos', unit: 'un' }, tx)
+      await doneTrip(tx, '2026-11-25', [{ productId: product.id, qty: 1, price: 1500 }])
+      const second = await doneTrip(tx, '2026-11-25', [{ productId: product.id, qty: 1, price: 1600 }])
+      const trip = await g.getTrip(second, tx)
+      assert.equal(trip.items[0]?.lastUnitPriceCents, 1500)
+      const [summary] = (await g.listTrips({}, tx)).filter((t) => t.id === second)
+      assert.equal(summary?.plannedCents, 1500)
+    })
+  })
+
   test('análise: índice da cesta, ranking por produto e previsto × real', async () => {
     await inRollback(async (tx) => {
       const g = loaded!.grocery

@@ -2,6 +2,10 @@
 
 Spec: [spec.md](spec.md). Branch: `feat/lista-de-compras`.
 
+**Andamento (25/11/2026):** etapas 1 a 7 feitas (migração aplicada em produção,
+33 testes, verificação no navegador com dados [teste] apagados depois). Falta a
+etapa 8 (prints) e o deploy das funções depois do merge.
+
 Convenções que valem para todas as etapas (vistas no código em 25/11/2026):
 - Código de servidor existe em **dois espelhos**: `server/src/**` (Node/tsx,
   Fastify local e testes) e `supabase/functions/_shared/**` (Deno). O espelho

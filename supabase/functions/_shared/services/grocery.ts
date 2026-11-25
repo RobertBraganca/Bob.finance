@@ -74,8 +74,11 @@ export type GroceryTrip = {
  * Preços (derivados)
  * ------------------------------------------------------------------ */
 
-/** Preço de cada item marcado em compra concluída, opcionalmente antes de uma data. */
-async function pricePoints(executor: DbExecutor, before?: string): Promise<PricePoint[]> {
+/**
+ * Preço de cada item marcado em compra concluída; com `before`, só das compras
+ * anteriores a ela (data menor, ou mesma data e id menor: duas compras no dia).
+ */
+async function pricePoints(executor: DbExecutor, before?: { purchasedOn: string; tripId: number }): Promise<PricePoint[]> {
   const rows = await executor
     .select({
       productId: groceryTripItems.productId,
@@ -89,7 +92,9 @@ async function pricePoints(executor: DbExecutor, before?: string): Promise<Price
       and(
         eq(groceryTrips.status, 'done'),
         eq(groceryTripItems.checked, true),
-        before ? sql`${groceryTrips.purchasedOn} < ${before}` : undefined,
+        before
+          ? sql`(${groceryTrips.purchasedOn} < ${before.purchasedOn} or (${groceryTrips.purchasedOn} = ${before.purchasedOn} and ${groceryTrips.id} < ${before.tripId}))`
+          : undefined,
       ),
     )
   return rows.map((r) => ({ ...r, purchasedOn: r.purchasedOn as string }))
@@ -195,7 +200,9 @@ async function loadTrip(id: number, executor: DbExecutor): Promise<GroceryTrip |
     .where(eq(groceryTripItems.tripId, id))
     .orderBy(asc(groceryProducts.name))
   // Último preço ANTES desta compra: numa compra concluída, o previsto não usa o próprio preço dela.
-  const last = lastPrices(await pricePoints(executor, trip.status === 'done' ? (trip.purchasedOn ?? undefined) : undefined))
+  const last = lastPrices(
+    await pricePoints(executor, trip.status === 'done' && trip.purchasedOn ? { purchasedOn: trip.purchasedOn, tripId: trip.id } : undefined),
+  )
   const items: GroceryItem[] = rows.map((r) => ({ ...r, lastUnitPriceCents: last.get(r.productId)?.unitPriceCents ?? null }))
   return {
     id: trip.id,
@@ -434,7 +441,7 @@ async function doneTrips(executor: DbExecutor): Promise<LoadedDoneTrip[]> {
   }
   return trips.map((t) => {
     const purchasedOn = t.purchasedOn as string
-    const before = lastPrices(points.filter((p) => p.purchasedOn < purchasedOn))
+    const before = lastPrices(points.filter((p) => p.purchasedOn < purchasedOn || (p.purchasedOn === purchasedOn && p.tripId < t.id)))
     const tripItems = byTrip.get(t.id) ?? []
     const calc: CalcItem[] = tripItems.map((it) => ({ ...it, lastUnitPriceCents: before.get(it.productId)?.unitPriceCents ?? null }))
     return {

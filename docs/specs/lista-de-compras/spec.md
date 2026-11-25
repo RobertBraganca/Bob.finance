@@ -1,6 +1,6 @@
 # Spec: Lista de compras (Mercado)
 
-Status: rascunho (25/11/2026)
+Status: implementado com desvios (25/11/2026; ver "Desvios"). Falta a carga histórica dos prints (plano, etapa 8)
 
 ## Objetivo
 Montar a lista de compras em casa, preencher preço e quantidade dentro do
@@ -261,4 +261,24 @@ celular, uma mão.
   `specs/monthly-goals`.
 
 ## Desvios da implementação
-(nenhum ainda)
+- **Histórico de preço só dos itens marcados.** Item que ficou na lista sem
+  ir para o carrinho não entra no último preço, no índice nem no ranking,
+  mesmo que tenha preço digitado.
+- **"Anterior" desempata pela ordem da compra.** O último preço de uma
+  compra concluída (e o previsto dela) usa compras com data menor **ou**
+  mesma data e id menor: duas compras no mesmo dia se enxergam.
+- **Concluir exige pelo menos um item marcado** (422).
+- **Folha inferior virou o `Modal` do app**, com o **preço como primeiro
+  campo** (o modal foca o primeiro campo; no corredor o que se digita é o
+  preço). Toque no checkbox de item com último preço marca direto com ele;
+  sem preço nenhum, abre o modal.
+- **A pergunta de vínculo depois de concluir mora na página**, não na aba
+  No mercado: sem compra ativa a página volta para a aba Lista.
+- **A fila grava a resposta do servidor no cache antes de soltar a
+  pendência**, para a tela não voltar por um instante ao estado antigo.
+- `clientRev` é o relógio do aparelho (nunca menor que o anterior), não um
+  contador a partir de 0.
+- Gasto do mês e do ano usa SQL próprio com os mesmos filtros do teto em
+  Orçamento (escopo pessoal, efetivado, não ignorado, sem ajuste, saída,
+  categoria + filhas), em vez de chamar `getPeriodProgress`, que só traz
+  categorias com teto.
