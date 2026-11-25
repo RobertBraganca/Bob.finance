@@ -21,12 +21,14 @@ export function normalizeName(name: string): string {
 }
 
 /**
- * qty × preço unitário, arredondado para o centavo (meio para cima). Conta em
- * inteiros (milésimos de unidade) para não herdar erro de ponto flutuante.
+ * qty × preço unitário, TRUNCADO no centavo, como a balança e o cupom fiscal
+ * (0,406 kg × R$ 39,80 = 16,1588 sai 16,15 no cupom): assim o total do
+ * carrinho bate com o caixa. Conta em inteiros (milésimos de unidade) para
+ * não herdar erro de ponto flutuante.
  */
 export function subtotalCents(qty: number, unitPriceCents: number): number {
   const thousandths = Math.round(qty * 1000)
-  return Math.floor((thousandths * unitPriceCents + 500) / 1000)
+  return Math.floor((thousandths * unitPriceCents) / 1000)
 }
 
 export type CalcItem = {
