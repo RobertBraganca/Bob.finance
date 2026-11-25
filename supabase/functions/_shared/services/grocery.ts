@@ -135,6 +135,7 @@ export async function createProduct(input: ProductInput, executor: DbExecutor = 
     .insert(groceryProducts)
     .values({ name, nameKey, unit: input.unit, defaultQty: input.defaultQty ?? 1 })
     .returning()
+  if (!product) throw new Error('insert de grocery_products não devolveu linha')
   return { product, created: true }
 }
 
@@ -167,7 +168,7 @@ export async function updateProduct(id: number, patch: ProductPatch, executor: D
   if (patch.archived !== undefined) set.archived = patch.archived
   if (Object.keys(set).length === 0) return current
   const [product] = await executor.update(groceryProducts).set(set).where(eq(groceryProducts.id, id)).returning()
-  return product
+  return product ?? current
 }
 
 /* ------------------------------------------------------------------ *
