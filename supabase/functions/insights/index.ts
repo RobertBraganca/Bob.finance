@@ -33,6 +33,7 @@ import * as quotesService from '../_shared/services/quotes.ts'
 import * as simulatorService from '../_shared/services/simulator.ts'
 import * as subscriptionsService from '../_shared/services/subscriptions.ts'
 import * as tasksService from '../_shared/services/tasks.ts'
+import * as grocery from '../_shared/services/grocery.ts'
 import * as google from '../_shared/services/googleCalendar.ts'
 import { ledgerBounds } from '../_shared/services/transactions.ts'
 
@@ -155,6 +156,7 @@ app.onError((error, c) => {
   if (error instanceof investments.InvestmentRuleError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
   if (error instanceof debtService.DebtError) return c.json({ error: error.message }, error.statusCode as 400 | 404 | 409)
   if (error instanceof tasksService.TaskError || error instanceof google.GoogleCalendarError) return c.json({ error: error.message }, 422)
+  if (error instanceof grocery.GroceryError) return c.json({ error: error.message }, error.status)
   console.error(error)
   return c.json({ error: friendlyErrorMessage(error) }, 500)
 })
@@ -589,6 +591,19 @@ const taskFields = {
   active: z.boolean().optional(),
 }
 const taskIdParam = z.object({ id: z.coerce.number().int().positive() })
+
+/* ---------------------------------------------------------------- *
+ * Lista de compras / Mercado (docs/specs/lista-de-compras): orçamento
+ * e análise. As escritas e a lista ativa ficam na `ledger` (/grocery).
+ * ---------------------------------------------------------------- */
+app.get('/grocery-insights/budget', async (c) => {
+  const { period } = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(c.req.query())
+  return c.json(await grocery.budget(period ?? todayIso().slice(0, 7)))
+})
+app.get('/grocery-insights/analytics', async (c) => {
+  const { year } = z.object({ year: z.string().regex(/^\d{4}$/).optional() }).parse(c.req.query())
+  return c.json(await grocery.analytics(year ?? todayIso().slice(0, 4)))
+})
 
 app.get('/tasks', async (c) => {
   const query = z.object({ from: taskDate.optional(), to: taskDate.optional() }).parse(c.req.query())

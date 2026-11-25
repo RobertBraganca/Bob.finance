@@ -89,7 +89,7 @@ Não guarda preço: o último preço é derivado.
 | coluna | tipo | o que é |
 |---|---|---|
 | id | int pk check (id = 1) | |
-| category_id | bigint null references categories(id) | categoria cujo teto e gasto valem como "orçamento de mercado"; na primeira leitura, se nula, procura categoria chamada "Supermercado" (normalizada) |
+| category_id | bigint null references categories(id) | categoria cujo teto e gasto valem como "orçamento de mercado"; na primeira leitura, se nula, procura categoria **não arquivada** chamada "Supermercado" (normalizada; hoje: Alimentação › Supermercado, id 19 — a id 82 de mesmo nome está arquivada). O orçamento é o teto dessa categoria em Orçamento (`category_caps`); em 25/11/2026 ainda não havia teto cadastrado, e a UI mostra "Definir teto" levando a `/metas` |
 
 Guarda só escolha do usuário, nenhum resultado.
 
